@@ -1,0 +1,46 @@
+# User-specific IDE state
+*.rsuser
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+*.DotSettings.user
+
+# Build and test output
+[Bb]in/
+[Oo]bj/
+[Dd]ebug/
+[Rr]elease/
+[Tt]est[Rr]esults*/
+artifacts/
+coverage*.json
+coverage*.xml
+coverage*.info
+*.coverage
+*.coveragexml
+*.binlog
+*.nupkg
+*.snupkg
+BenchmarkDotNet.Artifacts/
+
+# Visual Studio and VS Code
+.vs/
+.vscode/
+*.code-workspace
+.history/
+
+# JetBrains Rider
+.idea/
+*.sln.iml
+_ReSharper*/
+*.[Rr]e[Ss]harper
+
+# Operating-system files
+.DS_Store
+Thumbs.db
+
+# Local tooling and temporary files
+*.log
+*.tmp
+*~
+.localhistory/

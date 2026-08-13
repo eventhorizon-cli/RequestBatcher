@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <PackageId>RequestBatcher</PackageId>
+    <Description>Transparent, concurrent request batching for .NET.</Description>
+    <Authors>RequestBatcher contributors</Authors>
+    <PackageTags>batching;buffer;queue;async;task</PackageTags>
+    <RepositoryUrl>https://github.com/eventhorizon-cli/RequestBatcher</RepositoryUrl>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="BufferQueue" Version="1.1.0" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.9" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.9" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="../../README.md" Pack="true" PackagePath="/" />
+    <None Include="../../README.zh-CN.md" Pack="true" PackagePath="/" />
+  </ItemGroup>
+</Project>

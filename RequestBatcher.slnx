@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/RequestBatcher/RequestBatcher.csproj" />
+  </Folder>
+  <Folder Name="/samples/">
+    <Project Path="samples/RequestBatcher.Deduplication/RequestBatcher.Deduplication.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/RequestBatcher.Benchmarks/RequestBatcher.Benchmarks.csproj" />
+    <Project Path="tests/RequestBatcher.Tests/RequestBatcher.Tests.csproj" />
+  </Folder>
+</Solution>
