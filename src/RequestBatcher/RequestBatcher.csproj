@@ -20,5 +20,6 @@
   <ItemGroup>
     <None Include="../../README.md" Pack="true" PackagePath="/" />
     <None Include="../../README.zh-CN.md" Pack="true" PackagePath="/" />
+    <None Include="../../docs/assets/request-batcher-architecture.png" Pack="true" PackagePath="docs/assets/" />
   </ItemGroup>
 </Project>

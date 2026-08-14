@@ -1,0 +1,26 @@
+flowchart LR
+    caller["Application<br/>caller"]
+    coordinator["RequestBatch<br/>Coordinator"]
+    queue["Internal BufferQueue<br/>Memory topic<br/>round robin / Partition Key"]
+    handler["Batch handler<br/>up to BatchSize requests"]
+    downstream["Database, cache,<br/>or bulk API"]
+    outcome["Caller Task<br/>success or error"]
+
+    caller -->|"ProcessAsync(request)"| coordinator
+    coordinator -->|"enqueue"| queue
+    queue --> handler
+    handler -->|"batch operation"| downstream
+    coordinator -.->|"after handler outcome"| outcome
+    outcome -.->|"complete Task"| caller
+
+    class caller client
+    class coordinator gateway
+    class queue,outcome core
+    class handler handler
+    class downstream storage
+
+    classDef client fill:#e9f6f1,stroke:#2f6f5e,color:#173f35,stroke-width:1.5px
+    classDef gateway fill:#eaf2ff,stroke:#3567a7,color:#1d3b66,stroke-width:1.5px
+    classDef core fill:#edf1f5,stroke:#596773,color:#303b44,stroke-width:1.5px
+    classDef storage fill:#fff4d6,stroke:#8a6a1d,color:#4d3b0e,stroke-width:1.5px
+    classDef handler fill:#f4edfb,stroke:#75529b,color:#422d59,stroke-width:1.5px

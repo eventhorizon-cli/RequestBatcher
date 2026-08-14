@@ -2,175 +2,212 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
-RequestBatcher opportunistically coalesces individually submitted requests into batches. Each caller only awaits its own
-`Task`; queueing, partitioning, and batch scheduling remain transparent.
+RequestBatcher is an in-process .NET SDK that turns concurrent, single-request calls into batched handler invocations.
+Callers keep a simple asynchronous API and await their own `Task`; the handler receives an `IReadOnlyList<TRequest>`
+that can be written, queried, or sent downstream in one operation.
 
-The design follows goleveldb's write-merge approach: the first runnable request does not wait for a fixed batching
-window. Instead, the coordinator combines requests that have already arrived before dispatch. BufferQueue memory pull
-consumers provide batched delivery, while the partition count bounds concurrent batch execution.
+```text
+Caller:  ProcessAsync(TRequest)                 -> Task
+Handler: HandleAsync(IReadOnlyList<TRequest>)   -> ValueTask
+```
 
-## Usage
+## Features
+
+- Transparent batching: callers submit one request at a time and do not manage batches.
+- Opportunistic collection: an available request is not delayed to fill a batch; requests already waiting are handled
+  together, up to `BatchSize`.
+- Bounded concurrency: `MaxConcurrency` limits the number of handler invocations running at once.
+- Partition keys: equal numeric or string keys are routed to the same partition so they do not execute concurrently.
+- Per-request completion: every caller observes the success, failure, or cancellation of its own request.
+- Backpressure: pending work is bounded, with asynchronous waiting or immediate rejection at capacity.
+- Application-owned DI and logging: handler lifetimes are explicit, BufferQueue remains internal, and no nested
+  `ServiceProvider` is created.
+- Graceful shutdown: accepted requests are drained before the coordinator stops.
+
+## Applicable Scenarios
+
+RequestBatcher is useful when concurrent callers temporarily outpace a downstream dependency and that dependency can
+benefit from a batch operation. This is the same producer/consumer speed mismatch that makes an in-process buffer
+useful, but RequestBatcher keeps batching behind a single-request API.
+
+- **Database writes:** combine independent writes into batch `INSERT`, `UPDATE`, `UPSERT`, or transaction work to
+  reduce round trips and commit overhead.
+- **Cache and bulk APIs:** turn many cache updates, cache reads, HTTP/RPC submissions, or event publications into a
+  backend operation that already accepts multiple items.
+- **Burst smoothing and backpressure:** bound the amount of work retained in memory and limit database or external API
+  concurrency with `MaxPendingRequests`, `FullMode`, and `MaxConcurrency`.
+- **Per-entity serialization:** use `UsePartitionKey` for orders, products, accounts, inventory, or devices when work
+  for one entity must not run concurrently but unrelated entities can run in parallel.
+- **Latest-state coalescing:** retain the newest version of a high-frequency update within a batch, then use a version
+  check, idempotency key, unique constraint, or transaction in storage to keep cross-batch updates correct.
+
+RequestBatcher is not a durable queue or a replacement for a message broker. It does not persist pending requests,
+recover them after a process crash, retry failed handler calls, or provide global ordering with `MaxConcurrency > 1`.
+It also returns completion status rather than `Task<TResult>`; a batched read that needs a value should carry a result
+holder in the request or update application state from the handler.
+
+Do not submit an operation that must commit or roll back atomically with the caller's transaction. For example, an
+order write, inventory decrement, payment charge, and audit record that form one business transaction must remain in
+that transaction; sending one step to RequestBatcher breaks the atomic boundary and runs it after the caller's work.
+Use RequestBatcher only for independent follow-up work, or first record that work through an explicit transactional
+outbox.
+
+## Quick Start
+
+Define the request and a handler that processes one batch:
 
 ```csharp
-public sealed record SaveOrder(long Id, decimal Amount);
+public sealed record OrderWriteRequest(long OrderId, decimal Amount);
 
 public interface IOrderStore
 {
-    ValueTask SaveAsync(
-        IReadOnlyList<SaveOrder> orders,
+    ValueTask WriteBatchAsync(
+        IReadOnlyList<OrderWriteRequest> requests,
         CancellationToken cancellationToken);
 }
 
-public sealed class SaveOrderHandler(IOrderStore store) : IRequestBatchHandler<SaveOrder>
+public sealed class OrderWriteBatchHandler(IOrderStore store)
+    : IRequestBatchHandler<OrderWriteRequest>
 {
-    public async ValueTask HandleAsync(
-        IReadOnlyList<SaveOrder> requests,
-        CancellationToken cancellationToken = default)
-    {
-        await store.SaveAsync(requests, cancellationToken);
-    }
+    public ValueTask HandleAsync(
+        IReadOnlyList<OrderWriteRequest> requests,
+        CancellationToken cancellationToken = default) =>
+        store.WriteBatchAsync(requests, cancellationToken);
 }
-
-services.AddRequestBatcher<SaveOrder, SaveOrderHandler>(ServiceLifetime.Singleton, options =>
-{
-    options.BatchSize = 256;
-    options.MaxConcurrency = 4;
-    options.MaxPendingRequests = 10_000;
-    options.UsePartitionKey(order => order.Id);
-});
-
-var batcher = serviceProvider.GetRequiredService<IRequestBatcher<SaveOrder>>();
-await batcher.ProcessAsync(new SaveOrder(42, 99.50m), cancellationToken);
 ```
 
-A handler delegate can be registered in the same call:
+Register the handler and batcher in the same call. The handler lifetime is required:
 
 ```csharp
-services.AddRequestBatcher<SaveOrder>(
-    async (batch, cancellationToken) =>
-        await database.SaveOrdersAsync(batch, cancellationToken),
+services.AddRequestBatcher<OrderWriteRequest, OrderWriteBatchHandler>(
+    ServiceLifetime.Scoped,
+    options =>
+    {
+        options.BatchSize = 256;
+        options.MaxConcurrency = 4;
+        options.MaxPendingRequests = 10_000;
+        options.UsePartitionKey(request => request.OrderId);
+    });
+```
+
+Callers resolve `IRequestBatcher<TRequest>` and submit requests individually:
+
+```csharp
+var batcher = serviceProvider.GetRequiredService<IRequestBatcher<OrderWriteRequest>>();
+
+await batcher.ProcessAsync(
+    new OrderWriteRequest(OrderId: 42, Amount: 99.50m),
+    cancellationToken);
+```
+
+The returned `Task` completes only after the request's batch has been processed. Callers do not need to know which
+batch or partition handled the request.
+
+A delegate can be registered instead of an `IRequestBatchHandler<TRequest>` implementation:
+
+```csharp
+services.AddRequestBatcher<OrderWriteRequest>(
+    (batch, cancellationToken) =>
+        database.WriteOrdersAsync(batch, cancellationToken),
     ServiceLifetime.Singleton,
     options => options.BatchSize = 256);
 ```
 
-`AddRequestBatcher` extends `IServiceCollection` and encapsulates the internal BufferQueue memory topic. Callers do not
-need to install, register, or configure BufferQueue. BufferQueue, the handler, and the coordinator are all created and
-disposed by the application's existing DI container; RequestBatcher never builds a nested `ServiceProvider`.
+## Architecture
 
-The handler lifetime is explicit. Scoped and transient handlers are resolved once per batch and their async scope is
-disposed after the batch completes. A singleton handler is reused across batches and must be thread-safe when
-`MaxConcurrency > 1`.
+![RequestBatcher architecture](docs/assets/request-batcher-architecture.png)
 
-## Processing Semantics
+The caller only depends on `IRequestBatcher<TRequest>`. The coordinator owns the internal in-memory topic and its
+partitions, invokes the registered handler with a batch, then completes each accepted caller `Task` from that batch's
+outcome. Solid arrows show request and batch flow; dashed arrows show completion flow.
 
-- `BatchSize` is the maximum number of requests in a batch, not a target that must be filled. There is no fixed delay.
-- When the handler succeeds, every request in that batch succeeds. If it throws, every request receives the same exception.
-- `MaxConcurrency = 1` preserves global FIFO. Higher values use multiple partitions and guarantee ordering only within each partition; routing is round-robin unless `UsePartitionKey` is configured.
-- `UsePartitionKey` routes equal numeric or string keys to the same partition. This preserves their order after they are appended to that partition while allowing different keys to be processed concurrently.
-- Caller cancellation applies only before handler dispatch. Once dispatched, the call observes the actual batch outcome, preventing retries from unknowingly duplicating side effects.
-- At `MaxPendingRequests`, the default behavior asynchronously waits for capacity. Set `FullMode = RequestBatchFullMode.Fail` to immediately throw `RequestBatchQueueFullException`.
-- `StopAsync` and `DisposeAsync` stop admission first and then drain every accepted request.
+## How Batches Form
 
-RequestBatcher is an in-process scheduling component. It does not persist pending requests or recover them after process
-failure. When requests must not be lost, establish the durability boundary in the handler with a database transaction,
-WAL, or reliable messaging system.
+RequestBatcher does not hold the first request for a fixed batching window. When a partition is ready to run, it takes
+up to `BatchSize` requests that are already waiting and passes them to the handler. Low traffic can therefore produce
+single-request batches, while concurrent traffic naturally produces larger batches.
 
-## Logging
+`BatchSize` is an upper bound, not a minimum. This keeps the SDK useful for latency-sensitive paths without requiring
+callers to coordinate submission timing.
 
-RequestBatcher uses the application's existing `Microsoft.Extensions.Logging` pipeline with the category
-`RequestBatchCoordinator<TRequest>`. ASP.NET Core applications normally require no additional setup; other applications
-can call `services.AddLogging(...)` on their external container. When no logger is registered, RequestBatcher uses
-`NullLogger` and continues without creating an internal `ServiceProvider`.
+## Configuration
 
-- `Trace`: batch start and successful completion, including batch size.
-- `Debug`: coordinator startup and shutdown.
-- `Warning`: request rejection when `FullMode = Fail` reaches capacity.
-- `Error`: enqueue failure or handler failure; the original exception is attached.
-- `Critical`: unexpected BufferQueue consumer termination.
+| Option | Default | Behavior |
+| --- | ---: | --- |
+| `BatchSize` | `128` | Maximum number of requests passed to one handler invocation. |
+| `MaxConcurrency` | `1` | Maximum concurrent handler invocations and number of processing partitions. |
+| `MaxPendingRequests` | `8192` | Maximum accepted requests that have not completed. |
+| `FullMode` | `Wait` | Waits asynchronously for capacity. `Fail` throws `RequestBatchQueueFullException` immediately. |
+| `UsePartitionKey(...)` | Not set | Uses round-robin routing by default; a selector routes equal keys to one partition. |
 
-Logs contain stable metadata such as request type, batch size, and capacity, but never request payloads. A handler
-failure is logged once per batch, while every caller still receives the original exception through its own `Task`.
+With `MaxConcurrency = 1`, processing is globally FIFO. With a higher value, ordering is guaranteed only within a
+partition and the handler may be invoked concurrently.
 
-## Partition Keys And Duplicate Merging
+## Partition Keys And Duplicate Request Merging
 
-Configure a partition key when requests for the same entity must never be processed concurrently:
+Use a partition key when requests for the same entity must not be processed at the same time:
 
 ```csharp
-services.AddRequestBatcher<PriceUpdate, PriceUpdateHandler>(
-    ServiceLifetime.Singleton,
-    options =>
-    {
-        options.BatchSize = 100;
-        options.MaxConcurrency = 4;
-        options.UsePartitionKey(update => update.ProductId);
-    });
+options.MaxConcurrency = 4;
+options.UsePartitionKey(request => request.OrderId);
 ```
 
-Finite integer-valued numeric keys and non-null string keys are supported. The selector must be deterministic and
-side-effect free. Equal keys are routed to the same partition and retain their order after they are appended to that
-partition; concurrent calls do not establish an order before append. Different keys can share a partition, and key
-routing does not guarantee that all updates for an entity appear in one batch.
+Finite integer-valued numeric keys and non-null string keys are supported. The selector should be deterministic and
+side-effect free.
 
-The runnable [`samples/RequestBatcher.Deduplication`](samples/RequestBatcher.Deduplication) example merges repeated
-price updates in two layers: the handler retains only the highest version for each product within a batch, and the
-store applies updates conditionally by version across batches. The second layer is required because batching is
-opportunistic rather than a global deduplication boundary.
+- Equal keys enter the same partition and retain their order after being appended to that partition.
+- Concurrent calls do not establish an order before append.
+- Different keys may share a partition, so partitioning is not a one-partition-per-key allocation.
+- Partitioning does not guarantee that all requests for a key appear in one batch and does not deduplicate data.
+
+`UsePartitionKey` is the routing prerequisite for safe per-entity merging, not the merge operation itself. For example,
+when several `PriceUpdate` requests have the same `ProductId`, the handler can group the batch by product and persist
+only the highest version. Equal product IDs cannot run concurrently, while unrelated products may still use separate
+partitions. If the winning write succeeds, every caller represented by that batch, including callers whose update was
+superseded during the merge, completes successfully.
+
+The runnable [duplicate update sample](samples/RequestBatcher.Deduplication) demonstrates both layers required for
+correctness: the handler keeps only the highest version for each product within one batch, and the store rejects stale
+versions across batches. The storage check remains necessary because a partition key does not make all duplicate
+requests arrive in one batch.
+
+## Completion And Failure Semantics
+
+- When the handler succeeds, every request in that batch completes successfully.
+- When the handler throws, every request in that batch receives the original handler exception. The failure is logged
+  once for the batch.
+- Caller cancellation can remove a request only before handler dispatch. After dispatch, the caller observes the real
+  batch outcome instead of receiving an ambiguous cancellation.
+- `StopAsync` and `DisposeAsync` stop accepting new requests and drain all requests that were already accepted.
+
+RequestBatcher is an in-process scheduling component. It does not persist pending requests or recover them after a
+process failure. If requests must survive a crash, place the durability boundary in the handler with a database
+transaction, WAL, or reliable messaging system.
+
+## Dependency Injection And Logging
+
+`AddRequestBatcher` registers the handler and encapsulated BufferQueue topic in the application's existing
+`IServiceCollection`. Callers do not install or configure BufferQueue separately, and RequestBatcher does not build its
+own service provider.
+
+Scoped and transient handlers are resolved once per batch in an async scope. A singleton handler is reused across
+batches and must be thread-safe when `MaxConcurrency > 1`.
+
+Logging uses the application's `Microsoft.Extensions.Logging` pipeline with the category
+`RequestBatchCoordinator<TRequest>`. Handler and enqueue failures include their original exception. Request payloads
+are never written to logs. If no logger is registered, RequestBatcher uses `NullLogger`.
+
+## Repository
+
+- [Duplicate update sample](samples/RequestBatcher.Deduplication)
+- [Unit tests](tests/RequestBatcher.Tests)
+- [PostgreSQL and Redis benchmarks](tests/RequestBatcher.Benchmarks)
 
 ```bash
-dotnet run --project samples/RequestBatcher.Deduplication/RequestBatcher.Deduplication.csproj
+dotnet build RequestBatcher.slnx --configuration Release
+dotnet test tests/RequestBatcher.Tests/RequestBatcher.Tests.csproj --configuration Release
 ```
 
-## PostgreSQL Benchmark
+## License
 
-`tests/RequestBatcher.Benchmarks` uses BenchmarkDotNet and Testcontainers to start an isolated PostgreSQL instance and
-compare two paths for the same logical writes:
-
-- `DirectSingleWritesAsync`: one independently committed single-row `INSERT` per request.
-- `RequestBatcherWritesAsync`: callers still invoke `ProcessAsync` individually, while the handler uses PostgreSQL
-  `unnest` to issue one multi-row `INSERT` per aggregated batch.
-
-Both paths process the same 1,000 requests with the same schema, connection pool, and maximum database concurrency.
-Container startup, schema creation, pool warmup, and per-iteration `TRUNCATE` are outside measured regions. Cleanup
-validates the persisted row count and confirms that the SDK path actually formed batches. Defaults are
-`BatchSize = 100` and `MaxConcurrency = 4`; Docker is required and the image is pinned to
-`postgres:17.6-alpine`.
-
-```bash
-dotnet run --project tests/RequestBatcher.Benchmarks/RequestBatcher.Benchmarks.csproj \
-  --configuration Release -- \
-  --filter '*PostgreSqlWriteBenchmarks*'
-```
-
-Each reported operation processes all 1,000 logical requests, not one request. This benchmark primarily measures the
-benefit of fewer database round trips and commits; it is not a portable database-capacity measurement.
-
-## Redis Benchmarks
-
-`tests/RequestBatcher.Benchmarks/Redis` uses Testcontainers to start a pinned single-node Redis instance and defines
-separate read and write benchmark classes:
-
-- `RedisReadBenchmarks`: compares one `GET` per request with one `MGET` per batch.
-- `RedisWriteBenchmarks`: compares one `SET` per request with one `MSET` per batch.
-
-Both paths reuse the same StackExchange.Redis `ConnectionMultiplexer` and concurrently submit the same 1,000 logical
-requests. The direct path may therefore be automatically pipelined by the client, but still sends 1,000 distinct Redis
-commands. Container startup, connection warmup, read-data seeding, write-data reset, and result validation are outside
-measured regions. Every read result and persisted write value is verified, and the SDK path additionally verifies that
-all requests were handled and that batching occurred. Defaults are `BatchSize = 100`, `MaxConcurrency = 4`, and the
-image is pinned to `redis:7.4.5-alpine`.
-
-Set `REQUEST_BATCHER_REDIS_IMAGE` to use a compatible mirror or locally cached image when the default Docker Hub image
-is unavailable. Leaving it unset keeps the pinned default.
-
-```bash
-dotnet run --project tests/RequestBatcher.Benchmarks/RequestBatcher.Benchmarks.csproj \
-  --configuration Release -- \
-  --filter '*RedisReadBenchmarks*'
-
-dotnet run --project tests/RequestBatcher.Benchmarks/RequestBatcher.Benchmarks.csproj \
-  --configuration Release -- \
-  --filter '*RedisWriteBenchmarks*'
-```
-
-Each Redis operation also represents 1,000 logical requests. In a Redis Cluster, every key in an `MGET` or `MSET`
-must share a hash slot; the benchmark uses a single-node Redis instance, so that restriction does not apply here.
+RequestBatcher is available under the [MIT License](LICENSE).
