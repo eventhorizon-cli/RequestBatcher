@@ -1,25 +1,39 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
+    <Title>RequestBatcher</Title>
     <PackageId>RequestBatcher</PackageId>
-    <Description>Transparent, concurrent request batching for .NET.</Description>
-    <Authors>RequestBatcher contributors</Authors>
-    <PackageTags>batching;buffer;queue;async;task</PackageTags>
+    <VersionPrefix>1.0.0</VersionPrefix>
+    <Description>In-process request batching for concurrent .NET workloads, with backpressure, partition routing, and per-request completion.</Description>
+    <Authors>EventHorizon CLI</Authors>
+    <PackageTags>request-batching;batching;async;backpressure;partitioning;bufferqueue</PackageTags>
+    <PackageProjectUrl>https://github.com/eventhorizon-cli/RequestBatcher</PackageProjectUrl>
     <RepositoryUrl>https://github.com/eventhorizon-cli/RequestBatcher</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageReleaseNotes>First public release of RequestBatcher.</PackageReleaseNotes>
+    <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+    <IncludeSymbols>true</IncludeSymbols>
+    <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="BufferQueue" Version="1.1.0" />
-    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.9" />
-    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.9" />
+    <PackageReference Include="BufferQueue" Version="2.0.1" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.11" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.11" />
+    <PackageReference Include="Microsoft.Extensions.Options" Version="10.0.11" />
   </ItemGroup>
 
   <ItemGroup>
-    <None Include="../../README.md" Pack="true" PackagePath="/" />
-    <None Include="../../README.zh-CN.md" Pack="true" PackagePath="/" />
-    <None Include="../../docs/assets/request-batcher-architecture.png" Pack="true" PackagePath="docs/assets/" />
+    <InternalsVisibleTo Include="RequestBatcher.Tests" />
+    <InternalsVisibleTo Include="DynamicProxyGenAssembly2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="README.md" Pack="true" PackagePath="/" />
   </ItemGroup>
 </Project>

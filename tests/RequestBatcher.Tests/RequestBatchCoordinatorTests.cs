@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 using Moq;
 
 namespace RequestBatcher.Tests;
@@ -253,15 +254,17 @@ public sealed class RequestBatchCoordinatorTests
 
         using var cancellation = new CancellationTokenSource();
         var canceled = coordinator.ProcessAsync(2, cancellation.Token);
+        var unaffected = coordinator.ProcessAsync(3);
         cancellation.Cancel();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => canceled);
         releaseFirstBatch.SetResult();
-        await first.WaitAsync(TimeSpan.FromSeconds(5));
+        await Task.WhenAll(first, unaffected).WaitAsync(TimeSpan.FromSeconds(5));
         await coordinator.StopAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
 
         Assert.Contains(1, handled);
         Assert.DoesNotContain(2, handled);
+        Assert.Contains(3, handled);
     }
 
     [Fact]
@@ -283,6 +286,33 @@ public sealed class RequestBatchCoordinatorTests
         cancellation.Cancel();
 
         Assert.False(processing.IsCompleted);
+        releaseHandler.SetResult();
+        await processing.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public async Task ProcessAsync_HandlerReceivesConsumerToken_NotCallerToken()
+    {
+        var handlerStarted = new TaskCompletionSource<CancellationToken>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseHandler = NewSource();
+
+        await using var provider = CreateProvider<int>(async (_, cancellationToken) =>
+        {
+            handlerStarted.SetResult(cancellationToken);
+            await releaseHandler.Task;
+        });
+        var coordinator = provider.GetRequiredService<RequestBatchCoordinator<int>>();
+        using var callerCancellation = new CancellationTokenSource();
+
+        var processing = coordinator.ProcessAsync(1, callerCancellation.Token);
+        var handlerCancellation = await handlerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.NotEqual(callerCancellation.Token, handlerCancellation);
+        callerCancellation.Cancel();
+        Assert.False(handlerCancellation.IsCancellationRequested);
+        Assert.False(processing.IsCompleted);
+
         releaseHandler.SetResult();
         await processing.WaitAsync(TimeSpan.FromSeconds(5));
     }
@@ -476,6 +506,34 @@ public sealed class RequestBatchCoordinatorTests
 
         Assert.Equal(handlerLifetime, registration.Lifetime);
         Assert.Equal(typeof(ScopedTestHandler), registration.ImplementationType);
+    }
+
+    [Fact]
+    public void AddRequestBatcher_Configure_RegistersOptionsAndInvokesCallbackOnce()
+    {
+        var configureCallCount = 0;
+        var services = new ServiceCollection();
+        services.AddRequestBatcher<int>(
+            (_, _) => ValueTask.CompletedTask,
+            ServiceLifetime.Singleton,
+            options =>
+            {
+                configureCallCount++;
+                options.BatchSize = 32;
+                options.MaxConcurrency = 4;
+                options.MaxPendingRequests = 512;
+                options.FullMode = RequestBatchFullMode.Fail;
+            });
+
+        using var provider = services.BuildServiceProvider(
+            new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
+        var options = provider.GetRequiredService<IOptions<RequestBatchOptions<int>>>().Value;
+
+        Assert.Equal(1, configureCallCount);
+        Assert.Equal(32, options.BatchSize);
+        Assert.Equal(4, options.MaxConcurrency);
+        Assert.Equal(512, options.MaxPendingRequests);
+        Assert.Equal(RequestBatchFullMode.Fail, options.FullMode);
     }
 
     [Theory]

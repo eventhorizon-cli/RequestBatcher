@@ -118,8 +118,8 @@ public class RedisReadBenchmarks
         await Task.WhenAll(reads).ConfigureAwait(false);
     }
 
-    [Benchmark(Description = "RequestBatcher: one MGET per batch")]
-    public async Task RequestBatcherReadsAsync()
+    [Benchmark(Description = "RequestBatcher: single-request submissions")]
+    public async Task RequestBatcherSingleReadsAsync()
     {
         Volatile.Write(ref _workloadExecuted, 1);
 
@@ -139,6 +139,24 @@ public class RedisReadBenchmarks
         await Task.WhenAll(reads).ConfigureAwait(false);
     }
 
+    [Benchmark(Description = "RequestBatcher: one explicit batch submission")]
+    public async Task RequestBatcherBatchReadsAsync()
+    {
+        Volatile.Write(ref _workloadExecuted, 1);
+
+        Task processing;
+        try
+        {
+            processing = RequestBatcher.ProcessAsync(_requests);
+        }
+        finally
+        {
+            _startGate.Release();
+        }
+
+        await processing.ConfigureAwait(false);
+    }
+
     [IterationCleanup(Target = nameof(DirectSingleReadsAsync))]
     public void ValidateDirectReads()
     {
@@ -148,7 +166,11 @@ public class RedisReadBenchmarks
         }
     }
 
-    [IterationCleanup(Target = nameof(RequestBatcherReadsAsync))]
+    [IterationCleanup(Targets = new[]
+    {
+        nameof(RequestBatcherSingleReadsAsync),
+        nameof(RequestBatcherBatchReadsAsync),
+    })]
     public void ValidateRequestBatcherReads()
     {
         if (Volatile.Read(ref _workloadExecuted) == 0)

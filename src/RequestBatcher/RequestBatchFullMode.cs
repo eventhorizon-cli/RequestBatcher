@@ -8,6 +8,6 @@ public enum RequestBatchFullMode
     /// <summary>Asynchronously wait until capacity becomes available.</summary>
     Wait,
 
-    /// <summary>Fail the request immediately.</summary>
+    /// <summary>Fail the request submission immediately.</summary>
     Fail,
 }

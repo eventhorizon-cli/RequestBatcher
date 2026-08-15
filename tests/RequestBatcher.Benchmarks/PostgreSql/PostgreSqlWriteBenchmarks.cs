@@ -136,8 +136,8 @@ public class PostgreSqlWriteBenchmarks
         await Task.WhenAll(writes).ConfigureAwait(false);
     }
 
-    [Benchmark(Description = "RequestBatcher: one INSERT per batch")]
-    public async Task RequestBatcherWritesAsync()
+    [Benchmark(Description = "RequestBatcher: single-request submissions")]
+    public async Task RequestBatcherSingleWritesAsync()
     {
         Volatile.Write(ref _workloadExecuted, 1);
 
@@ -157,6 +157,24 @@ public class PostgreSqlWriteBenchmarks
         await Task.WhenAll(writes).ConfigureAwait(false);
     }
 
+    [Benchmark(Description = "RequestBatcher: one explicit batch submission")]
+    public async Task RequestBatcherBatchWritesAsync()
+    {
+        Volatile.Write(ref _workloadExecuted, 1);
+
+        Task processing;
+        try
+        {
+            processing = RequestBatcher.ProcessAsync(_requests);
+        }
+        finally
+        {
+            _startGate.Release();
+        }
+
+        await processing.ConfigureAwait(false);
+    }
+
     [IterationCleanup(Target = nameof(DirectSingleWritesAsync))]
     public void ValidateDirectWrites()
     {
@@ -166,7 +184,11 @@ public class PostgreSqlWriteBenchmarks
         }
     }
 
-    [IterationCleanup(Target = nameof(RequestBatcherWritesAsync))]
+    [IterationCleanup(Targets = new[]
+    {
+        nameof(RequestBatcherSingleWritesAsync),
+        nameof(RequestBatcherBatchWritesAsync),
+    })]
     public void ValidateRequestBatcherWrites()
     {
         if (Volatile.Read(ref _workloadExecuted) == 0)

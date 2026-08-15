@@ -11,9 +11,12 @@ You are an AI coding assistant for this repository.
 
 ## Architecture
 
-- Keep the public API small and centered on individual request submission through `IRequestBatcher<TRequest>`.
+- Keep the public API small and centered on single-request and explicit batch submission through
+  `IRequestBatcher<TRequest>`.
 - BufferQueue is an internal scheduling dependency. Do not expose its topics, partitions, producers, or consumers from
   RequestBatcher public APIs.
+- Keep queue adapters, admission control, consumer supervision, pending-request state, and logging under
+  `src/RequestBatcher/Internal`; the coordinator owns public submission and lifecycle composition.
 - Compose RequestBatcher through `IServiceCollection.AddRequestBatcher`; callers must not need to register or configure
   BufferQueue. Production code registers BufferQueue into the application's container and must not build or own a
   nested service provider.
@@ -65,20 +68,25 @@ You are an AI coding assistant for this repository.
   commit semantics, and validation. Verify persisted row counts so a faster result cannot hide dropped work.
 - Partition-key tests must prove both sides of the contract: equal keys never execute concurrently, while distinct keys
   can use separate partitions. Duplicate-merging examples must remain correct when duplicates span multiple batches.
+- Batch-submission tests must cover all-or-nothing admission, capacity waiting, handler failure, and per-item partition
+  routing. A submitted batch must not be documented as one handler invocation.
 - Name tests `MemberOrBehavior_Scenario_ExpectedOutcome`, with PascalCase within each segment and underscores between
   the three segments.
 - Avoid timing-only assertions where a completion source or another deterministic synchronization primitive can
   express the same condition.
 - After C# changes, run the narrowest relevant tests while iterating, then the complete test project and formatting.
+  In a dirty worktree, pass `--include` with the C# files changed by the task so formatting does not modify unrelated
+  work. CI remains responsible for verifying that the committed tree needs no formatting changes.
 
 Standard checks from the repository root:
 
 ```bash
 dotnet restore RequestBatcher.slnx
-dotnet format RequestBatcher.slnx --no-restore --verify-no-changes
+dotnet format RequestBatcher.slnx --no-restore
 dotnet build RequestBatcher.slnx --configuration Release --no-restore
 dotnet test tests/RequestBatcher.Tests/RequestBatcher.Tests.csproj --configuration Release --no-build --no-restore
 dotnet pack src/RequestBatcher/RequestBatcher.csproj --configuration Release --no-build --no-restore
+docker compose -f samples/RequestBatcher.Deduplication/compose.yaml up -d
 dotnet run --project samples/RequestBatcher.Deduplication/RequestBatcher.Deduplication.csproj --no-build --no-restore
 ```
 

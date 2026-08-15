@@ -1,5 +1,6 @@
 using System.Numerics;
 using BufferQueue.Memory;
+using RequestBatcher.Internal;
 
 namespace RequestBatcher;
 
@@ -21,7 +22,8 @@ public sealed class RequestBatchOptions<TRequest>
     public int MaxConcurrency { get; set; } = 1;
 
     /// <summary>
-    /// Gets or sets the maximum number of accepted requests that have not finished processing.
+    /// Gets or sets the maximum number of accepted requests that have not finished processing and the maximum number
+    /// of requests in one explicit batch submission.
     /// </summary>
     public int MaxPendingRequests { get; set; } = 8192;
 
@@ -95,5 +97,16 @@ public sealed class RequestBatchOptions<TRequest>
             FullMode = FullMode,
             ConfigurePartitionKey = ConfigurePartitionKey,
         };
+    }
+
+    internal void CopyFrom(RequestBatchOptions<TRequest> source)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+
+        BatchSize = source.BatchSize;
+        MaxConcurrency = source.MaxConcurrency;
+        MaxPendingRequests = source.MaxPendingRequests;
+        FullMode = source.FullMode;
+        ConfigurePartitionKey = source.ConfigurePartitionKey;
     }
 }

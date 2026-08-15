@@ -1,8 +1,8 @@
 using Microsoft.Extensions.Logging;
 
-namespace RequestBatcher;
+namespace RequestBatcher.Internal;
 
-internal static partial class RequestBatcherLog
+internal static partial class RequestBatcherLoggerExtensions
 {
     [LoggerMessage(
         EventId = 1000,
@@ -10,7 +10,7 @@ internal static partial class RequestBatcherLog
         Message = "Request batcher for {RequestType} started. BatchSize={BatchSize}, MaxConcurrency={MaxConcurrency}, " +
                   "MaxPendingRequests={MaxPendingRequests}, FullMode={FullMode}.")]
     public static partial void CoordinatorStarted(
-        ILogger logger,
+        this ILogger logger,
         string requestType,
         int batchSize,
         int maxConcurrency,
@@ -20,28 +20,30 @@ internal static partial class RequestBatcherLog
     [LoggerMessage(
         EventId = 1001,
         Level = LogLevel.Warning,
-        Message = "Request batcher queue for {RequestType} is full; rejecting request at capacity " +
+        Message = "Request batcher queue for {RequestType} cannot admit {RequestCount} request(s) at capacity " +
                   "{MaxPendingRequests}.")]
     public static partial void QueueFull(
-        ILogger logger,
+        this ILogger logger,
         string requestType,
+        int requestCount,
         int maxPendingRequests);
 
     [LoggerMessage(
         EventId = 1002,
         Level = LogLevel.Error,
-        Message = "Failed to enqueue a {RequestType} request.")]
+        Message = "Failed to enqueue {RequestCount} request(s) of type {RequestType}.")]
     public static partial void EnqueueFailed(
-        ILogger logger,
+        this ILogger logger,
         Exception exception,
-        string requestType);
+        string requestType,
+        int requestCount);
 
     [LoggerMessage(
         EventId = 1003,
         Level = LogLevel.Trace,
         Message = "Processing a {RequestType} batch containing {BatchSize} requests.")]
     public static partial void BatchStarted(
-        ILogger logger,
+        this ILogger logger,
         string requestType,
         int batchSize);
 
@@ -50,7 +52,7 @@ internal static partial class RequestBatcherLog
         Level = LogLevel.Trace,
         Message = "Processed a {RequestType} batch containing {BatchSize} requests.")]
     public static partial void BatchCompleted(
-        ILogger logger,
+        this ILogger logger,
         string requestType,
         int batchSize);
 
@@ -59,7 +61,7 @@ internal static partial class RequestBatcherLog
         Level = LogLevel.Error,
         Message = "Failed to process a {RequestType} batch containing {BatchSize} requests.")]
     public static partial void BatchFailed(
-        ILogger logger,
+        this ILogger logger,
         Exception exception,
         string requestType,
         int batchSize);
@@ -69,7 +71,7 @@ internal static partial class RequestBatcherLog
         Level = LogLevel.Critical,
         Message = "A request batcher consumer for {RequestType} stopped unexpectedly.")]
     public static partial void ConsumerFailed(
-        ILogger logger,
+        this ILogger logger,
         Exception exception,
         string requestType);
 
@@ -78,7 +80,7 @@ internal static partial class RequestBatcherLog
         Level = LogLevel.Debug,
         Message = "Stopping request batcher for {RequestType}; draining {PendingRequestCount} accepted requests.")]
     public static partial void CoordinatorStopping(
-        ILogger logger,
+        this ILogger logger,
         string requestType,
         int pendingRequestCount);
 
@@ -87,6 +89,6 @@ internal static partial class RequestBatcherLog
         Level = LogLevel.Debug,
         Message = "Request batcher for {RequestType} stopped.")]
     public static partial void CoordinatorStopped(
-        ILogger logger,
+        this ILogger logger,
         string requestType);
 }

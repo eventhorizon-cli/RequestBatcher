@@ -1,4 +1,4 @@
-namespace RequestBatcher;
+namespace RequestBatcher.Internal;
 
 internal sealed class PendingBatchRequest<TRequest>
 {
@@ -63,7 +63,7 @@ internal sealed class PendingBatchRequest<TRequest>
 
     public void FinishCanceledRequest() => Finish();
 
-    public void FailBeforeEnqueue(Exception exception)
+    public void FailWhileQueued(Exception exception)
     {
         ArgumentNullException.ThrowIfNull(exception);
 

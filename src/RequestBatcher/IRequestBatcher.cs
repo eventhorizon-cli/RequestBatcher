@@ -1,7 +1,7 @@
 namespace RequestBatcher;
 
 /// <summary>
-/// Accepts individual requests and completes each call after its containing batch is processed.
+/// Accepts individual or explicitly grouped requests and completes each call after its requests are processed.
 /// </summary>
 /// <typeparam name="TRequest">The request type.</typeparam>
 public interface IRequestBatcher<in TRequest>
@@ -10,4 +10,12 @@ public interface IRequestBatcher<in TRequest>
     /// Enqueues a request and asynchronously waits for its batch to finish.
     /// </summary>
     Task ProcessAsync(TRequest request, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Enqueues multiple requests with one production operation and asynchronously waits for every request to finish.
+    /// The requests may still be split across handler invocations according to the configured batch size and partitions.
+    /// </summary>
+    Task ProcessAsync(
+        IEnumerable<TRequest> requests,
+        CancellationToken cancellationToken = default);
 }

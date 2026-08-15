@@ -58,6 +58,17 @@ jobs:
           --configuration Release
           --no-build
           --no-restore
+          --collect:"XPlat Code Coverage"
+          --settings tests/RequestBatcher.Tests/coverage.runsettings
+          --results-directory "${{ github.workspace }}/TestResults"
+
+      - name: Upload coverage to Codecov
+        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          directory: ${{ github.workspace }}/TestResults
+          fail_ci_if_error: true
 
       - name: Pack
         run: >-

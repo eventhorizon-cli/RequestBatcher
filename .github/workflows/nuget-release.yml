@@ -1,0 +1,87 @@
+name: NuGet Release
+
+on:
+  release:
+    types:
+      - published
+
+permissions:
+  contents: write
+
+env:
+  DOTNET_CLI_TELEMETRY_OPTOUT: "true"
+  DOTNET_NOLOGO: "true"
+  NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+
+jobs:
+  publish:
+    name: Build and publish package
+    if: startsWith(github.event.release.tag_name, 'v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Validate release tag
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        shell: bash
+        run: |
+          package_version="${RELEASE_TAG#v}"
+          if [[ ! "$package_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Release tag must use the form v1.2.3 or v1.2.3-preview.1."
+            exit 1
+          fi
+          echo "PACKAGE_VERSION=$package_version" >> "$GITHUB_ENV"
+
+      - name: Checkout release
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.release.tag_name }}
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Restore
+        run: dotnet restore RequestBatcher.slnx
+
+      - name: Verify formatting
+        run: dotnet format RequestBatcher.slnx --no-restore --verify-no-changes --verbosity diagnostic
+
+      - name: Build
+        run: >-
+          dotnet build RequestBatcher.slnx
+          --configuration Release
+          --no-restore
+          -p:ContinuousIntegrationBuild=true
+
+      - name: Test
+        run: >-
+          dotnet test tests/RequestBatcher.Tests/RequestBatcher.Tests.csproj
+          --configuration Release
+          --no-build
+          --no-restore
+
+      - name: Pack
+        run: >-
+          dotnet pack src/RequestBatcher/RequestBatcher.csproj
+          --configuration Release
+          --no-build
+          --no-restore
+          --output artifacts
+          -p:PackageVersion=${PACKAGE_VERSION}
+          -p:ContinuousIntegrationBuild=true
+
+      - name: Upload packages to GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$RELEASE_TAG" artifacts/*.nupkg artifacts/*.snupkg --clobber
+
+      - name: Publish package to NuGet
+        run: >-
+          dotnet nuget push "artifacts/RequestBatcher.${PACKAGE_VERSION}.nupkg"
+          --source https://api.nuget.org/v3/index.json
+          --api-key "${{ secrets.NUGET_API_KEY }}"
+          --skip-duplicate

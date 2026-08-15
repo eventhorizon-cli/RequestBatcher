@@ -1,6 +1,9 @@
 using BufferQueue;
+using BufferQueue.Memory;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using RequestBatcher.Internal;
 
 namespace RequestBatcher;
 
@@ -73,17 +76,15 @@ public static class RequestBatcherServiceCollectionExtensions
                 $"A request batcher for '{typeof(TRequest)}' has already been registered.");
         }
 
-        var options = new RequestBatchOptions<TRequest>();
-        configure?.Invoke(options);
-        options = options.ValidateAndClone();
+        var optionsSnapshot = ConfigureOptions(services, configure);
 
         registerHandler(services);
-        AddInternalBufferQueueTopic<TRequest>(services, options);
+        AddInternalBufferQueueTopic<TRequest>(services, optionsSnapshot);
         services.AddSingleton<RequestBatchCoordinator<TRequest>>(provider =>
             new RequestBatchCoordinator<TRequest>(
                 provider.GetRequiredService<IBufferQueue>(),
                 CreateHandler<TRequest>(provider, handlerLifetime),
-                options,
+                provider.GetRequiredService<IOptions<RequestBatchOptions<TRequest>>>(),
                 provider.GetService<ILogger<RequestBatchCoordinator<TRequest>>>()));
         services.AddSingleton<IRequestBatcher<TRequest>>(
             static provider => provider.GetRequiredService<RequestBatchCoordinator<TRequest>>());
@@ -91,24 +92,54 @@ public static class RequestBatcherServiceCollectionExtensions
         return services;
     }
 
+    private static RequestBatchOptions<TRequest> ConfigureOptions<TRequest>(
+        IServiceCollection services,
+        Action<RequestBatchOptions<TRequest>>? configure)
+    {
+        // BufferQueue materializes topic topology during service registration, so both layers share one snapshot.
+        var configuredOptions = new RequestBatchOptions<TRequest>();
+        configure?.Invoke(configuredOptions);
+        var optionsSnapshot = configuredOptions.ValidateAndClone();
+
+        services
+            .AddOptions<RequestBatchOptions<TRequest>>()
+            .Configure(options => options.CopyFrom(optionsSnapshot))
+            .Validate(
+                static options => options.BatchSize > 0,
+                "Batch size must be greater than zero.")
+            .Validate(
+                static options => options.MaxConcurrency > 0,
+                "Maximum concurrency must be greater than zero.")
+            .Validate(
+                static options => options.MaxPendingRequests > 0,
+                "Maximum pending requests must be greater than zero.")
+            .Validate(
+                static options => Enum.IsDefined(options.FullMode),
+                "Unknown full mode.");
+
+        return optionsSnapshot;
+    }
+
     private static void AddInternalBufferQueueTopic<TRequest>(
         IServiceCollection services,
         RequestBatchOptions<TRequest> options)
     {
-        if (!services.Any(descriptor =>
-                descriptor.ServiceType == typeof(IBufferQueue) && !descriptor.IsKeyedService))
-        {
-            services.AddBufferQueue(static _ => { });
-        }
-
-        new BufferOptionsBuilder(services).UseMemory(memory =>
-            memory.AddTopic<PendingBatchRequest<TRequest>>(topic =>
-            {
-                topic.TopicName = RequestBatchCoordinator<TRequest>.TopicName;
-                topic.PartitionNumber = options.MaxConcurrency;
-                topic.SegmentSize = Math.Max(16, options.BatchSize);
-                options.ConfigurePartitionKey?.Invoke(topic);
-            }));
+        services.AddBufferQueue(queue =>
+            queue.UseMemory(memory =>
+                memory.AddTopic<PendingBatchRequest<TRequest>>(topic =>
+                {
+                    topic.TopicName = RequestBatchCoordinator<TRequest>.TopicName;
+                    topic.PartitionNumber = options.MaxConcurrency;
+                    topic.SegmentSize = Math.Max(16, options.BatchSize);
+                    topic.BoundedCapacity = (ulong)options.MaxPendingRequests;
+                    topic.FullMode = options.FullMode switch
+                    {
+                        RequestBatchFullMode.Wait => BufferQueueFullMode.Wait,
+                        RequestBatchFullMode.Fail => BufferQueueFullMode.Fail,
+                        _ => throw new ArgumentOutOfRangeException(nameof(options.FullMode)),
+                    };
+                    options.ConfigurePartitionKey?.Invoke(topic);
+                })));
     }
 
     private static RequestBatchHandler<TRequest> CreateHandler<TRequest>(
