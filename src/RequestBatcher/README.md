@@ -1,13 +1,13 @@
 # RequestBatcher
 
-Transparent request batching for concurrent .NET workloads.
+RequestBatcher collects concurrent requests inside a .NET process and invokes an application handler with
+`IReadOnlyList<TRequest>` batches. Callers continue to submit one request at a time and await a normal `Task`.
 
 [Full documentation](https://github.com/eventhorizon-cli/RequestBatcher#readme) |
 [简体中文](https://github.com/eventhorizon-cli/RequestBatcher/blob/main/README.zh-CN.md)
 
-RequestBatcher lets callers submit one request or an existing group and await one `Task`, while a handler processes the
-queued requests as `IReadOnlyList<TRequest>` batches. It is designed for in-process workloads such as database writes,
-cache operations, and downstream bulk APIs.
+RequestBatcher keeps pending requests in memory. It does not provide durable delivery, automatic retries, or
+exactly-once effects.
 
 ## Install
 
@@ -17,14 +17,14 @@ dotnet add package RequestBatcher
 
 ## Usage
 
-Define a request and its batch handler:
+Define a request and a handler for one batch:
 
 ```csharp
 public sealed record OrderWriteRequest(long OrderId, decimal Amount);
 
 public interface IOrderStore
 {
-    ValueTask WriteBatchAsync(
+    Task WriteBatchAsync(
         IReadOnlyList<OrderWriteRequest> requests,
         CancellationToken cancellationToken);
 }
@@ -32,14 +32,64 @@ public interface IOrderStore
 public sealed class OrderWriteBatchHandler(IOrderStore store)
     : IRequestBatchHandler<OrderWriteRequest>
 {
-    public ValueTask HandleAsync(
+    public async ValueTask HandleAsync(
         IReadOnlyList<OrderWriteRequest> requests,
-        CancellationToken cancellationToken = default) =>
-        store.WriteBatchAsync(requests, cancellationToken);
+        CancellationToken cancellationToken = default)
+    {
+        await store.WriteBatchAsync(requests, cancellationToken);
+    }
 }
 ```
 
-Register the handler and choose its lifetime in the same call:
+The handler's `ValueTask` is an internal completion signal that RequestBatcher awaits once. Application callers always
+receive `Task`.
+
+Register the handler and choose its lifetime:
+
+```csharp
+services.AddRequestBatcher<OrderWriteRequest, OrderWriteBatchHandler>(
+    ServiceLifetime.Scoped,
+    options =>
+    {
+        options.BatchSize = 256;
+    });
+```
+
+Inject `IRequestBatcher<TRequest>` and submit requests:
+
+```csharp
+public sealed class OrderService(IRequestBatcher<OrderWriteRequest> batcher)
+{
+    public Task SaveAsync(
+        OrderWriteRequest request,
+        CancellationToken cancellationToken = default) =>
+        batcher.ProcessAsync(request, cancellationToken);
+}
+```
+
+The returned `Task` completes after the handler has processed that request. If the handler fails, the caller receives
+the original exception.
+
+When requests already exist as a group, submit them together:
+
+```csharp
+await batcher.ProcessAsync(orderWriteRequests, cancellationToken);
+```
+
+This overload snapshots and admits the group as one capacity unit, then waits for every request. It does not force one
+handler call; the group may still be split by `BatchSize` or partition routing.
+
+## Batching Model
+
+- A handler batch contains at most `BatchSize` requests that are already queued.
+- RequestBatcher does not add a fixed delay or wait for a minimum batch size.
+- `MaxConcurrency` limits concurrent handler calls. Its default value of `1` preserves global FIFO processing.
+- `MaxPendingRequests` bounds accepted work. `FullMode` either waits for capacity or rejects immediately.
+- Caller cancellation removes a request only before handler dispatch. After dispatch, the caller observes the real
+  handler outcome.
+- Accepted requests are drained during shutdown, but they cannot be recovered after a process failure.
+
+## Optional Partition Routing
 
 ```csharp
 services.AddRequestBatcher<OrderWriteRequest, OrderWriteBatchHandler>(
@@ -48,52 +98,25 @@ services.AddRequestBatcher<OrderWriteRequest, OrderWriteBatchHandler>(
     {
         options.BatchSize = 256;
         options.MaxConcurrency = 4;
-        options.MaxPendingRequests = 10_000;
+
+        // Optional. Without this selector, routing is round-robin.
         options.UsePartitionKey(request => request.OrderId);
     });
 ```
 
-Submit requests individually:
+Equal finite, integer-valued numeric keys or equal non-null string keys are routed to one partition and processed there
+in append order. A partition key controls routing only: it does not force related requests into one handler batch or
+deduplicate them.
 
-```csharp
-var batcher = serviceProvider.GetRequiredService<IRequestBatcher<OrderWriteRequest>>();
+Partition-local ordering can support patterns such as merging repeated updates within each batch. Correctness across
+batches still requires application safeguards such as version checks, idempotency keys, unique constraints, or
+transactions.
 
-await batcher.ProcessAsync(
-    new OrderWriteRequest(OrderId: 42, Amount: 99.50m),
-    cancellationToken);
-```
+Do not move an operation into RequestBatcher when it must commit or roll back with the caller's transaction.
 
-Or enqueue an existing group with one production operation:
-
-```csharp
-await batcher.ProcessAsync(orderWriteRequests, cancellationToken);
-```
-
-The returned `Task` completes after all requests from that call have finished. A successful handler call completes every
-request in that handler batch; if it throws, those requests receive the original exception. One explicit submission may
-still be split across partitions or handler calls according to `BatchSize`.
-
-## Key Behavior
-
-- Batches contain at most `BatchSize` requests. RequestBatcher does not wait for a minimum batch size or add a fixed
-  batching delay.
-- `MaxConcurrency` limits concurrent handler calls. The default value of `1` preserves global FIFO processing.
-- `MaxPendingRequests` bounds accepted work. `FullMode` can wait asynchronously for capacity or return a faulted `Task`
-  immediately.
-- Explicit batches reserve capacity as one unit and cannot exceed `MaxPendingRequests`; insufficient capacity never
-  causes a partial submission.
-- `UsePartitionKey` routes equal numeric or string keys to one partition. It controls routing and partition-local order;
-  it does not place every request for one key in the same batch or deduplicate requests.
-- Caller cancellation removes a request only before handler dispatch. Once dispatch starts, the caller receives the
-  actual batch outcome.
-- Accepted requests are drained during shutdown. Pending requests are held only in memory and cannot be recovered after
-  a process failure.
-
-RequestBatcher does not retry failed handlers or provide exactly-once side effects. Keep operations idempotent when they
-may be retried, and do not move work out of a transaction when it must commit or roll back with that transaction.
-
-A runnable [PostgreSQL Web API sample](https://github.com/eventhorizon-cli/RequestBatcher/tree/main/samples/RequestBatcher.Deduplication)
-shows partitioned duplicate-update merging and one bulk upsert per handler batch.
+The runnable
+[PostgreSQL Web API sample](https://github.com/eventhorizon-cli/RequestBatcher/tree/main/samples/RequestBatcher.Deduplication)
+shows batched upserts, version-protected updates, and deduplicated reads.
 
 ## License
 
