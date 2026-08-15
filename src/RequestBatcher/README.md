@@ -9,12 +9,17 @@ multiple queued requests as an `IReadOnlyList<TRequest>`.
 ## When to Use It
 
 Use RequestBatcher for independent database, cache, or downstream operations that benefit from a batch API. It also
-fits short traffic bursts that need bounded pending work, or related requests that benefit from partition-local order.
+fits short traffic bursts that need bounded pending work, related requests that benefit from partition-local order,
+and work where caller cancellation should remove only requests that have not yet been dispatched. Dispatched work is
+allowed to finish independently of that caller.
 
 ## When Not to Use It
 
 Do not use RequestBatcher when work must survive process failure, remain inside the caller's transaction, return a
-direct `TResult`, wait for a minimum batch size, or rely on automatic retries or exactly-once effects.
+direct `TResult`, wait for a minimum batch size, or rely on automatic retries or exactly-once effects. It is also not
+suitable when an in-flight downstream operation must stop as soon as its individual caller disconnects, times out, or
+cancels. One handler batch can contain requests from several callers, so caller cancellation tokens are not forwarded
+to the handler and cannot cancel the shared handler call.
 
 ## Install
 

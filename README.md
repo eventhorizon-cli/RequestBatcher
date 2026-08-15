@@ -19,6 +19,8 @@ operation benefits from receiving multiple items:
 - database writes that can use batch `INSERT`, `UPDATE`, or `UPSERT`;
 - cache reads or writes and downstream APIs that already accept multiple items;
 - short traffic bursts where pending work and downstream concurrency must be bounded;
+- work where caller cancellation should discard only requests that have not been dispatched, while dispatched work
+  must be allowed to finish independently of that caller;
 - related requests that benefit from partition-local ordering or batch-level merging.
 
 ## When Not to Use It
@@ -33,6 +35,9 @@ RequestBatcher is not a durable background queue or a transaction coordinator:
 - The downstream operation requires automatic retries or exactly-once effects. RequestBatcher provides neither.
 - The handler requires a minimum batch size or a fixed collection window. RequestBatcher dispatches currently queued
   work without waiting to fill a batch.
+- An in-flight downstream operation must stop as soon as its individual caller disconnects, times out, or cancels.
+  One handler batch can contain requests from several callers, so caller cancellation tokens are not forwarded to the
+  handler and cannot cancel the shared handler call.
 
 ## How It Works
 
