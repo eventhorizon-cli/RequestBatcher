@@ -30,6 +30,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="RequestBatcher.Tests" />
+    <InternalsVisibleTo Include="RequestBatcher.Benchmarks" />
     <InternalsVisibleTo Include="DynamicProxyGenAssembly2" />
   </ItemGroup>
 

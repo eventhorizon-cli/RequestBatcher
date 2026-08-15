@@ -370,6 +370,184 @@ public sealed class RequestBatchSubmissionTests
         await processing.WaitAsync(TimeSpan.FromSeconds(5));
     }
 
+    [Fact]
+    public async Task ProcessAsync_PartitionedBatchFails_WaitsForOtherHandlerBeforeFaulting()
+    {
+        var expected = new TestBatchException();
+        var secondPartitionStarted = NewSource();
+        var releaseSecondPartition = NewSource();
+
+        await using var provider = CreateProvider<KeyedRequest>(
+            async (requests, _) =>
+            {
+                var request = Assert.Single(requests);
+                if (request.Key == 1)
+                {
+                    throw expected;
+                }
+
+                secondPartitionStarted.SetResult();
+                await releaseSecondPartition.Task;
+            },
+            options =>
+            {
+                options.BatchSize = 1;
+                options.MaxConcurrency = 2;
+                options.UsePartitionKey(request => request.Key);
+            });
+        var batcher = provider.GetRequiredService<IRequestBatcher<KeyedRequest>>();
+
+        var processing = batcher.ProcessAsync(
+            [new KeyedRequest(1), new KeyedRequest(2)]);
+        await secondPartitionStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.False(processing.IsCompleted);
+        releaseSecondPartition.SetResult();
+
+        var actual = await Assert.ThrowsAsync<TestBatchException>(
+            () => processing.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Same(expected, actual);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_PartitionedBatchHasMultipleFailures_PreservesDistinctExceptions()
+    {
+        var first = new TestBatchException();
+        var second = new TestBatchException();
+        var bothHandlersStarted = NewSource();
+        var releaseHandlers = NewSource();
+        var startedCount = 0;
+
+        await using var provider = CreateProvider<KeyedRequest>(
+            async (requests, _) =>
+            {
+                var request = Assert.Single(requests);
+                if (Interlocked.Increment(ref startedCount) == 2)
+                {
+                    bothHandlersStarted.SetResult();
+                }
+
+                await releaseHandlers.Task;
+                throw request.Key == 1 ? first : second;
+            },
+            options =>
+            {
+                options.BatchSize = 1;
+                options.MaxConcurrency = 2;
+                options.UsePartitionKey(request => request.Key);
+            });
+        var batcher = provider.GetRequiredService<IRequestBatcher<KeyedRequest>>();
+
+        var processing = batcher.ProcessAsync(
+            [new KeyedRequest(1), new KeyedRequest(2)]);
+        await bothHandlersStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        releaseHandlers.SetResult();
+
+        await Assert.ThrowsAsync<TestBatchException>(
+            () => processing.WaitAsync(TimeSpan.FromSeconds(5)));
+
+        var exceptions = processing.Exception!.InnerExceptions;
+        Assert.Equal(2, exceptions.Count);
+        Assert.Contains(first, exceptions);
+        Assert.Contains(second, exceptions);
+    }
+
+    [Fact]
+    public async Task ProcessAsync_BatchSplitByBatchSize_WaitsForLastHandlerCall()
+    {
+        var lastHandlerStarted = NewSource();
+        var releaseLastHandler = NewSource();
+
+        await using var provider = CreateProvider<int>(
+            async (requests, _) =>
+            {
+                var request = Assert.Single(requests);
+                if (request == 2)
+                {
+                    lastHandlerStarted.SetResult();
+                    await releaseLastHandler.Task;
+                }
+            },
+            options => options.BatchSize = 1);
+        var batcher = provider.GetRequiredService<IRequestBatcher<int>>();
+
+        var processing = batcher.ProcessAsync([1, 2]);
+        await lastHandlerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.False(processing.IsCompleted);
+        releaseLastHandler.SetResult();
+
+        await processing.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public async Task ProcessAsync_BatchPartitionSelectorFails_RejectsWithoutPartialHandling()
+    {
+        var expected = new TestBatchException();
+        var handledRequests = new ConcurrentQueue<int>();
+
+        await using var provider = CreateProvider<int>(
+            (requests, _) =>
+            {
+                foreach (var request in requests)
+                {
+                    handledRequests.Enqueue(request);
+                }
+
+                return ValueTask.CompletedTask;
+            },
+            options =>
+            {
+                options.MaxConcurrency = 2;
+                options.MaxPendingRequests = 3;
+                options.UsePartitionKey(request => request >= 0 ? request : throw expected);
+            });
+        var batcher = provider.GetRequiredService<IRequestBatcher<int>>();
+
+        var actual = await Assert.ThrowsAsync<TestBatchException>(
+            () => batcher.ProcessAsync([1, -1, 2]));
+
+        Assert.Same(expected, actual);
+        Assert.Empty(handledRequests);
+
+        await batcher.ProcessAsync([1, 2]).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(new[] { 1, 2 }, handledRequests.Order());
+    }
+
+    [Fact]
+    public async Task ProcessAsync_BatchCanceledAfterDispatch_HandlerFailureTakesPrecedence()
+    {
+        var expected = new TestBatchException();
+        var firstRequestStarted = NewSource();
+        var releaseFirstRequest = NewSource();
+        var handledRequests = new ConcurrentQueue<int>();
+
+        await using var provider = CreateProvider<int>(
+            async (requests, _) =>
+            {
+                var request = Assert.Single(requests);
+                handledRequests.Enqueue(request);
+                firstRequestStarted.SetResult();
+                await releaseFirstRequest.Task;
+                throw expected;
+            },
+            options => options.BatchSize = 1);
+        var batcher = provider.GetRequiredService<IRequestBatcher<int>>();
+        using var cancellation = new CancellationTokenSource();
+
+        var processing = batcher.ProcessAsync([1, 2], cancellation.Token);
+        await firstRequestStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        cancellation.Cancel();
+
+        Assert.False(processing.IsCompleted);
+        releaseFirstRequest.SetResult();
+
+        var actual = await Assert.ThrowsAsync<TestBatchException>(
+            () => processing.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Same(expected, actual);
+        Assert.Equal(new[] { 1 }, handledRequests);
+    }
+
     private static ServiceProvider CreateProvider<TRequest>(
         RequestBatchHandler<TRequest> handler,
         Action<RequestBatchOptions<TRequest>>? configure = null)

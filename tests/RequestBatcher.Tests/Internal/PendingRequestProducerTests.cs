@@ -85,11 +85,13 @@ public sealed class PendingRequestProducerTests
 
         using var stopping = new CancellationTokenSource();
         var finishedCount = 0;
+        var completion = new BatchSubmissionCompletion(3, default);
         var pendingRequests = Enumerable.Range(1, 3)
             .Select(request => new PendingBatchRequest<int>(
                 request,
                 default,
-                _ => Interlocked.Increment(ref finishedCount)))
+                _ => Interlocked.Increment(ref finishedCount),
+                completion))
             .ToArray();
         var subject = CreateSubject(producer.Object, stopping.Token, capacity: 8);
 
@@ -99,6 +101,75 @@ public sealed class PendingRequestProducerTests
         Assert.Equal(8, exception.Capacity);
         Assert.Equal(3, exception.RequestedCount);
         Assert.Equal(3, Volatile.Read(ref finishedCount));
+        producer.VerifyAll();
+    }
+
+    [Fact]
+    public async Task ProduceAsync_BatchProducerFailsAsynchronously_PropagatesOriginalException()
+    {
+        var expected = new TestProducerException();
+        var producer = new Mock<IBufferProducer<PendingBatchRequest<int>>>(MockBehavior.Strict);
+        producer
+            .Setup(candidate => candidate.ProduceAsync(
+                It.IsAny<ReadOnlyMemory<PendingBatchRequest<int>>>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(ValueTask.FromException(expected));
+
+        using var stopping = new CancellationTokenSource();
+        var completion = new BatchSubmissionCompletion(3, default);
+        var pendingRequests = Enumerable.Range(1, 3)
+            .Select(request => new PendingBatchRequest<int>(
+                request,
+                default,
+                _ => { },
+                completion))
+            .ToArray();
+        var subject = CreateSubject(producer.Object, stopping.Token);
+
+        var actual = await Assert.ThrowsAsync<TestProducerException>(
+            () => subject.ProduceAsync(pendingRequests, default));
+
+        Assert.Same(expected, actual);
+        Assert.Equal(expected, Assert.Single(completion.Task.Exception!.InnerExceptions));
+        producer.VerifyAll();
+    }
+
+    [Fact]
+    public async Task ProduceAsync_BatchProducerWaits_PreservesAllCompletionExceptions()
+    {
+        var produceCompletion = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var producer = new Mock<IBufferProducer<PendingBatchRequest<int>>>(MockBehavior.Strict);
+        producer
+            .Setup(candidate => candidate.ProduceAsync(
+                It.IsAny<ReadOnlyMemory<PendingBatchRequest<int>>>(),
+                It.IsAny<CancellationToken>()))
+            .Returns(new ValueTask(produceCompletion.Task));
+
+        using var stopping = new CancellationTokenSource();
+        var first = new TestProducerException();
+        var second = new TestProducerException();
+        var completion = new BatchSubmissionCompletion(2, default);
+        var pendingRequests = Enumerable.Range(1, 2)
+            .Select(request => new PendingBatchRequest<int>(
+                request,
+                default,
+                _ => { },
+                completion))
+            .ToArray();
+        var subject = CreateSubject(producer.Object, stopping.Token);
+
+        var processing = subject.ProduceAsync(pendingRequests, default);
+        produceCompletion.SetResult();
+        Assert.True(pendingRequests[0].TryStartProcessing());
+        Assert.True(pendingRequests[1].TryStartProcessing());
+        pendingRequests[0].CompleteWithError(first);
+        pendingRequests[1].CompleteWithError(second);
+
+        await Assert.ThrowsAsync<TestProducerException>(() => processing);
+        Assert.Equal(2, processing.Exception!.InnerExceptions.Count);
+        Assert.Contains(first, processing.Exception.InnerExceptions);
+        Assert.Contains(second, processing.Exception.InnerExceptions);
         producer.VerifyAll();
     }
 

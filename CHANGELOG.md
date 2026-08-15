@@ -2,6 +2,12 @@
 
 All notable changes to RequestBatcher are documented in this file.
 
+## [Unreleased]
+
+### Changed
+
+- Reduced explicit batch completion allocations by sharing one completion state across the submission while preserving handler failures, cancellation, and all-request completion semantics.
+
 ## [0.0.1] - 2026-08-15
 
 First public release.
@@ -15,4 +21,5 @@ First public release.
 - Dependency injection integration with explicit handler lifetimes and `Microsoft.Extensions.Logging` support.
 - PostgreSQL and Redis benchmarks, plus a PostgreSQL Web API sample for batched writes and deduplicated reads.
 
+[Unreleased]: https://github.com/eventhorizon-cli/RequestBatcher/compare/v0.0.1...HEAD
 [0.0.1]: https://github.com/eventhorizon-cli/RequestBatcher/releases/tag/v0.0.1

@@ -77,6 +77,10 @@ public sealed class OrderService(IRequestBatcher<OrderWriteRequest> batcher)
 The returned `Task` completes after the handler has processed that request. If the handler fails, the caller receives
 the original exception.
 
+If several handler calls fail for one explicit group, `await` follows normal `Task` semantics and throws one original
+exception. All distinct exception instances remain available through `Task.Exception.InnerExceptions`; one handler
+exception fanned out to several requests is recorded once.
+
 When requests already exist as a group, submit them together:
 
 ```csharp

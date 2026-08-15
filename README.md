@@ -170,6 +170,9 @@ partition exists.
 - RequestBatcher does not retry a failed handler.
 - The batch overload waits for the whole submitted group and faults if any handler call involved in that submission
   fails.
+- If several handler calls fail for one explicit group, `await` throws one original exception following normal `Task`
+  semantics. All distinct exception instances remain available through `Task.Exception.InnerExceptions`; one handler
+  exception fanned out to several requests is recorded once.
 
 ### Caller Cancellation
 

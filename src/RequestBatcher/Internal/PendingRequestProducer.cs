@@ -42,13 +42,7 @@ internal sealed class PendingRequestProducer<TRequest>(
         PendingBatchRequest<TRequest>[] pendingRequests,
         CancellationToken cancellationToken)
     {
-        var completions = new Task[pendingRequests.Length];
-        for (var i = 0; i < pendingRequests.Length; i++)
-        {
-            completions[i] = pendingRequests[i].Completion;
-        }
-
-        var completion = Task.WhenAll(completions);
+        var completion = pendingRequests[0].Completion;
         var linkedCancellation = CreateProducerCancellation(cancellationToken, out var producerCancellation);
         try
         {
@@ -59,12 +53,13 @@ internal sealed class PendingRequestProducer<TRequest>(
                 return completion;
             }
 
-            return AwaitProduceAndCompletionAsync(
-                produceTask,
-                pendingRequests,
-                completion,
-                linkedCancellation,
-                cancellationToken);
+            return AwaitProduceThenReturnCompletionAsync(
+                    produceTask,
+                    pendingRequests,
+                    completion,
+                    linkedCancellation,
+                    cancellationToken)
+                .Unwrap();
         }
         catch (Exception exception)
         {
@@ -100,7 +95,7 @@ internal sealed class PendingRequestProducer<TRequest>(
         await pendingRequest.Completion.ConfigureAwait(false);
     }
 
-    private async Task AwaitProduceAndCompletionAsync(
+    private async Task<Task> AwaitProduceThenReturnCompletionAsync(
         ValueTask produceTask,
         PendingBatchRequest<TRequest>[] pendingRequests,
         Task completion,
@@ -124,7 +119,7 @@ internal sealed class PendingRequestProducer<TRequest>(
             linkedCancellation?.Dispose();
         }
 
-        await completion.ConfigureAwait(false);
+        return completion;
     }
 
     private void FailWhileQueued(

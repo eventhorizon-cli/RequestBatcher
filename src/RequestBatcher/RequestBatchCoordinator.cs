@@ -228,6 +228,7 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
         CancellationToken cancellationToken)
     {
         PendingBatchRequest<TRequest>[] pendingRequests;
+        BatchSubmissionCompletion batchCompletion;
         lock (_lifecycleLock)
         {
             if (_state != Running)
@@ -236,13 +237,15 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
             }
 
             TrackRequestsLocked(requests.Length);
+            batchCompletion = new BatchSubmissionCompletion(requests.Length, cancellationToken);
             pendingRequests = new PendingBatchRequest<TRequest>[requests.Length];
             for (var i = 0; i < requests.Length; i++)
             {
                 pendingRequests[i] = new PendingBatchRequest<TRequest>(
                     requests[i],
                     cancellationToken,
-                    OnRequestFinished);
+                    OnRequestFinished,
+                    batchCompletion);
                 _pendingRequests.Add(pendingRequests[i]);
             }
         }
