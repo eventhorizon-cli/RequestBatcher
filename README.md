@@ -7,12 +7,32 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
-RequestBatcher collects concurrent requests inside a .NET process and passes them to an application handler in
-batches. Each caller submits a normal request and awaits a `Task`; the handler can then use one database command,
-cache operation, or downstream call for multiple requests.
+RequestBatcher lets application code submit one request and await one `Task`, while an application handler receives
+multiple queued requests at a time. It is an in-process way to use a downstream batch operation without exposing batch
+coordination to every caller.
 
-RequestBatcher is an in-memory coordination component. It does not persist requests or retry failed handlers. Work
-submitted to it is not part of the caller's existing transaction.
+## When to Use It
+
+Use RequestBatcher when requests are independent, temporary in-memory queuing is acceptable, and the downstream
+operation benefits from receiving multiple items:
+
+- database writes that can use batch `INSERT`, `UPDATE`, or `UPSERT`;
+- cache reads or writes and downstream APIs that already accept multiple items;
+- short traffic bursts where pending work and downstream concurrency must be bounded;
+- related requests that benefit from partition-local ordering or batch-level merging.
+
+## When Not to Use It
+
+RequestBatcher is not a durable background queue or a transaction coordinator:
+
+- Accepted work must survive process failure. Use durable storage or a reliable message broker.
+- The operation must commit or roll back with the caller's transaction. Keep it in that transaction, or record
+  independent follow-up work through a transactional outbox.
+- Every call needs a direct `TResult`. RequestBatcher returns completion through `Task`; a batched query must carry its
+  own result holder or update application state.
+- The downstream operation requires automatic retries or exactly-once effects. RequestBatcher provides neither.
+- The handler requires a minimum batch size or a fixed collection window. RequestBatcher dispatches currently queued
+  work without waiting to fill a batch.
 
 ## How It Works
 
@@ -111,6 +131,36 @@ RequestBatcher snapshots the sequence and admits it as one capacity unit. The re
 from that submission. This does not force the sequence into one handler call: it may still be split by `BatchSize` or
 partition routing.
 
+## Single and Group Submission
+
+In this documentation, a **submission** is one caller invocation of `ProcessAsync`. A **handler batch** is the
+`IReadOnlyList<TRequest>` passed to one `HandleAsync` invocation. They are not the same boundary.
+
+| Behavior | Single request | Explicit group |
+| --- | --- | --- |
+| Input | Uses the supplied `TRequest`. | Enumerates once and snapshots the sequence. An empty sequence completes immediately. |
+| Capacity | Reserves capacity for one request. | Reserves capacity for the whole group atomically. A group larger than `MaxPendingRequests` is rejected. |
+| Routing | Routes the request using the configured routing mode. | Routes every item independently, so one submission can span several partitions. |
+| Handler calls | May be handled together with other requests already queued in the same partition. | Does not create a handler boundary. Items can be split by partition and `BatchSize`, and may run in parallel. |
+| Completion | The returned `Task` represents this request's actual handler outcome. | The returned `Task` waits for every item in the submission. |
+| Failure | A handler failure fails every request in that handler batch. | Some items may succeed before another handler batch fails. The group `Task` faults, but successful work is not rolled back. |
+| Cancellation | Cancellation removes the request only before dispatch. | The same token applies to every item; undispatched items can be canceled while dispatched items continue to their actual outcome. |
+
+## Routing Modes
+
+`MaxConcurrency` determines both the maximum number of concurrent handler calls and the number of processing
+partitions. Each handler invocation receives requests from one partition.
+
+| Configuration | Request routing | Effect on an explicit group | Ordering |
+| --- | --- | --- | --- |
+| `MaxConcurrency = 1` | Every request uses the only partition. | Items stay in one partition but can still be split by `BatchSize`. | Global append order. |
+| `MaxConcurrency > 1`, no partition key | Round-robin advances once for every request. | Items are distributed across partitions one by one and handler calls may run concurrently. | Per-partition order only. |
+| `MaxConcurrency > 1`, with `UsePartitionKey` | The selector is applied to every request; equal keys use the same partition. | The group is split by selected partition; equal-key input order is retained in that partition. | Per-partition order; different keys can share a partition. |
+
+Ordering starts after a request has been appended to its partition. Concurrent callers do not establish an additional
+order before that point. Configuring a partition key with `MaxConcurrency = 1` does not change routing because only one
+partition exists.
+
 ## Processing Semantics
 
 ### Completion and Failure
@@ -129,6 +179,10 @@ side effect that may already have happened.
 
 The token passed to the handler belongs to RequestBatcher's processing lifetime, not to an individual caller. One
 caller's cancellation therefore cannot cancel work for the other requests in the same batch.
+
+For an explicit group, the caller token is applied to every item. Cancellation can therefore leave a mix of canceled
+items and items that were already dispatched. The returned `Task` still waits for all items; it faults if any item
+faults, otherwise it is canceled when at least one item was canceled. Completed side effects are not rolled back.
 
 ### Capacity and Backpressure
 
@@ -185,24 +239,6 @@ does not place every update for one product into the same batch. The runnable
 - the write handler merges repeated product updates within one batch, then performs one bulk upsert;
 - the upsert condition ignores older versions that arrive in later batches;
 - the query handler deduplicates product IDs before issuing one SQL query for the batch.
-
-## Appropriate Uses
-
-- Independent database writes that can use batch `INSERT`, `UPDATE`, or `UPSERT`.
-- Cache reads or writes and downstream APIs that already accept multiple items.
-- Short traffic bursts where queue capacity and handler concurrency should be bounded.
-- Related requests that benefit from partition-local ordering or batch-level merging.
-
-## Avoid It When
-
-- Accepted work must survive process failure. Use durable storage or a reliable message broker.
-- The operation must commit or roll back with the caller's transaction. Keep it in that transaction, or record
-  independent follow-up work through a transactional outbox.
-- Every call needs a direct `TResult`. RequestBatcher returns completion through `Task`; a batched query must carry its
-  own result holder or update application state.
-- The downstream operation requires automatic retries or exactly-once effects. RequestBatcher provides neither.
-- The handler requires a minimum batch size or a fixed collection window. RequestBatcher dispatches currently queued
-  work without waiting to fill a batch.
 
 ## Dependency Injection and Logging
 
