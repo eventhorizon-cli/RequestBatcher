@@ -3,7 +3,7 @@
     <TargetFramework>net8.0</TargetFramework>
     <Title>RequestBatcher</Title>
     <PackageId>RequestBatcher</PackageId>
-    <VersionPrefix>1.0.0</VersionPrefix>
+    <VersionPrefix>0.0.1</VersionPrefix>
     <Description>In-process request batching for concurrent .NET workloads, with backpressure, partition routing, and per-request completion.</Description>
     <Authors>EventHorizon CLI</Authors>
     <PackageTags>request-batching;batching;async;backpressure;partitioning;bufferqueue</PackageTags>

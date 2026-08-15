@@ -2,7 +2,7 @@
 
 All notable changes to RequestBatcher are documented in this file.
 
-## [1.0.0] - 2026-08-15
+## [0.0.1] - 2026-08-15
 
 First public release.
 
@@ -15,4 +15,4 @@ First public release.
 - Dependency injection integration with explicit handler lifetimes and `Microsoft.Extensions.Logging` support.
 - PostgreSQL and Redis benchmarks, plus a PostgreSQL Web API sample for batched writes and deduplicated reads.
 
-[1.0.0]: https://github.com/eventhorizon-cli/RequestBatcher/releases/tag/v1.0.0
+[0.0.1]: https://github.com/eventhorizon-cli/RequestBatcher/releases/tag/v0.0.1
