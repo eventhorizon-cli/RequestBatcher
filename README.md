@@ -11,6 +11,16 @@ RequestBatcher lets application code submit one request and await one `Task`, wh
 multiple queued requests at a time. It is an in-process way to use a downstream batch operation without exposing batch
 coordination to every caller.
 
+> **Batching does not require callers to assemble a collection.** Separate callers can each submit one `TRequest`
+> concurrently. RequestBatcher coalesces requests already queued for the same partition into handler batches of up to
+> `BatchSize`. `ProcessAsync(IEnumerable<TRequest>)` is an additional submission option, not a prerequisite for
+> batching.
+
+![Request coalescing illustration](docs/assets/request-batcher-request-coalescing.png)
+
+Separate concurrent requests can be combined into one batch before a downstream batch operation. The illustration is
+an example: only requests already queued in the same partition can be combined into one handler batch.
+
 ## When to Use It
 
 Use RequestBatcher when requests are independent, temporary in-memory queuing is acceptable, and the downstream
@@ -28,8 +38,7 @@ operation benefits from receiving multiple items:
 RequestBatcher is not a durable background queue or a transaction coordinator:
 
 - Accepted work must survive process failure. Use durable storage or a reliable message broker.
-- The operation must commit or roll back with the caller's transaction. Keep it in that transaction, or record
-  independent follow-up work through a transactional outbox.
+- The operation must commit or roll back with the caller's transaction. Keep it in that transaction.
 - Every call needs a direct `TResult`. RequestBatcher returns completion through `Task`; a batched query must carry its
   own result holder or update application state.
 - The downstream operation requires automatic retries or exactly-once effects. RequestBatcher provides neither.
@@ -51,6 +60,9 @@ RequestBatcher is not a durable background queue or a transaction coordinator:
 window, so low traffic may produce single-request batches while concurrent traffic naturally produces larger batches.
 
 ![RequestBatcher architecture](docs/assets/request-batcher-architecture.png)
+
+The architecture diagram shows the coordinator, the in-memory partition queue, and the separate `Task` completion
+path for each accepted request.
 
 The two sides of the API have different responsibilities:
 
@@ -265,16 +277,9 @@ Logs use the application's `Microsoft.Extensions.Logging` pipeline under the cat
 `RequestBatchCoordinator<TRequest>`. Handler failures are logged with their original exception, and request payloads
 are not logged.
 
-## Sample and Development
+## Sample
 
 - [PostgreSQL Web API sample](samples/RequestBatcher.Deduplication)
-- [Changelog](CHANGELOG.md)
-- [Unit tests](tests/RequestBatcher.Tests)
-
-```bash
-dotnet build RequestBatcher.slnx --configuration Release
-dotnet test tests/RequestBatcher.Tests/RequestBatcher.Tests.csproj --configuration Release
-```
 
 ## License
 

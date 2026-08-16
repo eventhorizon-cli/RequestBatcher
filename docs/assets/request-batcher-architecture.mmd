@@ -1,25 +1,31 @@
 flowchart LR
-    caller["Application<br/>caller"]
+    subgraph callers["Concurrent application callers"]
+        direction TB
+        callerA["Caller A<br/>ProcessAsync(request A)"]
+        callerB["Caller B<br/>ProcessAsync(request B)"]
+        callerC["Caller C<br/>ProcessAsync(request C)"]
+    end
 
     subgraph requestBatcher["RequestBatcher"]
         direction TB
         coordinator["RequestBatch<br/>Coordinator"]
-        queue["Internal BufferQueue<br/>Memory topic<br/>round robin / Partition Key"]
-        outcome["Caller Task<br/>success or error"]
+        queue["Internal BufferQueue<br/>Memory topic<br/>per-partition routing"]
 
         coordinator -->|"enqueue"| queue
-        coordinator -.->|"after handler outcome"| outcome
     end
 
-    handler["Batch handler<br/>up to BatchSize requests"]
+    handler["Batch handler<br/>coalesced A + B + C<br/>up to BatchSize requests"]
     downstream["Database, cache,<br/>or bulk API"]
+    outcome["One Task per request<br/>success or error"]
 
-    caller -->|"ProcessAsync(request)<br/>ProcessAsync(requests)"| coordinator
+    callerA -->|"one request"| coordinator
+    callerB -->|"one request"| coordinator
+    callerC -->|"one request"| coordinator
     queue --> handler
     handler -->|"batch operation"| downstream
-    outcome -.->|"complete Task"| caller
+    handler -.->|"actual outcome"| outcome
 
-    class caller client
+    class callerA,callerB,callerC client
     class coordinator gateway
     class queue,outcome core
     class handler handler
@@ -30,4 +36,5 @@ flowchart LR
     classDef core fill:#edf1f5,stroke:#596773,color:#303b44,stroke-width:1.5px
     classDef storage fill:#fff4d6,stroke:#8a6a1d,color:#4d3b0e,stroke-width:1.5px
     classDef handler fill:#f4edfb,stroke:#75529b,color:#422d59,stroke-width:1.5px
+    style callers fill:#ffffff,stroke:#aeb8c2,color:#303b44,stroke-width:1px
     style requestBatcher fill:#ffffff,stroke:#aeb8c2,color:#303b44,stroke-width:1px

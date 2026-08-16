@@ -3,6 +3,11 @@
 RequestBatcher lets application code submit one request and await one `Task`, while an application handler receives
 multiple queued requests as an `IReadOnlyList<TRequest>`.
 
+> **Batching does not require callers to assemble a collection.** Separate callers can each submit one `TRequest`
+> concurrently. RequestBatcher coalesces requests already queued for the same partition into handler batches of up to
+> `BatchSize`. `ProcessAsync(IEnumerable<TRequest>)` is an additional submission option, not a prerequisite for
+> batching.
+
 [Full documentation](https://github.com/eventhorizon-cli/RequestBatcher#readme) |
 [简体中文](https://github.com/eventhorizon-cli/RequestBatcher/blob/main/README.zh-CN.md)
 

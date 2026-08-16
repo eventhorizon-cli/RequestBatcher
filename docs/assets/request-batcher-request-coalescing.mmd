@@ -1,0 +1,19 @@
+flowchart LR
+    requestA["Request A"]
+    requestB["Request B"]
+    requestC["Request C"]
+    batch["One batch<br/>A + B + C"]
+    operation["One batch<br/>operation"]
+
+    requestA --> batch
+    requestB --> batch
+    requestC --> batch
+    batch --> operation
+
+    class requestA,requestB,requestC client
+    class batch core
+    class operation storage
+
+    classDef client fill:#e9f6f1,stroke:#2f6f5e,color:#173f35,stroke-width:1.5px
+    classDef core fill:#edf1f5,stroke:#596773,color:#303b44,stroke-width:1.5px
+    classDef storage fill:#fff4d6,stroke:#8a6a1d,color:#4d3b0e,stroke-width:1.5px
