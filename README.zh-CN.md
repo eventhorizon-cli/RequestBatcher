@@ -26,9 +26,12 @@ RequestBatcher 会在 .NET 进程内汇集来自不同调用方的并发请求�
 
 - 能够使用批量 `INSERT`、`UPDATE` 或 `UPSERT` 的数据库写入；
 - 原生支持多项输入的缓存读写或下游 API；
-- 需要限制排队请求数和下游并发量的短时流量突发；
+- 需要限制内部队列容量和下游并发量的短时流量突发；
 - 调用方取消时，只需要撤销尚未分发的请求；已分发的操作应继续执行并返回实际处理结果；
 - 需要保持分区内处理顺序，或可以在同一处理批次内合并相关请求。
+
+数据库更新还需要注意事务边界：如果一次 Handler 调用只成功一部分会造成数据不一致，应由 Handler 在同一个事务中
+完成整批更新。RequestBatcher 只负责传递 Handler 的处理结果，不会回滚已经提交的数据。
 
 ## 不适用场景
 
@@ -135,8 +138,10 @@ public sealed class OrderService(IRequestBatcher<OrderWriteRequest> batcher)
 await batcher.ProcessAsync(orderWriteRequests, cancellationToken);
 ```
 
-RequestBatcher 会先为请求序列创建快照，再以整组请求为单位申请容量。返回的 `Task` 会等待本次
-提交中的所有请求。一次提交不等于一次 Handler 调用：请求仍可能按 `BatchSize` 或分区路由拆成多个处理批次。
+RequestBatcher 会先为请求序列创建快照，再作为一次生产操作提交。`Wait` 模式下，数量不超过
+`MaxPendingRequests` 的请求组会原子地申请容量；超过容量的请求组会随着容量释放，按连续的容量片段逐步进入队列。
+`Fail` 模式下，整组请求必须能够立即获得容量。返回的 `Task` 会等待本次提交中的所有请求。一次提交不等于一次
+Handler 调用：请求仍可能按 `BatchSize` 或分区路由拆成多个处理批次。
 
 > **显式批量提交不是分区边界。** 配置多个分区后，RequestBatcher 会逐项路由，并不会将整次提交强制放入同一
 > 分区。只有 `MaxConcurrency = 1`，或者每项请求计算出相同的分区键时，才保证整组请求落在同一个分区。
@@ -149,7 +154,7 @@ RequestBatcher 会先为请求序列创建快照，再以整组请求为单位�
 | 行为 | 单次提交 | 显式批量提交 |
 | --- | --- | --- |
 | 输入 | 直接提交传入的 `TRequest`。 | 枚举一次序列并创建快照；空序列立即完成。 |
-| 容量 | 为一个请求申请容量。 | 整组请求原子地申请容量；组内请求数量超过 `MaxPendingRequests` 时拒绝整组。 |
+| 容量 | 为一个请求申请容量。 | `Wait` 将超容量请求组按连续的容量片段逐步接收；`Fail` 要求整组请求立即获得容量。 |
 | 路由 | 按当前路由模式处理这个请求。 | 每个请求独立路由，因此一次提交可以跨多个分区。 |
 | Handler 调用 | 可能与同一分区中已排队的其他请求一起交给 Handler。 | 不形成处理批次边界；请求可按分区和 `BatchSize` 拆分，并可能并行执行。 |
 | 完成 | 返回的 `Task` 表示这个请求的实际处理结果。 | 返回的 `Task` 等待本次提交中的每个请求。 |
@@ -195,17 +200,19 @@ RequestBatcher 会先为请求序列创建快照，再以整组请求为单位�
 
 ### 容量与背压
 
-`MaxPendingRequests` 限制已接收但尚未完成的请求数量：
+`MaxPendingRequests` 是内部 BufferQueue 的有界容量，由已排队的请求和 Handler 正在处理但尚未提交消费进度的请求
+共同占用。它不限制一次显式提交的请求数量，也不限制正在等待容量的调用方数量：
 
 - `FullMode = Wait` 会在容量可用前异步等待，并支持调用方在等待期间取消。
-- `FullMode = Fail` 会立即返回一个因 `RequestBatchQueueFullException` 而失败的 `Task`。
-- 显式提交的一组请求会原子地申请容量：要么整组接收，要么整组不接收。
-- 请求组数量超过 `MaxPendingRequests` 时始终会被拒绝。
+- `Wait` 模式下，不超过容量的请求组会原子地进入队列；超过容量的请求组会拆成连续的容量片段逐步进入队列。
+  中途取消时，已分发的请求仍会继续处理，尚未分发的请求会被取消。
+- `FullMode = Fail` 要求整次提交立即获得容量。否则，包括请求组数量超过容量时，会返回一个因
+  `RequestBatchQueueFullException` 而失败的 `Task`，且不会接收其中任何一项。
 
 ### 停止
 
-`StopAsync` 和 `DisposeAsync` 会停止接收新请求，并排空已经接收的请求。取消传给 `StopAsync` 的
-`CancellationToken` 只会中止本次等待，后台停止过程仍会继续。
+`StopAsync` 和 `DisposeAsync` 会停止接收新请求，并排空停止前已经开始的所有提交，包括仍在等待容量的提交。取消
+传给 `StopAsync` 的 `CancellationToken` 只会中止本次等待，后台停止过程仍会继续。
 
 ## 配置
 
@@ -213,7 +220,7 @@ RequestBatcher 会先为请求序列创建快照，再以整组请求为单位�
 | --- | ---: | --- |
 | `BatchSize` | `128` | 单次 Handler 调用包含的请求数量上限。 |
 | `MaxConcurrency` | `1` | Handler 最大并发调用数，同时也是处理分区数。 |
-| `MaxPendingRequests` | `8192` | 已接收但尚未完成的请求上限，也是一次显式提交的数量上限。 |
+| `MaxPendingRequests` | `8192` | 内部 BufferQueue 的有界容量，由已排队和 Handler 正在处理的请求共同占用。 |
 | `FullMode` | `Wait` | 默认等待容量；`Fail` 在容量不足时立即拒绝。 |
 | `UsePartitionKey(...)` | 未配置 | 未配置时按轮询方式分配；选择器返回相同键值的请求进入同一分区。 |
 

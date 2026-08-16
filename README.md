@@ -28,10 +28,14 @@ operation benefits from receiving multiple items:
 
 - database writes that can use batch `INSERT`, `UPDATE`, or `UPSERT`;
 - cache reads or writes and downstream APIs that already accept multiple items;
-- short traffic bursts where pending work and downstream concurrency must be bounded;
+- short traffic bursts where internal queue capacity and downstream concurrency must be bounded;
 - work where caller cancellation should discard only requests that have not been dispatched, while dispatched work
   must be allowed to finish independently of that caller;
 - related requests that benefit from partition-local ordering or batch-level merging.
+
+For database updates, if partial success within one handler invocation would leave inconsistent state, the handler
+should execute that invocation in one transaction. RequestBatcher propagates the handler outcome but cannot roll back
+writes that have already been committed.
 
 ## When Not to Use It
 
@@ -144,9 +148,11 @@ When the caller already has multiple requests, it can submit them with one call:
 await batcher.ProcessAsync(orderWriteRequests, cancellationToken);
 ```
 
-RequestBatcher snapshots the sequence and admits it as one capacity unit. The returned `Task` waits for every request
-from that submission. This does not force the sequence into one handler call: it may still be split by `BatchSize` or
-partition routing.
+RequestBatcher snapshots the sequence and submits it as one producer operation. In `Wait` mode, a group no larger than
+`MaxPendingRequests` is admitted atomically; a larger group is admitted as consecutive capacity-sized slices as
+capacity becomes available. In `Fail` mode, the whole group must fit immediately. The returned `Task` waits for every
+request from the submission. This does not force the sequence into one handler call: it may still be split by
+`BatchSize` or partition routing.
 
 > **An explicit group is not a partition boundary.** With more than one partition, RequestBatcher routes every item
 > independently; it does not send the whole submission to one partition. The group is guaranteed to stay in one
@@ -160,7 +166,7 @@ In this documentation, a **submission** is one caller invocation of `ProcessAsyn
 | Behavior | Single request | Explicit group |
 | --- | --- | --- |
 | Input | Uses the supplied `TRequest`. | Enumerates once and snapshots the sequence. An empty sequence completes immediately. |
-| Capacity | Reserves capacity for one request. | Reserves capacity for the whole group atomically. A group larger than `MaxPendingRequests` is rejected. |
+| Capacity | Reserves capacity for one request. | `Wait` admits an oversized group in consecutive capacity-sized slices; `Fail` requires the whole group to fit immediately. |
 | Routing | Routes the request using the configured routing mode. | Routes every item independently, so one submission can span several partitions. |
 | Handler calls | May be handled together with other requests already queued in the same partition. | Does not create a handler boundary. Items can be split by partition and `BatchSize`, and may run in parallel. |
 | Completion | The returned `Task` represents this request's actual handler outcome. | The returned `Task` waits for every item in the submission. |
@@ -210,17 +216,22 @@ faults, otherwise it is canceled when at least one item was canceled. Completed 
 
 ### Capacity and Backpressure
 
-`MaxPendingRequests` limits accepted requests that have not finished:
+`MaxPendingRequests` sets the bounded BufferQueue capacity shared by queued requests and requests currently being
+handled but not yet committed. It is not a limit on the size of an explicit submission or on the number of callers
+waiting for capacity:
 
 - `FullMode = Wait` waits asynchronously for enough capacity and honors caller cancellation while waiting.
-- `FullMode = Fail` immediately returns a faulted `Task` with `RequestBatchQueueFullException`.
-- An explicit group reserves capacity atomically. RequestBatcher either admits the whole group or none of it.
-- A group larger than `MaxPendingRequests` is always rejected.
+- In `Wait` mode, a group no larger than the capacity is admitted atomically. A larger group is split into consecutive
+  capacity-sized slices. Cancellation can leave already dispatched requests running while undispatched requests are
+  canceled.
+- `FullMode = Fail` requires the whole submission to fit immediately. Otherwise, including when a group is larger than
+  the capacity, it returns a faulted `Task` with `RequestBatchQueueFullException` without admitting any item.
 
 ### Shutdown
 
-`StopAsync` and `DisposeAsync` stop accepting new requests and drain requests that were already accepted. Canceling
-the token passed to `StopAsync` stops only that wait; shutdown continues in the background.
+`StopAsync` and `DisposeAsync` stop accepting new requests and drain every submission that started before shutdown,
+including submissions waiting for capacity. Canceling the token passed to `StopAsync` stops only that wait; shutdown
+continues in the background.
 
 ## Configuration
 
@@ -228,7 +239,7 @@ the token passed to `StopAsync` stops only that wait; shutdown continues in the 
 | --- | ---: | --- |
 | `BatchSize` | `128` | Maximum requests passed to one handler call. |
 | `MaxConcurrency` | `1` | Maximum concurrent handler calls and number of processing partitions. |
-| `MaxPendingRequests` | `8192` | Maximum accepted requests that have not completed, and maximum size of one explicit submission. |
+| `MaxPendingRequests` | `8192` | Internal BufferQueue capacity shared by queued and currently handled requests. |
 | `FullMode` | `Wait` | Waits for capacity; `Fail` rejects immediately when capacity is unavailable. |
 | `UsePartitionKey(...)` | Not set | Uses round-robin routing by default; equal selected keys are routed to one partition. |
 

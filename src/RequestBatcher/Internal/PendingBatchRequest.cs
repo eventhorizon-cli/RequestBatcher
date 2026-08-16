@@ -73,12 +73,17 @@ internal sealed class PendingBatchRequest<TRequest>
     {
         ArgumentNullException.ThrowIfNull(exception);
 
-        if (Interlocked.CompareExchange(ref _status, Completed, Queued) == Queued)
+        // An oversized batch can have earlier slices in the handler when production of a later slice fails.
+        var status = Interlocked.CompareExchange(ref _status, Completed, Queued);
+        if (status == Queued)
         {
             CompleteWithErrorCore(exception);
+            Finish();
         }
-
-        Finish();
+        else if (status != Processing)
+        {
+            Finish();
+        }
     }
 
     private void CancelWhileQueued()

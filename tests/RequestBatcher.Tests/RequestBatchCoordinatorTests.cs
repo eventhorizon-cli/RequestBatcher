@@ -397,30 +397,37 @@ public sealed class RequestBatchCoordinatorTests
     }
 
     [Fact]
-    public async Task StopAsync_AcceptedAndWaitingRequests_DrainsAcceptedAndRejectsWaitingAndNew()
+    public async Task StopAsync_SubmittedAndWaitingRequests_DrainsBothAndRejectsNew()
     {
         var handlerStarted = NewSource();
         var releaseHandler = NewSource();
+        var handledRequests = new ConcurrentQueue<int>();
 
-        await using var provider = CreateProvider<int>(async (_, _) =>
+        await using var provider = CreateProvider<int>(async (requests, _) =>
         {
-            handlerStarted.SetResult();
-            await releaseHandler.Task;
+            var request = Assert.Single(requests);
+            handledRequests.Enqueue(request);
+            if (request == 1)
+            {
+                handlerStarted.SetResult();
+                await releaseHandler.Task;
+            }
         }, options => options.MaxPendingRequests = 1);
         var coordinator = provider.GetRequiredService<RequestBatchCoordinator<int>>();
 
-        var accepted = coordinator.ProcessAsync(1);
+        var first = coordinator.ProcessAsync(1);
         await handlerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        var waiting = coordinator.ProcessAsync(2);
+        var second = coordinator.ProcessAsync(2);
         var stopping = coordinator.StopAsync().AsTask();
 
-        await Assert.ThrowsAsync<ObjectDisposedException>(() => waiting);
         await Assert.ThrowsAsync<ObjectDisposedException>(
             () => coordinator.ProcessAsync(3));
+        Assert.False(second.IsCompleted);
         Assert.False(stopping.IsCompleted);
 
         releaseHandler.SetResult();
-        await Task.WhenAll(accepted, stopping).WaitAsync(TimeSpan.FromSeconds(5));
+        await Task.WhenAll(first, second, stopping).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(new[] { 1, 2 }, handledRequests);
     }
 
     [Fact]

@@ -51,6 +51,8 @@ You are an AI coding assistant for this repository.
 ## Documentation
 
 - Update the README when behavior, configuration, public APIs, lifecycle, or user-facing functionality changes.
+- Keep `src/RequestBatcher/README.md`, the NuGet package README, synchronized with relevant user-facing behavior,
+  configuration, and usage guidance in the root README.
 - Keep usage examples compilable and focused on the public abstraction rather than internal queue mechanics.
 - Document the durability boundary explicitly: RequestBatcher is in-process and does not recover pending requests after a
   process failure.

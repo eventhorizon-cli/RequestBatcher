@@ -59,7 +59,11 @@ public sealed class RequestBatchSubmissionTests
                     ? ValueTask.FromException(expected)
                     : ValueTask.CompletedTask;
             },
-            options => options.BatchSize = 2);
+            options =>
+            {
+                options.BatchSize = 2;
+                options.MaxPendingRequests = 2;
+            });
         var batcher = provider.GetRequiredService<IRequestBatcher<int>>();
 
         var actual = await Assert.ThrowsAsync<TestBatchException>(
@@ -70,7 +74,44 @@ public sealed class RequestBatchSubmissionTests
     }
 
     [Fact]
-    public async Task ProcessAsync_BatchExceedsCapacity_RejectsWithoutHandling()
+    public async Task ProcessAsync_WaitModeBatchExceedsCapacity_ProcessesCapacitySizedSlices()
+    {
+        var firstSliceStarted = NewSource();
+        var releaseFirstSlice = NewSource();
+        var handledBatches = new ConcurrentQueue<int[]>();
+
+        await using var provider = CreateProvider<int>(
+            async (requests, _) =>
+            {
+                var batch = requests.ToArray();
+                handledBatches.Enqueue(batch);
+                if (batch.SequenceEqual(new[] { 1, 2 }))
+                {
+                    firstSliceStarted.SetResult();
+                    await releaseFirstSlice.Task;
+                }
+            },
+            options =>
+            {
+                options.BatchSize = 2;
+                options.MaxPendingRequests = 2;
+            });
+        var batcher = provider.GetRequiredService<IRequestBatcher<int>>();
+
+        var processing = batcher.ProcessAsync([1, 2, 3]);
+        await firstSliceStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.False(processing.IsCompleted);
+        releaseFirstSlice.SetResult();
+        await processing.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(2, handledBatches.Count);
+        Assert.Equal(new[] { 1, 2 }, handledBatches.ElementAt(0));
+        Assert.Equal(new[] { 3 }, handledBatches.ElementAt(1));
+    }
+
+    [Fact]
+    public async Task ProcessAsync_FailModeBatchExceedsCapacity_RejectsWithoutHandling()
     {
         var invocationCount = 0;
 
@@ -80,7 +121,11 @@ public sealed class RequestBatchSubmissionTests
                 Interlocked.Increment(ref invocationCount);
                 return ValueTask.CompletedTask;
             },
-            options => options.MaxPendingRequests = 2);
+            options =>
+            {
+                options.MaxPendingRequests = 2;
+                options.FullMode = RequestBatchFullMode.Fail;
+            });
         var batcher = provider.GetRequiredService<IRequestBatcher<int>>();
 
         var exception = await Assert.ThrowsAsync<RequestBatchQueueFullException>(
@@ -89,6 +134,83 @@ public sealed class RequestBatchSubmissionTests
         Assert.Equal(2, exception.Capacity);
         Assert.Equal(3, exception.RequestedCount);
         Assert.Equal(0, Volatile.Read(ref invocationCount));
+    }
+
+    [Fact]
+    public async Task ProcessAsync_WaitModeOversizedBatchCanceledAfterDispatch_WaitsForActiveHandler()
+    {
+        var firstSliceStarted = NewSource();
+        var releaseFirstSlice = NewSource();
+        var handledBatches = new ConcurrentQueue<int[]>();
+
+        await using var provider = CreateProvider<int>(
+            async (requests, _) =>
+            {
+                handledBatches.Enqueue(requests.ToArray());
+                firstSliceStarted.SetResult();
+                await releaseFirstSlice.Task;
+            },
+            options =>
+            {
+                options.BatchSize = 2;
+                options.MaxPendingRequests = 2;
+            });
+        var batcher = provider.GetRequiredService<IRequestBatcher<int>>();
+        var coordinator = provider.GetRequiredService<RequestBatchCoordinator<int>>();
+        using var cancellation = new CancellationTokenSource();
+
+        var processing = batcher.ProcessAsync([1, 2, 3], cancellation.Token);
+        await firstSliceStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        cancellation.Cancel();
+        var stopping = coordinator.StopAsync().AsTask();
+
+        Assert.False(processing.IsCompleted);
+        Assert.False(stopping.IsCompleted);
+
+        releaseFirstSlice.SetResult();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => processing.WaitAsync(TimeSpan.FromSeconds(5)));
+        await stopping.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(new[] { 1, 2 }, Assert.Single(handledBatches));
+    }
+
+    [Fact]
+    public async Task StopAsync_WaitModeOversizedBatch_DrainsAcceptedSlicesAndWaitingTail()
+    {
+        var firstRequestStarted = NewSource();
+        var releaseFirstRequest = NewSource();
+        var handledRequests = new ConcurrentQueue<int>();
+
+        await using var provider = CreateProvider<int>(
+            async (requests, _) =>
+            {
+                var request = Assert.Single(requests);
+                handledRequests.Enqueue(request);
+                if (request == 1)
+                {
+                    firstRequestStarted.SetResult();
+                    await releaseFirstRequest.Task;
+                }
+            },
+            options =>
+            {
+                options.BatchSize = 1;
+                options.MaxPendingRequests = 4;
+            });
+        var coordinator = provider.GetRequiredService<RequestBatchCoordinator<int>>();
+
+        var processing = coordinator.ProcessAsync([1, 2, 3, 4, 5]);
+        await firstRequestStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var stopping = coordinator.StopAsync().AsTask();
+
+        Assert.False(processing.IsCompleted);
+        Assert.False(stopping.IsCompleted);
+
+        releaseFirstRequest.SetResult();
+        await Task.WhenAll(processing, stopping).WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(new[] { 1, 2, 3, 4, 5 }, handledRequests);
     }
 
     [Fact]
@@ -368,6 +490,44 @@ public sealed class RequestBatchSubmissionTests
         }
 
         await processing.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
+    public async Task ProcessAsync_WaitModeOversizedPartitionedBatch_PreservesPerKeyOrder()
+    {
+        var handledRequests = new ConcurrentQueue<KeyedRequest>();
+
+        await using var provider = CreateProvider<KeyedRequest>(
+            (requests, _) =>
+            {
+                handledRequests.Enqueue(Assert.Single(requests));
+                return ValueTask.CompletedTask;
+            },
+            options =>
+            {
+                options.BatchSize = 1;
+                options.MaxConcurrency = 2;
+                options.MaxPendingRequests = 2;
+                options.UsePartitionKey(request => request.Key);
+            });
+        var batcher = provider.GetRequiredService<IRequestBatcher<KeyedRequest>>();
+        KeyedRequest[] requests =
+        [
+            new(1, 1),
+            new(2, 1),
+            new(1, 2),
+            new(2, 2),
+            new(1, 3),
+        ];
+
+        await batcher.ProcessAsync(requests).WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(
+            new[] { 1, 2, 3 },
+            handledRequests.Where(request => request.Key == 1).Select(request => request.Sequence));
+        Assert.Equal(
+            new[] { 1, 2 },
+            handledRequests.Where(request => request.Key == 2).Select(request => request.Sequence));
     }
 
     [Fact]

@@ -162,16 +162,11 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
             return Task.CompletedTask;
         }
 
-        if (requestArray.Length > _options.MaxPendingRequests)
-        {
-            return CreateQueueFullTask(requestArray.Length);
-        }
-
         return AcceptBatch(requestArray, cancellationToken);
     }
 
     /// <summary>
-    /// Stops accepting requests, drains all accepted requests, and then stops the consumers.
+    /// Stops accepting requests, drains all submitted requests, and then stops the consumers.
     /// Cancellation only cancels this wait; shutdown continues in the background.
     /// </summary>
     public ValueTask StopAsync(CancellationToken cancellationToken = default)
@@ -281,16 +276,6 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
         _pendingRequestCount += requestCount;
     }
 
-    private Task CreateQueueFullTask(int requestCount)
-    {
-        _logger.QueueFull(
-            _requestTypeName,
-            requestCount,
-            _options.MaxPendingRequests);
-        return Task.FromException(
-            new RequestBatchQueueFullException(_options.MaxPendingRequests, requestCount));
-    }
-
     private Task GetOrStartStopTaskLocked()
     {
         if (_stopTask is not null)
@@ -311,7 +296,6 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
             Volatile.Read(ref _pendingRequestCount));
         try
         {
-            await _producerCancellation.CancelAsync().ConfigureAwait(false);
             await pendingRequestsDrained.ConfigureAwait(false);
             await _consumerCancellation.CancelAsync().ConfigureAwait(false);
             await Task.WhenAll(_consumerTasks).ConfigureAwait(false);
@@ -370,6 +354,9 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
         {
             pendingRequest.FailWhileQueued(exception);
         }
+
+        // No consumer can reliably release capacity after a consumer loop fails.
+        _producerCancellation.Cancel();
     }
 
     private static ObjectDisposedException CreateStoppedException() =>

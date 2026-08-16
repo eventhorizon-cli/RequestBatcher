@@ -22,8 +22,9 @@ public sealed class RequestBatchOptions<TRequest>
     public int MaxConcurrency { get; set; } = 1;
 
     /// <summary>
-    /// Gets or sets the maximum number of accepted requests that have not finished processing and the maximum number
-    /// of requests in one explicit batch submission.
+    /// Gets or sets the bounded capacity shared by queued and currently processing requests.
+    /// In <see cref="RequestBatchFullMode.Wait"/> mode, an explicit submission may exceed this value and is admitted
+    /// in consecutive capacity-sized slices. <see cref="RequestBatchFullMode.Fail"/> rejects an oversized submission.
     /// </summary>
     public int MaxPendingRequests { get; set; } = 8192;
 

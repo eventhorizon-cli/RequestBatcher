@@ -14,9 +14,13 @@ multiple queued requests as an `IReadOnlyList<TRequest>`.
 ## When to Use It
 
 Use RequestBatcher for independent database, cache, or downstream operations that benefit from a batch API. It also
-fits short traffic bursts that need bounded pending work, related requests that benefit from partition-local order,
-and work where caller cancellation should remove only requests that have not yet been dispatched. Dispatched work is
-allowed to finish independently of that caller.
+fits short traffic bursts that need bounded internal queue capacity and downstream concurrency, related requests that
+benefit from partition-local order, and work where caller cancellation should remove only requests that have not yet
+been dispatched. Dispatched work is allowed to finish independently of that caller.
+
+For database updates, if partial success within one handler invocation would leave inconsistent state, the handler
+should execute that invocation in one transaction. RequestBatcher propagates the handler outcome but cannot roll back
+writes that have already been committed.
 
 ## When Not to Use It
 
@@ -97,8 +101,10 @@ When requests already exist as a group, submit them together:
 await batcher.ProcessAsync(orderWriteRequests, cancellationToken);
 ```
 
-This overload snapshots and admits the group as one capacity unit, then waits for every request. It does not force one
-handler call; the group may still be split by `BatchSize` or partition routing.
+This overload snapshots the group and submits it as one producer operation, then waits for every request. In `Wait`
+mode, an oversized group enters the queue as consecutive capacity-sized slices. In `Fail` mode, the whole group must
+fit immediately. The submission does not force one handler call; it may still be split by `BatchSize` or partition
+routing.
 
 **An explicit group is not a partition boundary.** With more than one partition, every item is routed independently;
 the group is guaranteed to stay in one partition only when `MaxConcurrency = 1`, or when every item produces the same
@@ -108,7 +114,7 @@ partition key.
 
 | Behavior | Single request | Explicit group |
 | --- | --- | --- |
-| Capacity | Reserves one request slot. | Reserves the whole group atomically. |
+| Capacity | Reserves one request slot. | `Wait` admits oversized groups in consecutive capacity-sized slices; `Fail` requires the whole group to fit immediately. |
 | Routing | Routes one request. | Routes every item independently and can span partitions. |
 | Handler calls | May share a handler batch with other queued requests. | Can split by partition and `BatchSize`; it is not a handler-batch boundary. |
 | Completion | Represents this request's actual outcome. | Waits for every item in the submission. |
@@ -119,10 +125,14 @@ partition key.
 
 - A handler batch contains at most `BatchSize` requests that are already queued.
 - RequestBatcher does not add a fixed delay or wait for a minimum batch size.
-- `MaxPendingRequests` bounds accepted work. `FullMode` either waits for capacity or rejects immediately.
+- `MaxPendingRequests` is the internal BufferQueue capacity shared by queued and currently handled requests. It does
+  not limit the size of one explicit submission or the number of callers waiting for capacity.
+- `Wait` admits a group no larger than the capacity atomically and splits a larger group into consecutive
+  capacity-sized slices. `Fail` rejects the whole submission unless it fits immediately.
 - Caller cancellation removes a request only before handler dispatch. After dispatch, the caller observes the real
   handler outcome.
-- Accepted requests are drained during shutdown, but they cannot be recovered after a process failure.
+- Shutdown rejects new calls and drains every submission that started before shutdown, including submissions waiting
+  for capacity. Requests still cannot be recovered after a process failure.
 
 ## Routing Modes
 

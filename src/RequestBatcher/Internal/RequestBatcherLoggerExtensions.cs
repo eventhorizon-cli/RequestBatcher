@@ -78,7 +78,7 @@ internal static partial class RequestBatcherLoggerExtensions
     [LoggerMessage(
         EventId = 1007,
         Level = LogLevel.Debug,
-        Message = "Stopping request batcher for {RequestType}; draining {PendingRequestCount} accepted requests.")]
+        Message = "Stopping request batcher for {RequestType}; draining {PendingRequestCount} submitted requests.")]
     public static partial void CoordinatorStopping(
         this ILogger logger,
         string requestType,
