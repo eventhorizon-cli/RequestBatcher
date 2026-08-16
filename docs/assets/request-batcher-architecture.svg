@@ -1,136 +1,71 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="2100" height="700" viewBox="0 0 2100 700"
-     role="img" aria-labelledby="title description">
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="800" viewBox="0 0 1800 800" role="img" aria-labelledby="title description">
   <title id="title">RequestBatcher architecture</title>
-  <desc id="description">
-    Three independent application callers concurrently submit one request each. RequestBatcher queues those requests
-    by partition, coalesces the queued requests in one partition into a handler batch, and completes one Task for each
-    accepted request with the handler outcome.
-  </desc>
+  <desc id="description">Three concurrent callers submit requests from the left. RequestBatcher coordinates and queues requests by partition, then a batch handler invokes a downstream operation and completes every accepted request's Task.</desc>
   <defs>
-    <marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="3" orient="auto"
-            markerUnits="strokeWidth">
-      <path d="M0,0 L0,6 L9,3 z" fill="#596773" />
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#596773"/>
     </marker>
     <style>
-      text {
-        font-family: Arial, Helvetica, sans-serif;
-        letter-spacing: 0;
-      }
-      .boundary {
-        fill: #ffffff;
-        stroke: #aeb8c2;
-        stroke-width: 1.5;
-      }
-      .client {
-        fill: #e9f6f1;
-        stroke: #2f6f5e;
-      }
-      .gateway {
-        fill: #eaf2ff;
-        stroke: #3567a7;
-      }
-      .core {
-        fill: #edf1f5;
-        stroke: #596773;
-      }
-      .handler {
-        fill: #f4edfb;
-        stroke: #75529b;
-      }
-      .storage {
-        fill: #fff4d6;
-        stroke: #8a6a1d;
-      }
-      .node {
-        stroke-width: 2;
-        rx: 6;
-      }
-      .node-label {
-        fill: #303b44;
-        font-size: 21px;
-        text-anchor: middle;
-      }
-      .boundary-label {
-        fill: #303b44;
-        font-size: 22px;
-        font-weight: 600;
-        text-anchor: middle;
-      }
-      .edge {
-        fill: none;
-        stroke: #596773;
-        stroke-width: 2;
-        marker-end: url(#arrow);
-      }
-      .result-edge {
-        fill: none;
-        stroke: #596773;
-        stroke-width: 1.75;
-        stroke-dasharray: 7 6;
-        marker-end: url(#arrow);
-      }
-      .edge-label {
-        fill: #303b44;
-        font-size: 16px;
-        text-anchor: middle;
-      }
+      .group { fill: #ffffff; stroke: #aab7c4; stroke-width: 2; }
+      .client { fill: #e9f6f1; stroke: #2f6f5e; stroke-width: 2.5; }
+      .gateway { fill: #eaf2ff; stroke: #3567a7; stroke-width: 2.5; }
+      .core { fill: #edf1f5; stroke: #596773; stroke-width: 2.5; }
+      .handler { fill: #f4edfb; stroke: #75529b; stroke-width: 2.5; }
+      .storage { fill: #fff4d6; stroke: #8a6a1d; stroke-width: 2.5; }
+      .edge { fill: none; stroke: #596773; stroke-width: 2.5; marker-end: url(#arrow); }
+      .result-edge { fill: none; stroke: #596773; stroke-width: 2.5; stroke-dasharray: 7 6; marker-end: url(#arrow); }
+      .group-title { font: 700 29px Arial, Helvetica, sans-serif; fill: #202a33; text-anchor: middle; }
+      .node-text { font: 600 25px Arial, Helvetica, sans-serif; fill: #27343d; text-anchor: middle; }
+      .edge-text { font: 600 22px Arial, Helvetica, sans-serif; fill: #4c5a66; text-anchor: middle; }
     </style>
   </defs>
 
-  <rect width="2100" height="700" fill="#ffffff" />
+  <rect width="1800" height="800" fill="#ffffff"/>
 
-  <rect class="boundary" x="25" y="45" width="420" height="610" />
-  <text class="boundary-label" x="235" y="82">Concurrent application callers</text>
+  <rect class="group" x="50" y="50" width="310" height="700"/>
+  <text class="group-title" x="205" y="100">Concurrent callers</text>
+  <rect class="client" x="75" y="145" width="240" height="112"/>
+  <text class="node-text" x="195" y="194">Caller A</text>
+  <text class="node-text" x="195" y="232">Request A</text>
+  <rect class="client" x="75" y="344" width="240" height="112"/>
+  <text class="node-text" x="195" y="393">Caller B</text>
+  <text class="node-text" x="195" y="431">Request B</text>
+  <rect class="client" x="75" y="543" width="240" height="112"/>
+  <text class="node-text" x="195" y="592">Caller C</text>
+  <text class="node-text" x="195" y="630">Request C</text>
 
-  <rect class="node client" x="75" y="135" width="320" height="100" />
-  <text class="node-label" x="235" y="173">Caller A</text>
-  <text class="node-label" x="235" y="207">ProcessAsync(request A)</text>
+  <rect class="group" x="530" y="50" width="480" height="700"/>
+  <text class="group-title" x="770" y="100">RequestBatcher</text>
+  <rect class="gateway" x="640" y="145" width="260" height="115"/>
+  <text class="node-text" x="770" y="193">Request batch</text>
+  <text class="node-text" x="770" y="231">coordinator</text>
+  <rect class="core" x="625" y="365" width="290" height="115"/>
+  <text class="node-text" x="770" y="413">Internal BufferQueue</text>
+  <text class="node-text" x="770" y="451">per-partition routing</text>
+  <rect class="core" x="610" y="570" width="320" height="120"/>
+  <text class="node-text" x="770" y="610">One Task per</text>
+  <text class="node-text" x="770" y="642">accepted request</text>
+  <text class="node-text" x="770" y="674">success / failure</text>
 
-  <rect class="node client" x="75" y="300" width="320" height="100" />
-  <text class="node-label" x="235" y="338">Caller B</text>
-  <text class="node-label" x="235" y="372">ProcessAsync(request B)</text>
+  <rect class="group" x="1170" y="50" width="580" height="700"/>
+  <text class="group-title" x="1460" y="100">Batch processing</text>
+  <rect class="handler" x="1300" y="365" width="320" height="115"/>
+  <text class="node-text" x="1460" y="413">Batch handler</text>
+  <text class="node-text" x="1460" y="451">up to BatchSize items</text>
+  <rect class="storage" x="1300" y="565" width="320" height="115"/>
+  <text class="node-text" x="1460" y="613">Database, cache</text>
+  <text class="node-text" x="1460" y="651">or bulk API</text>
 
-  <rect class="node client" x="75" y="465" width="320" height="100" />
-  <text class="node-label" x="235" y="503">Caller C</text>
-  <text class="node-label" x="235" y="537">ProcessAsync(request C)</text>
-
-  <rect class="boundary" x="510" y="45" width="890" height="610" />
-  <text class="boundary-label" x="955" y="82">RequestBatcher</text>
-
-  <rect class="node gateway" x="575" y="260" width="235" height="120" />
-  <text class="node-label" x="692" y="307">RequestBatch</text>
-  <text class="node-label" x="692" y="341">Coordinator</text>
-
-  <rect class="node core" x="970" y="235" width="330" height="170" />
-  <text class="node-label" x="1135" y="278">Internal BufferQueue</text>
-  <text class="node-label" x="1135" y="314">Memory topic</text>
-  <text class="node-label" x="1135" y="350">per-partition routing</text>
-
-  <rect class="node core" x="975" y="490" width="320" height="105" />
-  <text class="node-label" x="1135" y="531">One Task per accepted request</text>
-  <text class="node-label" x="1135" y="565">success / error</text>
-
-  <rect class="node handler" x="1470" y="245" width="280" height="150" />
-  <text class="node-label" x="1610" y="286">Batch handler</text>
-  <text class="node-label" x="1610" y="322">coalesced A + B + C</text>
-  <text class="node-label" x="1610" y="358">up to BatchSize</text>
-
-  <rect class="node storage" x="1830" y="260" width="230" height="120" />
-  <text class="node-label" x="1945" y="300">Database, cache,</text>
-  <text class="node-label" x="1945" y="334">or bulk API</text>
-
-  <path class="edge" d="M395 185 H485 V285 H575" />
-  <path class="edge" d="M395 350 H575" />
-  <path class="edge" d="M395 515 H485 V355 H575" />
-  <path class="edge" d="M810 320 H970" />
-  <path class="edge" d="M1300 320 H1470" />
-  <path class="edge" d="M1750 320 H1830" />
-  <path class="result-edge" d="M1610 395 V542 H1295" />
-
-  <text class="edge-label" x="445" y="168">one request</text>
-  <text class="edge-label" x="480" y="337">one request</text>
-  <text class="edge-label" x="445" y="542">one request</text>
-  <text class="edge-label" x="890" y="302">enqueue</text>
-  <text class="edge-label" x="1790" y="304">batch operation</text>
-  <text class="edge-label" x="1500" y="531">actual outcome</text>
+  <path class="edge" d="M 315 201 C 450 201, 540 202, 640 202"/>
+  <path class="edge" d="M 315 400 C 475 400, 525 225, 640 225"/>
+  <path class="edge" d="M 315 599 C 465 599, 535 247, 640 247"/>
+  <text class="edge-text" x="455" y="320">one request</text>
+  <path class="edge" d="M 770 260 L 770 365"/>
+  <text class="edge-text" x="815" y="322">enqueue</text>
+  <path class="edge" d="M 915 422 L 1300 422"/>
+  <text class="edge-text" x="1107" y="392">batch pull</text>
+  <path class="edge" d="M 1460 480 L 1460 565"/>
+  <text class="edge-text" x="1515" y="531">batch operation</text>
+  <path class="result-edge" d="M 1300 457 C 1190 475, 1110 630, 930 630"/>
+  <text class="edge-text" x="1090" y="595">actual outcome</text>
 </svg>
