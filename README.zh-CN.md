@@ -126,6 +126,9 @@ await batcher.ProcessAsync(orderWriteRequests, cancellationToken);
 RequestBatcher 会先取得请求序列的快照，再把它作为一个整体申请容量。返回的 `Task` 会等待这次提交中的所有
 请求。一次提交不等于一次处理器调用：请求仍可能按 `BatchSize` 或分区路由拆成多个处理批次。
 
+> **显式批量提交不是分区边界。** 配置多个分区后，RequestBatcher 会逐项路由，而不会把整次提交放进一个分区。
+> 只有 `MaxConcurrency = 1`，或者每项计算出相同的分区键时，才保证整组请求落在同一个分区。
+
 ## 单次提交与批量提交
 
 本文中的**提交**指调用方执行一次 `ProcessAsync`；**处理批次**指一次 `HandleAsync` 收到的

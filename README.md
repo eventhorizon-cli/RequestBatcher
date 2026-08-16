@@ -136,6 +136,10 @@ RequestBatcher snapshots the sequence and admits it as one capacity unit. The re
 from that submission. This does not force the sequence into one handler call: it may still be split by `BatchSize` or
 partition routing.
 
+> **An explicit group is not a partition boundary.** With more than one partition, RequestBatcher routes every item
+> independently; it does not send the whole submission to one partition. The group is guaranteed to stay in one
+> partition only when `MaxConcurrency = 1`, or when every item produces the same partition key.
+
 ## Single and Group Submission
 
 In this documentation, a **submission** is one caller invocation of `ProcessAsync`. A **handler batch** is the

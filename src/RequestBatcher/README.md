@@ -95,6 +95,10 @@ await batcher.ProcessAsync(orderWriteRequests, cancellationToken);
 This overload snapshots and admits the group as one capacity unit, then waits for every request. It does not force one
 handler call; the group may still be split by `BatchSize` or partition routing.
 
+**An explicit group is not a partition boundary.** With more than one partition, every item is routed independently;
+the group is guaranteed to stay in one partition only when `MaxConcurrency = 1`, or when every item produces the same
+partition key.
+
 ## Submission Behavior
 
 | Behavior | Single request | Explicit group |
