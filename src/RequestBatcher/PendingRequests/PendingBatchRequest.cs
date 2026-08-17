@@ -1,4 +1,4 @@
-namespace RequestBatcher.Internal;
+namespace RequestBatcher.PendingRequests;
 
 internal sealed class PendingBatchRequest<TRequest>
 {

@@ -1,4 +1,4 @@
-namespace RequestBatcher.Internal;
+namespace RequestBatcher.Scheduling;
 
 internal sealed class ConsumerTaskMonitor
 {

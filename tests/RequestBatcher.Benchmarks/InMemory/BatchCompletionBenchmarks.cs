@@ -2,7 +2,7 @@ using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Columns;
 using BenchmarkDotNet.Engines;
 using BenchmarkDotNet.Order;
-using RequestBatcher.Internal;
+using RequestBatcher.PendingRequests;
 
 namespace RequestBatcher.Benchmarks.InMemory;
 

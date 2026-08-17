@@ -81,7 +81,7 @@ public sealed class RequestBatchCoordinatorTests
     }
 
     [Fact]
-    public async Task ProcessAsync_MultiplePartitions_LimitsParallelHandlerInvocations()
+    public async Task ProcessAsync_MaxConcurrency_LimitsParallelHandlerInvocations()
     {
         const int concurrency = 3;
         var allPartitionsStarted = NewSource();
@@ -119,34 +119,24 @@ public sealed class RequestBatchCoordinatorTests
     }
 
     [Fact]
-    public async Task ProcessAsync_PartitionKey_SerializesEqualKeysWhileDifferentKeysProceed()
+    public async Task ProcessAsync_PartitionKey_EqualKeysCanExecuteConcurrently()
     {
         var firstKeyStarted = NewSource();
         var secondKeyStarted = NewSource();
-        var differentKeyStarted = NewSource();
         var releaseFirstKey = NewSource();
-        var firstKeySequences = new ConcurrentQueue<int>();
 
         await using var provider = CreateProvider<KeyedRequest>(async (requests, _) =>
         {
             var request = requests[0];
-            if (request.Key == 1)
+            if (request.Sequence == 1)
             {
-                firstKeySequences.Enqueue(request.Sequence);
-                if (request.Sequence == 1)
-                {
-                    firstKeyStarted.SetResult();
-                    await releaseFirstKey.Task;
-                }
-                else
-                {
-                    secondKeyStarted.SetResult();
-                }
-
-                return;
+                firstKeyStarted.SetResult();
+                await releaseFirstKey.Task;
             }
-
-            differentKeyStarted.SetResult();
+            else
+            {
+                secondKeyStarted.SetResult();
+            }
         }, options =>
         {
             options.BatchSize = 1;
@@ -159,14 +149,11 @@ public sealed class RequestBatchCoordinatorTests
         await firstKeyStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         var secondForSameKey = coordinator.ProcessAsync(new KeyedRequest(1, 2));
-        var requestForDifferentKey = coordinator.ProcessAsync(new KeyedRequest(2, 1));
 
         try
         {
-            await differentKeyStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
-            await requestForDifferentKey.WaitAsync(TimeSpan.FromSeconds(5));
-            Assert.False(secondKeyStarted.Task.IsCompleted);
-            Assert.False(secondForSameKey.IsCompleted);
+            await secondKeyStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.False(first.IsCompleted);
         }
         finally
         {
@@ -174,9 +161,6 @@ public sealed class RequestBatchCoordinatorTests
         }
 
         await Task.WhenAll(first, secondForSameKey).WaitAsync(TimeSpan.FromSeconds(5));
-
-        Assert.True(secondKeyStarted.Task.IsCompleted);
-        Assert.Equal(new[] { 1, 2 }, firstKeySequences);
     }
 
     [Fact]
@@ -335,12 +319,13 @@ public sealed class RequestBatchCoordinatorTests
 
         var first = coordinator.ProcessAsync(1);
         await firstBatchStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        var second = coordinator.ProcessAsync(2);
+        var queued = coordinator.ProcessAsync(2);
+        var waiting = coordinator.ProcessAsync(3);
 
-        Assert.False(second.IsCompleted);
+        Assert.False(waiting.IsCompleted);
 
         releaseFirstBatch.SetResult();
-        await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(5));
+        await Task.WhenAll(first, queued, waiting).WaitAsync(TimeSpan.FromSeconds(5));
     }
 
     [Fact]
@@ -358,18 +343,19 @@ public sealed class RequestBatchCoordinatorTests
 
         var first = coordinator.ProcessAsync(1);
         await firstBatchStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var queued = coordinator.ProcessAsync(2);
         using var cancellation = new CancellationTokenSource();
-        var second = coordinator.ProcessAsync(2, cancellation.Token);
+        var canceled = coordinator.ProcessAsync(3, cancellation.Token);
         cancellation.Cancel();
 
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => second);
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => canceled);
 
         releaseFirstBatch.SetResult();
-        await first.WaitAsync(TimeSpan.FromSeconds(5));
+        await Task.WhenAll(first, queued).WaitAsync(TimeSpan.FromSeconds(5));
     }
 
     [Fact]
-    public async Task ProcessAsync_FailModeAtCapacity_RejectsImmediately()
+    public async Task ProcessAsync_FailModeQueueFull_RejectsImmediately()
     {
         var firstBatchStarted = NewSource();
         var releaseFirstBatch = NewSource();
@@ -387,13 +373,14 @@ public sealed class RequestBatchCoordinatorTests
 
         var first = coordinator.ProcessAsync(1);
         await firstBatchStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        var rejected = coordinator.ProcessAsync(2);
+        var queued = coordinator.ProcessAsync(2);
+        var rejected = coordinator.ProcessAsync(3);
 
         var exception = await Assert.ThrowsAsync<RequestBatchQueueFullException>(() => rejected);
         Assert.Equal(1, exception.Capacity);
 
         releaseFirstBatch.SetResult();
-        await first.WaitAsync(TimeSpan.FromSeconds(5));
+        await Task.WhenAll(first, queued).WaitAsync(TimeSpan.FromSeconds(5));
     }
 
     [Fact]
@@ -418,16 +405,18 @@ public sealed class RequestBatchCoordinatorTests
         var first = coordinator.ProcessAsync(1);
         await handlerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
         var second = coordinator.ProcessAsync(2);
+        var third = coordinator.ProcessAsync(3);
         var stopping = coordinator.StopAsync().AsTask();
 
         await Assert.ThrowsAsync<ObjectDisposedException>(
-            () => coordinator.ProcessAsync(3));
+            () => coordinator.ProcessAsync(4));
         Assert.False(second.IsCompleted);
+        Assert.False(third.IsCompleted);
         Assert.False(stopping.IsCompleted);
 
         releaseHandler.SetResult();
-        await Task.WhenAll(first, second, stopping).WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.Equal(new[] { 1, 2 }, handledRequests);
+        await Task.WhenAll(first, second, third, stopping).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(new[] { 1, 2, 3 }, handledRequests.Order());
     }
 
     [Fact]
@@ -541,6 +530,23 @@ public sealed class RequestBatchCoordinatorTests
         Assert.Equal(4, options.MaxConcurrency);
         Assert.Equal(512, options.MaxPendingRequests);
         Assert.Equal(RequestBatchFullMode.Fail, options.FullMode);
+    }
+
+    [Theory]
+    [InlineData(1, 12, 1)]
+    [InlineData(4, 12, 4)]
+    [InlineData(64, 12, 12)]
+    [InlineData(4, 0, 1)]
+    public void GetPartitionCount_MaxConcurrencyAndProcessorCount_AppliesBounds(
+        int maxConcurrency,
+        int processorCount,
+        int expected)
+    {
+        var actual = RequestBatcherServiceCollectionExtensions.GetPartitionCount(
+            maxConcurrency,
+            processorCount);
+
+        Assert.Equal(expected, actual);
     }
 
     [Theory]

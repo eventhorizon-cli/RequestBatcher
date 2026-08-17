@@ -21,7 +21,7 @@ internal sealed class PriceUpdateHandler(NpgsqlDataSource dataSource)
         IReadOnlyList<PriceUpdate> requests,
         CancellationToken cancellationToken = default)
     {
-        // Partition routing serializes equal keys across batches; this merges duplicates inside the current batch.
+        // Routing improves locality; the version predicate protects correctness when equal-key batches overlap.
         var latestUpdates = requests
             .GroupBy(request => request.ProductId)
             .Select(group => group.MaxBy(request => request.Version)!)

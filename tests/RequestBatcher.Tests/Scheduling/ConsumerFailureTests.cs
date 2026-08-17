@@ -2,9 +2,9 @@ using System.Runtime.CompilerServices;
 using BufferQueue;
 using Microsoft.Extensions.Options;
 using Moq;
-using RequestBatcher.Internal;
+using RequestBatcher.PendingRequests;
 
-namespace RequestBatcher.Tests.Internal;
+namespace RequestBatcher.Tests.Scheduling;
 
 public sealed class ConsumerFailureTests
 {
@@ -28,14 +28,14 @@ public sealed class ConsumerFailureTests
                     options.TopicName == RequestBatchCoordinator<int>.TopicName &&
                     options.GroupName == RequestBatchCoordinator<int>.ConsumerGroupName &&
                     options.BatchSize == 128 &&
-                    !options.AutoCommit),
+                    options.AutoCommit),
                 1))
             .Returns([consumer]);
 
         var coordinator = new RequestBatchCoordinator<int>(
             bufferQueue.Object,
             (_, _) => ValueTask.CompletedTask,
-            Options.Create(new RequestBatchOptions<int>()));
+            Options.Create(new RequestBatchOptions<int> { MaxConcurrency = 64 }));
 
         var processing = coordinator.ProcessAsync(42);
 

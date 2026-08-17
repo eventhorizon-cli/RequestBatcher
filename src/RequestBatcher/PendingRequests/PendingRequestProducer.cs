@@ -1,7 +1,8 @@
 using BufferQueue;
 using Microsoft.Extensions.Logging;
+using RequestBatcher.Diagnostics;
 
-namespace RequestBatcher.Internal;
+namespace RequestBatcher.PendingRequests;
 
 internal sealed class PendingRequestProducer<TRequest>(
     IBufferProducer<PendingBatchRequest<TRequest>> producer,

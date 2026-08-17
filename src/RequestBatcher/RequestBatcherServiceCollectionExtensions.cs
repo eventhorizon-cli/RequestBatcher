@@ -3,7 +3,7 @@ using BufferQueue.Memory;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using RequestBatcher.Internal;
+using RequestBatcher.PendingRequests;
 
 namespace RequestBatcher;
 
@@ -129,7 +129,9 @@ public static class RequestBatcherServiceCollectionExtensions
                 memory.AddTopic<PendingBatchRequest<TRequest>>(topic =>
                 {
                     topic.TopicName = RequestBatchCoordinator<TRequest>.TopicName;
-                    topic.PartitionNumber = options.MaxConcurrency;
+                    topic.PartitionNumber = GetPartitionCount(
+                        options.MaxConcurrency,
+                        Environment.ProcessorCount);
                     topic.SegmentSize = Math.Max(16, options.BatchSize);
                     topic.BoundedCapacity = (ulong)options.MaxPendingRequests;
                     topic.FullMode = options.FullMode switch
@@ -163,6 +165,9 @@ public static class RequestBatcherServiceCollectionExtensions
             await handler.HandleAsync(requests, cancellationToken).ConfigureAwait(false);
         }
     }
+
+    internal static int GetPartitionCount(int maxConcurrency, int processorCount) =>
+        Math.Min(maxConcurrency, Math.Max(1, processorCount));
 
     private static void ValidateHandlerLifetime(ServiceLifetime handlerLifetime)
     {

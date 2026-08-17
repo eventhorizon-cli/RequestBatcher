@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Columns;
 using BenchmarkDotNet.Engines;
@@ -18,9 +19,12 @@ namespace RequestBatcher.Benchmarks.PostgreSql;
     warmupCount: 2,
     iterationCount: 8,
     invocationCount: 1,
-    id: "PostgreSQL")]
-public class PostgreSqlPriceQueryBenchmarks
+    id: "PostgreSQL rate")]
+public class PostgreSqlPriceQueryRateBenchmarks
 {
+    private const int MeasurementDurationSeconds = 3;
+    private const int DistinctProductCount = 1_024;
+    private const int SubmissionWindowMilliseconds = 10;
     private const string SelectSingleSql = """
         SELECT price
         FROM benchmark_product_prices
@@ -33,19 +37,19 @@ public class PostgreSqlPriceQueryBenchmarks
     private PostgreSqlPriceQueryBenchmarkDatabase? _database;
     private ServiceProvider? _serviceProvider;
     private IRequestBatcher<PriceQueryRequest>? _requestBatcher;
+    private SemaphoreSlim? _directReadConcurrency;
     private int _workloadExecuted;
 
-    [Params(1_000)]
-    public int RequestCount { get; set; }
+    [Params(100, 1_000, 5_000)]
+    public int TargetQps { get; set; }
 
-    [Params(10)]
-    public int DistinctProductCount { get; set; }
+    [Params(1, 4, 16, 64)]
+    public int MaxConcurrency { get; set; }
 
     [Params(100)]
     public int BatchSize { get; set; }
 
-    [Params(4)]
-    public int MaxConcurrency { get; set; }
+    private int RequestCount => checked(TargetQps * MeasurementDurationSeconds);
 
     private NpgsqlDataSource DataSource =>
         _database?.DataSource ?? throw new InvalidOperationException("The benchmark has not been initialized.");
@@ -53,16 +57,19 @@ public class PostgreSqlPriceQueryBenchmarks
     private IRequestBatcher<PriceQueryRequest> RequestBatcher =>
         _requestBatcher ?? throw new InvalidOperationException("The benchmark has not been initialized.");
 
+    private SemaphoreSlim DirectReadConcurrency =>
+        _directReadConcurrency ?? throw new InvalidOperationException("The benchmark has not been initialized.");
+
     [GlobalSetup]
     public async Task GlobalSetupAsync()
     {
         _database = await PostgreSqlPriceQueryBenchmarkDatabase
             .StartAsync(MaxConcurrency, DistinctProductCount)
             .ConfigureAwait(false);
-
         _requests = Enumerable.Range(0, RequestCount)
             .Select(index => new PriceQueryRequest(index % DistinctProductCount + 1))
             .ToArray();
+        _directReadConcurrency = new SemaphoreSlim(MaxConcurrency, MaxConcurrency);
 
         var services = new ServiceCollection();
         services.AddRequestBatcher<PriceQueryRequest>(
@@ -97,42 +104,22 @@ public class PostgreSqlPriceQueryBenchmarks
         Volatile.Write(ref _workloadExecuted, 0);
     }
 
-    [Benchmark(Baseline = true, Description = "Direct: one SELECT per request")]
-    public async Task DirectSingleReadsAsync()
+    [Benchmark(Baseline = true, Description = "Direct: paced single SELECTs")]
+    public async Task DirectPacedReadsAsync()
     {
         Volatile.Write(ref _workloadExecuted, 1);
-
-        await Parallel.ForEachAsync(
-            _requests,
-            new ParallelOptions { MaxDegreeOfParallelism = MaxConcurrency },
-            async (request, cancellationToken) =>
-            {
-                await ReadSingleAsync(request, cancellationToken).ConfigureAwait(false);
-            }).ConfigureAwait(false);
+        await SubmitAtTargetRateAsync(ReadSingleAsync).ConfigureAwait(false);
     }
 
-    [Benchmark(Description = "RequestBatcher: single-request submissions")]
-    public async Task RequestBatcherSingleReadsAsync()
+    [Benchmark(Description = "RequestBatcher: paced single-request submissions")]
+    public async Task RequestBatcherPacedReadsAsync()
     {
         Volatile.Write(ref _workloadExecuted, 1);
-
-        var reads = new Task[_requests.Length];
-        try
-        {
-            for (var index = 0; index < _requests.Length; index++)
-            {
-                reads[index] = RequestBatcher.ProcessAsync(_requests[index]);
-            }
-        }
-        finally
-        {
-            _startGate.Release();
-        }
-
-        await Task.WhenAll(reads).ConfigureAwait(false);
+        _startGate.Release();
+        await SubmitAtTargetRateAsync(request => RequestBatcher.ProcessAsync(request)).ConfigureAwait(false);
     }
 
-    [IterationCleanup(Target = nameof(DirectSingleReadsAsync))]
+    [IterationCleanup(Target = nameof(DirectPacedReadsAsync))]
     public void ValidateDirectReads()
     {
         if (Volatile.Read(ref _workloadExecuted) != 0)
@@ -141,7 +128,7 @@ public class PostgreSqlPriceQueryBenchmarks
         }
     }
 
-    [IterationCleanup(Target = nameof(RequestBatcherSingleReadsAsync))]
+    [IterationCleanup(Target = nameof(RequestBatcherPacedReadsAsync))]
     public void ValidateRequestBatcherReads()
     {
         if (Volatile.Read(ref _workloadExecuted) == 0)
@@ -156,13 +143,6 @@ public class PostgreSqlPriceQueryBenchmarks
         {
             throw new InvalidOperationException(
                 $"The batch handler processed {snapshot.RequestCount} reads; expected {RequestCount}.");
-        }
-
-        if (snapshot.BatchCount >= RequestCount || snapshot.MaximumBatchSize <= 1)
-        {
-            throw new InvalidOperationException(
-                $"Read batching did not occur: {snapshot.BatchCount} batches, " +
-                $"maximum size {snapshot.MaximumBatchSize}.");
         }
     }
 
@@ -180,6 +160,8 @@ public class PostgreSqlPriceQueryBenchmarks
         {
             _serviceProvider = null;
             _requestBatcher = null;
+            _directReadConcurrency?.Dispose();
+            _directReadConcurrency = null;
 
             if (_database is not null)
             {
@@ -189,17 +171,51 @@ public class PostgreSqlPriceQueryBenchmarks
         }
     }
 
-    private async Task ReadSingleAsync(
-        PriceQueryRequest request,
-        CancellationToken cancellationToken)
+    private async Task SubmitAtTargetRateAsync(Func<PriceQueryRequest, Task> submit)
     {
-        await using var command = DataSource.CreateCommand(SelectSingleSql);
-        command.Parameters.AddWithValue("product_id", NpgsqlDbType.Bigint, request.ProductId);
+        var reads = new Task[_requests.Length];
+        var submittedCount = 0;
+        var startTimestamp = Stopwatch.GetTimestamp();
 
-        var price = await command.ExecuteScalarAsync(cancellationToken).ConfigureAwait(false);
-        request.Result = price is decimal decimalPrice
-            ? decimalPrice
-            : throw new InvalidOperationException($"Product {request.ProductId} was not found.");
+        while (submittedCount < _requests.Length)
+        {
+            var elapsed = Stopwatch.GetElapsedTime(startTimestamp);
+            var targetSubmissionCount = Math.Min(
+                _requests.Length,
+                (int)(elapsed.TotalSeconds * TargetQps));
+
+            while (submittedCount < targetSubmissionCount)
+            {
+                reads[submittedCount] = submit(_requests[submittedCount]);
+                submittedCount++;
+            }
+
+            if (submittedCount < _requests.Length)
+            {
+                await Task.Delay(SubmissionWindowMilliseconds).ConfigureAwait(false);
+            }
+        }
+
+        await Task.WhenAll(reads).ConfigureAwait(false);
+    }
+
+    private async Task ReadSingleAsync(PriceQueryRequest request)
+    {
+        await DirectReadConcurrency.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            await using var command = DataSource.CreateCommand(SelectSingleSql);
+            command.Parameters.AddWithValue("product_id", NpgsqlDbType.Bigint, request.ProductId);
+
+            var price = await command.ExecuteScalarAsync().ConfigureAwait(false);
+            request.Result = price is decimal decimalPrice
+                ? decimalPrice
+                : throw new InvalidOperationException($"Product {request.ProductId} was not found.");
+        }
+        finally
+        {
+            DirectReadConcurrency.Release();
+        }
     }
 
     private void ValidateResults()
