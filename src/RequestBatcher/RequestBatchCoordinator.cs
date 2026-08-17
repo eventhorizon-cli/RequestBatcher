@@ -3,7 +3,9 @@ using BufferQueue;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using RequestBatcher.Internal;
+using RequestBatcher.Diagnostics;
+using RequestBatcher.PendingRequests;
+using RequestBatcher.Scheduling;
 
 namespace RequestBatcher;
 
@@ -28,8 +30,9 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
     private readonly PendingRequestProducer<TRequest> _producer;
     private readonly CancellationTokenSource _producerCancellation = new();
     private readonly CancellationTokenSource _consumerCancellation = new();
-    private readonly Task[] _consumerTasks;
-    private readonly ConsumerTaskMonitor _consumerMonitor;
+    private readonly BatchDispatchLoop<TRequest> _batchDispatchLoop;
+    private readonly Task _dispatchLoopTask;
+    private readonly ConsumerTaskMonitor _dispatchLoopMonitor;
 
     private Task? _stopTask;
     private Task? _disposeTask;
@@ -71,24 +74,23 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
             _options.MaxPendingRequests,
             _producerCancellation.Token);
 
-        var batchConsumer = new RequestBatchConsumer<TRequest>(
+        _batchDispatchLoop = new BatchDispatchLoop<TRequest>(
             handler,
-            _options.BatchSize,
+            _options.MaxConcurrency,
             _logger,
             _requestTypeName);
-        var consumers = bufferQueue.CreatePullConsumers<PendingBatchRequest<TRequest>>(
+        var consumer = bufferQueue.CreatePullConsumers<PendingBatchRequest<TRequest>>(
             new BufferPullConsumerOptions
             {
                 TopicName = TopicName,
                 GroupName = ConsumerGroupName,
                 BatchSize = _options.BatchSize,
-                AutoCommit = false,
+                AutoCommit = true,
             },
-            _options.MaxConcurrency);
+            1)
+            .Single();
 
-        _consumerTasks = consumers
-            .Select(consumer => batchConsumer.RunAsync(consumer, _consumerCancellation.Token))
-            .ToArray();
+        _dispatchLoopTask = _batchDispatchLoop.RunAsync(consumer, _consumerCancellation.Token);
 
         _logger.CoordinatorStarted(
             _requestTypeName,
@@ -97,8 +99,8 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
             _options.MaxPendingRequests,
             _options.FullMode);
 
-        _consumerMonitor = new ConsumerTaskMonitor(
-            _consumerTasks,
+        _dispatchLoopMonitor = new ConsumerTaskMonitor(
+            [_dispatchLoopTask],
             _consumerCancellation.Token,
             _requestTypeName,
             HandleConsumerFailure);
@@ -297,8 +299,9 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
         try
         {
             await pendingRequestsDrained.ConfigureAwait(false);
+            await _batchDispatchLoop.DrainAsync().ConfigureAwait(false);
             await _consumerCancellation.CancelAsync().ConfigureAwait(false);
-            await Task.WhenAll(_consumerTasks).ConfigureAwait(false);
+            await _dispatchLoopTask.ConfigureAwait(false);
 
             if (_consumerFailure is not null)
             {
@@ -324,7 +327,8 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
         }
         finally
         {
-            await _consumerMonitor.Completion.ConfigureAwait(false);
+            await _dispatchLoopMonitor.Completion.ConfigureAwait(false);
+            _batchDispatchLoop.Dispose();
             _producerCancellation.Dispose();
             _consumerCancellation.Dispose();
         }

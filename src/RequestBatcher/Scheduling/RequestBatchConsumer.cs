@@ -1,40 +1,16 @@
-using BufferQueue;
 using Microsoft.Extensions.Logging;
+using RequestBatcher.Diagnostics;
+using RequestBatcher.PendingRequests;
 
-namespace RequestBatcher.Internal;
+namespace RequestBatcher.Scheduling;
 
 internal sealed class RequestBatchConsumer<TRequest>(
     RequestBatchHandler<TRequest> handler,
-    int batchSize,
     ILogger logger,
     string requestTypeName)
 {
-    public async Task RunAsync(
-        IBufferPullConsumer<PendingBatchRequest<TRequest>> consumer,
-        CancellationToken cancellationToken)
-    {
-        try
-        {
-            await foreach (var bufferedRequests in consumer
-                               .ConsumeAsync(cancellationToken)
-                               .ConfigureAwait(false))
-            {
-                await ProcessAsync(bufferedRequests, cancellationToken).ConfigureAwait(false);
-                await consumer.CommitAsync().ConfigureAwait(false);
-            }
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-        }
-        catch (Exception exception)
-        {
-            logger.ConsumerFailed(exception, requestTypeName);
-            throw;
-        }
-    }
-
-    private async ValueTask ProcessAsync(
-        IEnumerable<PendingBatchRequest<TRequest>> bufferedRequests,
+    internal async ValueTask ProcessAsync(
+        IReadOnlyList<PendingBatchRequest<TRequest>> bufferedRequests,
         CancellationToken cancellationToken)
     {
         List<PendingBatchRequest<TRequest>>? activeRequests = null;
@@ -45,7 +21,7 @@ internal sealed class RequestBatchConsumer<TRequest>(
             {
                 if (pendingRequest.TryStartProcessing())
                 {
-                    activeRequests ??= new List<PendingBatchRequest<TRequest>>(batchSize);
+                    activeRequests ??= new List<PendingBatchRequest<TRequest>>(bufferedRequests.Count);
                     activeRequests.Add(pendingRequest);
                 }
                 else

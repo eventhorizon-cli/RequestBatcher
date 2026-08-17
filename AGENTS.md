@@ -15,8 +15,9 @@ You are an AI coding assistant for this repository.
   `IRequestBatcher<TRequest>`.
 - BufferQueue is an internal scheduling dependency. Do not expose its topics, partitions, producers, or consumers from
   RequestBatcher public APIs.
-- Keep queue adapters, admission control, consumer supervision, pending-request state, and logging under
-  `src/RequestBatcher/Internal`; the coordinator owns public submission and lifecycle composition.
+- Keep queue adapters and pending-request state under `src/RequestBatcher/PendingRequests`, consumer supervision and
+  dispatch under `src/RequestBatcher/Scheduling`, and logging under `src/RequestBatcher/Diagnostics`; the coordinator
+  owns public submission and lifecycle composition.
 - Compose RequestBatcher through `IServiceCollection.AddRequestBatcher`; callers must not need to register or configure
   BufferQueue. Production code registers BufferQueue into the application's container and must not build or own a
   nested service provider.
@@ -24,10 +25,9 @@ You are an AI coding assistant for this repository.
   transient handlers inside an async scope owned by one batch; never capture them in the singleton coordinator.
 - A request accepted by the coordinator must complete exactly once with success, cancellation, or the handler failure
   for its batch. Capacity must be released exactly once on every terminal path.
-- `MaxConcurrency = 1` preserves global FIFO processing. With higher concurrency, only partition-local ordering is
-  guaranteed. When `UsePartitionKey` is configured, equal keys route to one partition and retain their order after
-  append to that partition; concurrent calls do not establish pre-append order. Do not imply that an entire key is
-  collected into one batch or that ordering is global.
+- RequestBatcher provides no global, partition-local, or partition-key handler execution ordering guarantee.
+  `UsePartitionKey` routes equal keys to one queue partition only; separate batches for equal keys can execute
+  concurrently. Do not imply that an entire key is collected into one batch or that routing serializes execution.
 - Caller cancellation may remove work only before handler dispatch. Once a batch is dispatched, report its actual
   outcome so retrying callers cannot unknowingly duplicate side effects.
 - `StopAsync` and `DisposeAsync` stop admission before draining accepted work. Keep lifecycle transitions idempotent
@@ -47,6 +47,8 @@ You are an AI coding assistant for this repository.
   resource ownership, or cleanup make the lifecycle clearer.
 - Prefer base libraries and existing dependencies. Explain any new production dependency and compatibility impact.
 - Do not add a repository `NuGet.config` or hard-code a package source.
+- Do not decompile NuGet package assemblies. When implementation details of a dependency are necessary, inspect the
+  corresponding source repository at the commit recorded in the package metadata.
 
 ## Documentation
 
@@ -68,8 +70,9 @@ You are an AI coding assistant for this repository.
   container startup, schema creation, pool warmup, and table reset must stay outside measured regions.
 - Keep direct and batched database paths comparable: use the same logical requests, schema, connection pool limit,
   commit semantics, and validation. Verify persisted row counts so a faster result cannot hide dropped work.
-- Partition-key tests must prove both sides of the contract: equal keys never execute concurrently, while distinct keys
-  can use separate partitions. Duplicate-merging examples must remain correct when duplicates span multiple batches.
+- Partition-key tests must prove both sides of the contract: equal keys route consistently while separate batches for
+  equal keys can execute concurrently. Duplicate-merging examples must remain correct when duplicates span multiple
+  batches.
 - Batch-submission tests must cover all-or-nothing admission, capacity waiting, handler failure, and per-item partition
   routing. A submitted batch must not be documented as one handler invocation.
 - Name tests `MemberOrBehavior_Scenario_ExpectedOutcome`, with PascalCase within each segment and underscores between

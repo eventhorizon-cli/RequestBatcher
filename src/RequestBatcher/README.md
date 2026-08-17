@@ -15,8 +15,8 @@ multiple queued requests as an `IReadOnlyList<TRequest>`.
 
 Use RequestBatcher for independent database, cache, or downstream operations that benefit from a batch API. It also
 fits short traffic bursts that need bounded internal queue capacity and downstream concurrency, related requests that
-benefit from partition-local order, and work where caller cancellation should remove only requests that have not yet
-been dispatched. Dispatched work is allowed to finish independently of that caller.
+benefit from batch-level merging without relying on handler ordering, and work where caller cancellation should remove
+only requests that have not yet been dispatched. Dispatched work is allowed to finish independently of that caller.
 
 For database updates, if partial success within one handler invocation would leave inconsistent state, the handler
 should execute that invocation in one transaction. RequestBatcher propagates the handler outcome but cannot roll back
@@ -125,8 +125,10 @@ partition key.
 
 - A handler batch contains at most `BatchSize` requests that are already queued.
 - RequestBatcher does not add a fixed delay or wait for a minimum batch size.
-- `MaxPendingRequests` is the internal BufferQueue capacity shared by queued and currently handled requests. It does
-  not limit the size of one explicit submission or the number of callers waiting for capacity.
+- `MaxPendingRequests` is the internal BufferQueue capacity for requests that have not yet been pulled. A pulled batch
+  is auto-committed before its handler starts, so up to `MaxConcurrency * BatchSize` requests can execute in addition
+  to queued capacity. It does not limit the size of one explicit submission or the number of callers waiting for
+  capacity.
 - `Wait` admits a group no larger than the capacity atomically and splits a larger group into consecutive
   capacity-sized slices. `Fail` rejects the whole submission unless it fits immediately.
 - Caller cancellation removes a request only before handler dispatch. After dispatch, the caller observes the real
@@ -134,18 +136,20 @@ partition key.
 - Shutdown rejects new calls and drains every submission that started before shutdown, including submissions waiting
   for capacity. Requests still cannot be recovered after a process failure.
 
-## Routing Modes
+## Routing and Dispatch
 
-`MaxConcurrency` controls both handler concurrency and partition count:
+`MaxConcurrency` is the global maximum number of concurrent handler batches. The queue uses
+`min(MaxConcurrency, max(1, Environment.ProcessorCount))` internal partitions, and one `BatchDispatchLoop` owns all
+of them. It acquires an execution slot before pulling an auto-committed batch, so there is no application-owned
+handoff queue behind BufferQueue.
 
-| Configuration | Routing and ordering |
+| Configuration | Routing and dispatch |
 | --- | --- |
-| `MaxConcurrency = 1` | All requests use one partition and retain global append order. |
-| `MaxConcurrency > 1`, no partition key | Requests advance round-robin, including every item in an explicit group. Ordering is per partition. |
-| `MaxConcurrency > 1`, with `UsePartitionKey` | The selector runs for every item. Equal keys use one partition and retain their input order there. |
+| `MaxConcurrency = 1` | All requests use one queue partition; one handler batch can execute at a time. |
+| `MaxConcurrency > 1`, no partition key | Requests advance round-robin across the capped partition count; batches compete for global execution slots. |
+| `MaxConcurrency > 1`, with `UsePartitionKey` | The selector runs for every item. Equal keys use one queue partition, but separate handler batches for that key can execute concurrently. |
 
-One explicit group can therefore be handled concurrently by several partitions. Each handler invocation reads from one
-partition. Concurrent callers have no defined order before their requests are appended.
+RequestBatcher provides no global, partition-local, or partition-key handler execution ordering guarantee.
 
 Partition routing is optional:
 
@@ -162,13 +166,12 @@ services.AddRequestBatcher<OrderWriteRequest, OrderWriteBatchHandler>(
     });
 ```
 
-Equal finite, integer-valued numeric keys or equal non-null string keys are routed to one partition and processed there
-in append order. A partition key controls routing only: it does not force related requests into one handler batch or
-deduplicate them.
+Equal finite, integer-valued numeric keys or equal non-null string keys are routed to one queue partition. A partition
+key controls routing only: it does not force related requests into one handler batch, deduplicate them, or serialize
+their handler execution.
 
-Partition-local ordering can support patterns such as merging repeated updates within each batch. Correctness across
-batches still requires application safeguards such as version checks, idempotency keys, unique constraints, or
-transactions.
+Handlers can merge repeated updates within the current batch. Correctness across batches still requires application
+safeguards such as version checks, idempotency keys, unique constraints, or transactions.
 
 Do not move an operation into RequestBatcher when it must commit or roll back with the caller's transaction.
 

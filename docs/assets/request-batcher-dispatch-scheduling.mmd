@@ -1,0 +1,32 @@
+flowchart TB
+    subgraph admission["Admission and routing"]
+        direction LR
+        callers["Concurrent callers"] -->|submit| coordinator["Request batch<br/>coordinator"]
+        partitions["P queue partitions<br/>P = min(MaxConcurrency,<br/>logical processor count)"]
+        coordinator -->|enqueue| partitions
+    end
+
+    subgraph processing["Dispatch and execution"]
+        direction LR
+        dispatch["BatchDispatchLoop<br/>acquire a free slot<br/>before pulling"]
+        slots["H execution slots<br/>H = MaxConcurrency"]
+        handlers["H independent handler batches<br/>each up to BatchSize items"]
+        completion["One Task per accepted request<br/>actual outcome"]
+        dispatch -->|dispatch one auto-committed batch| slots
+        slots --> handlers
+        handlers -.->|complete each request| completion
+    end
+
+    partitions -->|pull after a slot is acquired| dispatch
+
+    class callers client
+    class coordinator gateway
+    class partitions,dispatch,slots,completion core
+    class handlers handler
+
+    classDef client fill:#e9f6f1,stroke:#2f6f5e,color:#173f35,stroke-width:1.5px
+    classDef gateway fill:#eaf2ff,stroke:#3567a7,color:#1d3b66,stroke-width:1.5px
+    classDef core fill:#edf1f5,stroke:#596773,color:#303b44,stroke-width:1.5px
+    classDef handler fill:#f4edfb,stroke:#75529b,color:#422d59,stroke-width:1.5px
+    style admission fill:#ffffff,stroke:#aeb8c2,color:#303b44,stroke-width:1px
+    style processing fill:#ffffff,stroke:#aeb8c2,color:#303b44,stroke-width:1px

@@ -243,11 +243,13 @@ public sealed class RequestBatchSubmissionTests
 
         var first = batcher.ProcessAsync(0);
         await firstBatchStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var queuedFirst = batcher.ProcessAsync(1);
+        var queuedSecond = batcher.ProcessAsync(2);
 
         try
         {
             var exception = await Assert.ThrowsAsync<RequestBatchQueueFullException>(
-                () => batcher.ProcessAsync([1, 2]));
+                () => batcher.ProcessAsync([3, 4]));
 
             Assert.Equal(2, exception.Capacity);
             Assert.Equal(2, exception.RequestedCount);
@@ -258,7 +260,7 @@ public sealed class RequestBatchSubmissionTests
             releaseFirstBatch.TrySetResult();
         }
 
-        await first.WaitAsync(TimeSpan.FromSeconds(5));
+        await Task.WhenAll(first, queuedFirst, queuedSecond).WaitAsync(TimeSpan.FromSeconds(5));
     }
 
     [Fact]
@@ -287,19 +289,19 @@ public sealed class RequestBatchSubmissionTests
 
         var first = batcher.ProcessAsync(0);
         await firstBatchStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        var batch = batcher.ProcessAsync([1, 2]);
+        var queuedBatch = batcher.ProcessAsync([1, 2]);
+        var waitingBatch = batcher.ProcessAsync([3, 4]);
 
-        Assert.False(batch.IsCompleted);
+        Assert.False(waitingBatch.IsCompleted);
         releaseFirstBatch.SetResult();
-        await Task.WhenAll(first, batch).WaitAsync(TimeSpan.FromSeconds(5));
+        await Task.WhenAll(first, queuedBatch, waitingBatch).WaitAsync(TimeSpan.FromSeconds(5));
 
-        Assert.Equal(2, handledBatches.Count);
-        Assert.Equal(new[] { 0 }, handledBatches.ElementAt(0));
-        Assert.Equal(new[] { 1, 2 }, handledBatches.ElementAt(1));
+        Assert.Equal(5, handledBatches.Sum(batch => batch.Length));
+        Assert.Equal(Enumerable.Range(0, 5), handledBatches.SelectMany(batch => batch).Order());
     }
 
     [Fact]
-    public async Task ProcessAsync_HandlerFails_ReleasesCapacityForWaitingRequest()
+    public async Task ProcessAsync_HandlerFails_ReleasesExecutionSlotForQueuedRequest()
     {
         var expected = new TestBatchException();
         var firstRequestStarted = NewSource();
@@ -341,28 +343,23 @@ public sealed class RequestBatchSubmissionTests
     }
 
     [Fact]
-    public async Task ProcessAsync_WaitMode_PreservesFifoAcrossWeightedSubmissions()
+    public async Task ProcessAsync_WaitMode_ProcessesWeightedSubmissions()
     {
         var firstRequestStarted = NewSource();
         var releaseFirstRequest = NewSource();
-        var explicitBatchStarted = NewSource();
-        var releaseExplicitBatch = NewSource();
-        var handledBatches = new ConcurrentQueue<int[]>();
+        var handledRequests = new ConcurrentQueue<int>();
 
         await using var provider = CreateProvider<int>(
             async (requests, _) =>
             {
-                var batch = requests.ToArray();
-                handledBatches.Enqueue(batch);
-                if (batch.SequenceEqual(new[] { 0 }))
+                foreach (var request in requests)
                 {
-                    firstRequestStarted.SetResult();
-                    await releaseFirstRequest.Task;
-                }
-                else if (batch.SequenceEqual(new[] { 1, 2, 3 }))
-                {
-                    explicitBatchStarted.SetResult();
-                    await releaseExplicitBatch.Task;
+                    handledRequests.Enqueue(request);
+                    if (request == 0)
+                    {
+                        firstRequestStarted.SetResult();
+                        await releaseFirstRequest.Task;
+                    }
                 }
             },
             options =>
@@ -378,72 +375,57 @@ public sealed class RequestBatchSubmissionTests
         var laterSingle = batcher.ProcessAsync(4);
 
         releaseFirstRequest.SetResult();
-        await explicitBatchStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
-
-        Assert.Equal(new[] { 0 }, handledBatches.ElementAt(0));
-        Assert.Equal(new[] { 1, 2, 3 }, handledBatches.ElementAt(1));
-        Assert.False(laterSingle.IsCompleted);
-
-        releaseExplicitBatch.SetResult();
         await Task.WhenAll(first, explicitBatch, laterSingle).WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.Equal(new[] { 4 }, handledBatches.ElementAt(2));
+        Assert.Equal(Enumerable.Range(0, 5), handledRequests.Order());
     }
 
     [Fact]
-    public async Task ProcessAsync_CanceledWhileWaiting_ReleasesPartialReservation()
+    public async Task ProcessAsync_CanceledWhileWaiting_ReleasesQueueCapacity()
     {
         var firstRequestStarted = NewSource();
-        var differentKeyStarted = NewSource();
         var releaseFirstRequest = NewSource();
-        var handledRequests = new ConcurrentQueue<KeyedRequest>();
+        var handledRequests = new ConcurrentQueue<int>();
 
-        await using var provider = CreateProvider<KeyedRequest>(
+        await using var provider = CreateProvider<int>(
             async (requests, _) =>
             {
-                var request = requests[0];
+                var request = Assert.Single(requests);
                 handledRequests.Enqueue(request);
-                if (request == new KeyedRequest(1, 1))
+                if (request == 0)
                 {
                     firstRequestStarted.SetResult();
                     await releaseFirstRequest.Task;
-                }
-                else if (request.Key == 2)
-                {
-                    differentKeyStarted.SetResult();
                 }
             },
             options =>
             {
                 options.BatchSize = 1;
-                options.MaxConcurrency = 2;
                 options.MaxPendingRequests = 2;
-                options.UsePartitionKey(request => request.Key);
             });
-        var batcher = provider.GetRequiredService<IRequestBatcher<KeyedRequest>>();
+        var batcher = provider.GetRequiredService<IRequestBatcher<int>>();
 
-        var first = batcher.ProcessAsync(new KeyedRequest(1, 1));
+        var first = batcher.ProcessAsync(0);
         await firstRequestStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var queuedBatch = batcher.ProcessAsync([1, 2]);
 
         using var cancellation = new CancellationTokenSource();
-        var canceledBatch = batcher.ProcessAsync(
-            [new KeyedRequest(1, 2), new KeyedRequest(1, 3)],
-            cancellation.Token);
+        var canceledBatch = batcher.ProcessAsync([3, 4], cancellation.Token);
         cancellation.Cancel();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => canceledBatch);
 
-        var differentKey = batcher.ProcessAsync(new KeyedRequest(2, 1));
+        var laterBatch = batcher.ProcessAsync([5, 6]);
         try
         {
-            await differentKeyStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.False(laterBatch.IsCompleted);
         }
         finally
         {
             releaseFirstRequest.TrySetResult();
         }
 
-        await Task.WhenAll(first, differentKey).WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.DoesNotContain(handledRequests, request => request is { Key: 1, Sequence: 2 or 3 });
+        await Task.WhenAll(first, queuedBatch, laterBatch).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(new[] { 0, 1, 2, 5, 6 }, handledRequests.Order());
     }
 
     [Fact]
@@ -493,7 +475,7 @@ public sealed class RequestBatchSubmissionTests
     }
 
     [Fact]
-    public async Task ProcessAsync_WaitModeOversizedPartitionedBatch_PreservesPerKeyOrder()
+    public async Task ProcessAsync_WaitModeOversizedPartitionedBatch_ProcessesAllRoutedItems()
     {
         var handledRequests = new ConcurrentQueue<KeyedRequest>();
 
@@ -523,11 +505,8 @@ public sealed class RequestBatchSubmissionTests
         await batcher.ProcessAsync(requests).WaitAsync(TimeSpan.FromSeconds(5));
 
         Assert.Equal(
-            new[] { 1, 2, 3 },
-            handledRequests.Where(request => request.Key == 1).Select(request => request.Sequence));
-        Assert.Equal(
-            new[] { 1, 2 },
-            handledRequests.Where(request => request.Key == 2).Select(request => request.Sequence));
+            requests.OrderBy(request => request.Key).ThenBy(request => request.Sequence),
+            handledRequests.OrderBy(request => request.Key).ThenBy(request => request.Sequence));
     }
 
     [Fact]

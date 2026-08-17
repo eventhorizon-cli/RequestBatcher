@@ -1,6 +1,6 @@
 using System.Numerics;
 using BufferQueue.Memory;
-using RequestBatcher.Internal;
+using RequestBatcher.PendingRequests;
 
 namespace RequestBatcher;
 
@@ -17,12 +17,11 @@ public sealed class RequestBatchOptions<TRequest>
 
     /// <summary>
     /// Gets or sets the maximum number of handler invocations that may run concurrently.
-    /// A value of one preserves global request order.
     /// </summary>
     public int MaxConcurrency { get; set; } = 1;
 
     /// <summary>
-    /// Gets or sets the bounded capacity shared by queued and currently processing requests.
+    /// Gets or sets the bounded capacity for requests waiting in the internal queue.
     /// In <see cref="RequestBatchFullMode.Wait"/> mode, an explicit submission may exceed this value and is admitted
     /// in consecutive capacity-sized slices. <see cref="RequestBatchFullMode.Fail"/> rejects an oversized submission.
     /// </summary>
@@ -40,7 +39,8 @@ public sealed class RequestBatchOptions<TRequest>
     }
 
     /// <summary>
-    /// Routes requests with equal finite, integer-valued numeric keys to the same processing partition.
+    /// Routes requests with equal finite, integer-valued numeric keys to the same queue partition.
+    /// Routing does not guarantee handler ordering or serial execution.
     /// </summary>
     /// <typeparam name="TNumber">The numeric key type.</typeparam>
     /// <param name="partitionKeySelector">A deterministic, side-effect-free function that selects a request key.</param>
@@ -53,7 +53,8 @@ public sealed class RequestBatchOptions<TRequest>
     }
 
     /// <summary>
-    /// Routes requests with equal string keys to the same processing partition.
+    /// Routes requests with equal string keys to the same queue partition.
+    /// Routing does not guarantee handler ordering or serial execution.
     /// </summary>
     /// <param name="partitionKeySelector">
     /// A deterministic, side-effect-free function that selects a non-null request key.

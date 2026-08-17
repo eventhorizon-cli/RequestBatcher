@@ -31,7 +31,7 @@ operation benefits from receiving multiple items:
 - short traffic bursts where internal queue capacity and downstream concurrency must be bounded;
 - work where caller cancellation should discard only requests that have not been dispatched, while dispatched work
   must be allowed to finish independently of that caller;
-- related requests that benefit from partition-local ordering or batch-level merging.
+- related requests that benefit from batch-level merging without relying on handler ordering.
 
 For database updates, if partial success within one handler invocation would leave inconsistent state, the handler
 should execute that invocation in one transaction. RequestBatcher propagates the handler outcome but cannot roll back
@@ -56,8 +56,8 @@ RequestBatcher is not a durable background queue or a transaction coordinator:
 
 1. A caller submits one request through `ProcessAsync`.
 2. RequestBatcher admits the request according to the configured capacity and routes it to an in-memory partition.
-3. When that partition is ready, RequestBatcher takes up to `BatchSize` requests that are already queued and invokes
-   the handler once.
+3. The internal `BatchDispatchLoop` acquires a free handler slot, then pulls and auto-commits up to `BatchSize`
+   requests that are already queued.
 4. The handler outcome completes the `Task` returned to every caller represented in that handler batch.
 
 `BatchSize` is an upper bound, not a minimum. RequestBatcher does not hold the first request for a fixed batching
@@ -67,6 +67,15 @@ window, so low traffic may produce single-request batches while concurrent traff
 
 The architecture diagram shows the coordinator, the in-memory partition queue, and the separate `Task` completion
 path for each accepted request.
+
+### Internal Dispatch Scheduling
+
+![Internal dispatch scheduling](docs/assets/request-batcher-dispatch-scheduling.svg)
+
+`MaxConcurrency` bounds concurrent handler batches. The queue uses
+`min(MaxConcurrency, max(1, Environment.ProcessorCount))` internal partitions, while one `BatchDispatchLoop` owns all
+of them and shares one global execution-slot pool. A slot is acquired before a queue batch is pulled, so work waits in
+BufferQueue rather than in an application-owned handoff queue.
 
 The two sides of the API have different responsibilities:
 
@@ -173,20 +182,19 @@ In this documentation, a **submission** is one caller invocation of `ProcessAsyn
 | Failure | A handler failure fails every request in that handler batch. | Some items may succeed before another handler batch fails. The group `Task` faults, but successful work is not rolled back. |
 | Cancellation | Cancellation removes the request only before dispatch. | The same token applies to every item; undispatched items can be canceled while dispatched items continue to their actual outcome. |
 
-## Routing Modes
+## Routing and Dispatch
 
-`MaxConcurrency` determines both the maximum number of concurrent handler calls and the number of processing
-partitions. Each handler invocation receives requests from one partition.
+`MaxConcurrency` is the global maximum number of concurrent handler batches. The number of internal queue partitions
+is `min(MaxConcurrency, max(1, Environment.ProcessorCount))`, and one `BatchDispatchLoop` pulls from all of them.
 
-| Configuration | Request routing | Effect on an explicit group | Ordering |
-| --- | --- | --- | --- |
-| `MaxConcurrency = 1` | Every request uses the only partition. | Items stay in one partition but can still be split by `BatchSize`. | Global append order. |
-| `MaxConcurrency > 1`, no partition key | Round-robin advances once for every request. | Items are distributed across partitions one by one and handler calls may run concurrently. | Per-partition order only. |
-| `MaxConcurrency > 1`, with `UsePartitionKey` | The selector is applied to every request; equal keys use the same partition. | The group is split by selected partition; equal-key input order is retained in that partition. | Per-partition order; different keys can share a partition. |
+| Configuration | Request routing | Dispatch behavior |
+| --- | --- | --- |
+| `MaxConcurrency = 1` | Every request uses one queue partition. | One handler batch can execute at a time. |
+| `MaxConcurrency > 1`, no partition key | Round-robin advances once per request across the capped partition count. | Batches from any partition compete for the same global execution slots. |
+| `MaxConcurrency > 1`, with `UsePartitionKey` | The selector is applied to every request; equal keys route to one queue partition. | Equal keys can still be dispatched in separate handler batches at the same time. |
 
-Ordering starts after a request has been appended to its partition. Concurrent callers do not establish an additional
-order before that point. Configuring a partition key with `MaxConcurrency = 1` does not change routing because only one
-partition exists.
+RequestBatcher provides no global, partition-local, or partition-key ordering guarantee. A partition key controls only
+queue routing; it is not a serialization mechanism.
 
 ## Processing Semantics
 
@@ -216,9 +224,10 @@ faults, otherwise it is canceled when at least one item was canceled. Completed 
 
 ### Capacity and Backpressure
 
-`MaxPendingRequests` sets the bounded BufferQueue capacity shared by queued requests and requests currently being
-handled but not yet committed. It is not a limit on the size of an explicit submission or on the number of callers
-waiting for capacity:
+`MaxPendingRequests` sets the bounded BufferQueue capacity for requests that remain queued. A batch is auto-committed
+when the dispatch loop pulls it, before its handler starts. Therefore, up to `MaxConcurrency * BatchSize` pulled
+requests can be executing in addition to queued capacity. It is not a limit on the size of an explicit submission or
+on the number of callers waiting for capacity:
 
 - `FullMode = Wait` waits asynchronously for enough capacity and honors caller cancellation while waiting.
 - In `Wait` mode, a group no larger than the capacity is admitted atomically. A larger group is split into consecutive
@@ -238,13 +247,12 @@ continues in the background.
 | Option | Default | Behavior |
 | --- | ---: | --- |
 | `BatchSize` | `128` | Maximum requests passed to one handler call. |
-| `MaxConcurrency` | `1` | Maximum concurrent handler calls and number of processing partitions. |
-| `MaxPendingRequests` | `8192` | Internal BufferQueue capacity shared by queued and currently handled requests. |
+| `MaxConcurrency` | `1` | Maximum concurrent handler batches; queue partitions are capped at the logical processor count. |
+| `MaxPendingRequests` | `8192` | Internal BufferQueue capacity for requests that have not yet been pulled for execution. |
 | `FullMode` | `Wait` | Waits for capacity; `Fail` rejects immediately when capacity is unavailable. |
-| `UsePartitionKey(...)` | Not set | Uses round-robin routing by default; equal selected keys are routed to one partition. |
+| `UsePartitionKey(...)` | Not set | Uses round-robin routing by default; equal selected keys are routed to one queue partition. |
 
-With `MaxConcurrency = 1`, requests are processed in global FIFO order. With a higher value, handler calls may run in
-parallel and ordering is guaranteed only within each partition.
+No ordering is guaranteed for handler execution, including when `MaxConcurrency = 1`.
 
 ## Partition Keys
 
@@ -255,17 +263,17 @@ options.MaxConcurrency = 4;
 options.UsePartitionKey(request => request.OrderId);
 ```
 
-Equal finite, integer-valued numeric keys or equal non-null string keys are routed to the same partition and processed
-there in append order. Different keys can still share a partition, so keys and partitions are not one-to-one.
+Equal finite, integer-valued numeric keys or equal non-null string keys are routed to the same queue partition.
+Different keys can still share a partition, so keys and partitions are not one-to-one.
 
 Partition routing does not force all requests for one key into the same handler batch, and it does not deduplicate
-requests. It provides an ordering boundary that a handler can use for patterns such as merging repeated updates.
+requests. It does not provide an execution-order or mutual-exclusion boundary.
 
 ### Example: Merge Repeated Updates
 
 Suppose several `PriceUpdate` requests have the same `ProductId`. A handler can group its current batch by product and
-write only the highest version. Routing by `ProductId` prevents separate handler calls from processing that product
-concurrently, while other products can still be processed in parallel.
+write only the highest version. Routing by `ProductId` improves locality, but separate handler calls can still process
+that product concurrently.
 
 The storage layer must still prevent stale versions from overwriting newer state across batches because a partition key
 does not place every update for one product into the same batch. The runnable

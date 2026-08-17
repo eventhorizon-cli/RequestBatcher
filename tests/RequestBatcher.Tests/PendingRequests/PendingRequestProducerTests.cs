@@ -1,9 +1,9 @@
 using BufferQueue;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
-using RequestBatcher.Internal;
+using RequestBatcher.PendingRequests;
 
-namespace RequestBatcher.Tests.Internal;
+namespace RequestBatcher.Tests.PendingRequests;
 
 public sealed class PendingRequestProducerTests
 {

@@ -28,7 +28,7 @@ RequestBatcher 会在 .NET 进程内汇集来自不同调用方的并发请求�
 - 原生支持多项输入的缓存读写或下游 API；
 - 需要限制内部队列容量和下游并发量的短时流量突发；
 - 调用方取消时，只需要撤销尚未分发的请求；已分发的操作应继续执行并返回实际处理结果；
-- 需要保持分区内处理顺序，或可以在同一处理批次内合并相关请求。
+- 可以在同一处理批次内合并相关请求，且正确性不依赖 Handler 执行顺序。
 
 数据库更新还需要注意事务边界：如果一次 Handler 调用只成功一部分会造成数据不一致，应由 Handler 在同一个事务中
 完成整批更新。RequestBatcher 只负责传递 Handler 的处理结果，不会回滚已经提交的数据。
@@ -50,7 +50,7 @@ RequestBatcher 既不是持久化后台队列，也不是事务协调器：
 
 1. 调用方通过 `ProcessAsync` 提交单个请求。
 2. RequestBatcher 根据容量配置接收请求，并将它路由到一个内存分区。
-3. 某个分区可处理时，RequestBatcher 从其中已排队的请求中取出最多 `BatchSize` 个，并调用 Handler 一次。
+3. 内部 `BatchDispatchLoop` 先获取一个空闲 Handler 槽位，再拉取并自动提交最多 `BatchSize` 个已排队请求。
 4. 处理结果会完成该批次中每个调用方持有的 `Task`。
 
 已接收请求在分区中的排队时长主要取决于前一批 Handler 调用何时完成，而不是等待凑满 `BatchSize`。RequestBatcher
@@ -60,6 +60,15 @@ RequestBatcher 既不是持久化后台队列，也不是事务协调器：
 ![RequestBatcher 架构](docs/assets/request-batcher-architecture.png)
 
 架构图展示协调器、分区内存队列，以及每个已接收请求独立完成 `Task` 的详细路径。
+
+### 内部调度设计
+
+![内部调度设计](docs/assets/request-batcher-dispatch-scheduling.svg)
+
+`MaxConcurrency` 限制并发执行的 Handler 批次数。队列内部使用
+`min(MaxConcurrency, max(1, Environment.ProcessorCount))` 个分区；一个 `BatchDispatchLoop` 负责所有分区并共享
+同一个全局执行槽位池。它只有在拿到槽位后才会从队列拉取批次，因此请求只在 BufferQueue 中等待，不会进入应用自行
+维护的转交队列。
 
 调用方和 Handler 的 API 职责不同：
 
@@ -161,18 +170,18 @@ Handler 调用：请求仍可能按 `BatchSize` 或分区路由拆成多个处�
 | 失败 | 这次 Handler 调用失败时，该处理批次中的所有请求都会失败。 | 部分请求可能已经成功，其他处理批次仍可能失败；整组 `Task` 会失败，但不会回滚已经成功的操作。 |
 | 取消 | 只能取消尚未交给 Handler 的请求。 | 同一个 `CancellationToken` 用于整组中的每个请求；尚未分发的请求可以取消，已分发的请求继续返回实际结果。 |
 
-## 路由模式
+## 路由与调度
 
-`MaxConcurrency` 同时决定 Handler 的最大并发调用数和处理分区数。一次 Handler 调用只会接收同一分区内的请求。
+`MaxConcurrency` 是全局并发 Handler 批次数上限。内部队列分区数为
+`min(MaxConcurrency, max(1, Environment.ProcessorCount))`，由一个 `BatchDispatchLoop` 从所有分区拉取。
 
-| 配置 | 请求如何路由 | 对显式批量提交的影响 | 顺序保证 |
-| --- | --- | --- | --- |
-| `MaxConcurrency = 1` | 所有请求进入唯一分区。 | 请求留在同一分区，但仍可能按 `BatchSize` 拆成多个批次。 | 保持全局写入顺序。 |
-| `MaxConcurrency > 1`，未配置分区键 | 每个请求按轮询方式依次进入下一个分区。 | 每项请求分别分散到不同分区，Handler 调用可以并行执行。 | 只保证分区内顺序。 |
-| `MaxConcurrency > 1`，配置 `UsePartitionKey` | 每个请求都会调用选择器；相同键值进入同一分区。 | 按选择结果分到不同分区；相同键值保留其在输入中的顺序。 | 分区内有序；不同键值可能映射到同一分区。 |
+| 配置 | 请求如何路由 | 调度行为 |
+| --- | --- | --- |
+| `MaxConcurrency = 1` | 所有请求进入一个队列分区。 | 同时最多执行一个 Handler 批次。 |
+| `MaxConcurrency > 1`，未配置分区键 | 每个请求按轮询方式在受上限约束的分区间分配。 | 任一分区的批次都会竞争同一组全局执行槽位。 |
+| `MaxConcurrency > 1`，配置 `UsePartitionKey` | 每个请求都会调用选择器；相同键值进入同一队列分区。 | 相同键值的不同 Handler 批次仍可同时分发执行。 |
 
-请求的顺序从写入分区时开始计算。多个调用方并发提交时，写入分区之前没有额外的先后保证。
-`MaxConcurrency = 1` 时只有一个分区，此时配置分区键不会改变路由结果。
+RequestBatcher 不提供全局、分区内或分区键级别的 Handler 执行顺序保证。分区键只决定队列路由，不能用于串行化处理。
 
 ## 处理语义
 
@@ -200,8 +209,9 @@ Handler 调用：请求仍可能按 `BatchSize` 或分区路由拆成多个处�
 
 ### 容量与背压
 
-`MaxPendingRequests` 是内部 BufferQueue 的有界容量，由已排队的请求和 Handler 正在处理但尚未提交消费进度的请求
-共同占用。它不限制一次显式提交的请求数量，也不限制正在等待容量的调用方数量：
+`MaxPendingRequests` 是内部 BufferQueue 中仍处于排队状态的请求容量上限。分发循环拉取批次时会自动提交消费进度，
+随后才启动 Handler。因此，除了排队容量外，最多还有 `MaxConcurrency * BatchSize` 个已拉取请求正在执行。它不限制
+一次显式提交的请求数量，也不限制正在等待容量的调用方数量：
 
 - `FullMode = Wait` 会在容量可用前异步等待，并支持调用方在等待期间取消。
 - `Wait` 模式下，不超过容量的请求组会原子地进入队列；超过容量的请求组会拆成连续的容量片段逐步进入队列。
@@ -219,12 +229,12 @@ Handler 调用：请求仍可能按 `BatchSize` 或分区路由拆成多个处�
 | 选项 | 默认值 | 行为 |
 | --- | ---: | --- |
 | `BatchSize` | `128` | 单次 Handler 调用包含的请求数量上限。 |
-| `MaxConcurrency` | `1` | Handler 最大并发调用数，同时也是处理分区数。 |
-| `MaxPendingRequests` | `8192` | 内部 BufferQueue 的有界容量，由已排队和 Handler 正在处理的请求共同占用。 |
+| `MaxConcurrency` | `1` | Handler 批次最大并发数；队列分区数最多为逻辑处理器数。 |
+| `MaxPendingRequests` | `8192` | 内部 BufferQueue 中尚未被拉取执行的请求容量上限。 |
 | `FullMode` | `Wait` | 默认等待容量；`Fail` 在容量不足时立即拒绝。 |
-| `UsePartitionKey(...)` | 未配置 | 未配置时按轮询方式分配；选择器返回相同键值的请求进入同一分区。 |
+| `UsePartitionKey(...)` | 未配置 | 未配置时按轮询方式分配；选择器返回相同键值的请求进入同一队列分区。 |
 
-`MaxConcurrency = 1` 时保持全局 FIFO 顺序。提高该值后，Handler 可以并行执行，只保证各分区内部的顺序。
+Handler 执行不保证顺序，包括 `MaxConcurrency = 1` 的情况。
 
 ## 分区键
 
@@ -235,16 +245,16 @@ options.MaxConcurrency = 4;
 options.UsePartitionKey(request => request.OrderId);
 ```
 
-值相同的有限整数数值键，或值相同的非 `null` 字符串键，会进入同一分区，并按写入该分区的顺序处理。不同键值
-仍可能落入同一分区，因此键值与分区不是一一对应关系；并发调用在进入分区之前也没有额外的先后保证。
+值相同的有限整数数值键，或值相同的非 `null` 字符串键，会进入同一队列分区。不同键值仍可能落入同一分区，
+因此键值与分区不是一一对应关系。
 
 分区路由只决定请求进入哪个分区：它不会强制同一键值的全部请求进入同一个处理批次，也不会自动去重。它提供了
-一个有序处理边界，Handler 可以在此基础上实现重复更新合并等业务逻辑。
+一个路由边界，不提供执行顺序或互斥保证。
 
 ### 示例：合并重复更新
 
 假设多个 `PriceUpdate` 的 `ProductId` 相同。Handler 可以在当前批次中按商品分组，只写入版本最高的更新。按
-`ProductId` 路由可以避免两个 Handler 调用并发处理同一个商品，同时让其他商品继续并行处理。
+`ProductId` 路由能改善局部性，但不同 Handler 调用仍可能同时处理同一个商品。
 
 分区键无法让同一商品的所有更新都进入同一批，因此存储层仍需防止旧版本跨批次覆盖新状态。可运行的
 [PostgreSQL Web API 示例](samples/RequestBatcher.Deduplication)展示了完整做法：

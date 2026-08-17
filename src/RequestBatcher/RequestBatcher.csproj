@@ -3,7 +3,6 @@
     <TargetFramework>net8.0</TargetFramework>
     <Title>RequestBatcher</Title>
     <PackageId>RequestBatcher</PackageId>
-    <VersionPrefix>0.0.2</VersionPrefix>
     <Description>In-process request batching for concurrent .NET workloads, with backpressure, partition routing, and per-request completion.</Description>
     <Authors>EventHorizon CLI</Authors>
     <PackageTags>request-batching;batching;async;backpressure;partitioning;bufferqueue</PackageTags>
@@ -12,7 +11,6 @@
     <RepositoryType>git</RepositoryType>
     <PackageLicenseExpression>MIT</PackageLicenseExpression>
     <PackageReadmeFile>README.md</PackageReadmeFile>
-    <PackageReleaseNotes>Supports capacity-sliced batch submissions with BufferQueue 2.0.2, preserves cancellation and partition behavior, and safely drains submissions during shutdown.</PackageReleaseNotes>
     <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
     <IncludeSymbols>true</IncludeSymbols>
     <SymbolPackageFormat>snupkg</SymbolPackageFormat>

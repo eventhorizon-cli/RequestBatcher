@@ -1,6 +1,6 @@
-using RequestBatcher.Internal;
+using RequestBatcher.PendingRequests;
 
-namespace RequestBatcher.Tests.Internal;
+namespace RequestBatcher.Tests.PendingRequests;
 
 public sealed class BatchSubmissionCompletionTests
 {

@@ -1,0 +1,79 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="650" viewBox="0 0 1800 650" role="img" aria-labelledby="title description">
+  <title id="title">RequestBatcher internal dispatch scheduling</title>
+  <desc id="description">Concurrent callers submit to a coordinator and bounded queue partitions. A BatchDispatchLoop acquires a global execution slot before pulling an auto-committed batch, then dispatches independent handler batches that complete each accepted request.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#475467"/>
+    </marker>
+    <style>
+      .container { fill: #ffffff; stroke: #98a2b3; stroke-width: 1.5; }
+      .container-label { fill: #303b44; font-family: Arial, sans-serif; font-size: 20px; font-weight: 600; }
+      .node-label { font-family: Arial, sans-serif; font-size: 20px; font-weight: 600; text-anchor: middle; }
+      .node-detail { font-family: Arial, sans-serif; font-size: 18px; text-anchor: middle; }
+      .edge { fill: none; stroke: #475467; stroke-width: 2; marker-end: url(#arrow); }
+      .edge-dashed { fill: none; stroke: #475467; stroke-width: 2; stroke-dasharray: 6 4; marker-end: url(#arrow); }
+      .edge-label { fill: #303b44; font-family: Arial, sans-serif; font-size: 18px; text-anchor: middle; }
+      .edge-label-background { fill: #ffffff; }
+    </style>
+  </defs>
+
+  <rect width="1800" height="650" fill="#ffffff"/>
+
+  <rect class="container" x="95" y="15" width="1610" height="205"/>
+  <text class="container-label" x="900" y="52" text-anchor="middle">Admission and routing</text>
+
+  <rect x="145" y="85" width="260" height="70" fill="#e9f6f1" stroke="#2f6f5e" stroke-width="2"/>
+  <text class="node-label" x="275" y="128" fill="#173f35">Concurrent callers</text>
+
+  <rect x="590" y="72" width="250" height="96" fill="#eaf2ff" stroke="#3567a7" stroke-width="2"/>
+  <text class="node-label" x="715" y="112" fill="#1d3b66">Request batch</text>
+  <text class="node-label" x="715" y="140" fill="#1d3b66">coordinator</text>
+
+  <rect x="1115" y="54" width="380" height="132" fill="#edf1f5" stroke="#596773" stroke-width="2"/>
+  <text class="node-label" x="1305" y="91" fill="#303b44">P queue partitions</text>
+  <text class="node-detail" x="1305" y="120" fill="#303b44">P = min(MaxConcurrency,</text>
+  <text class="node-detail" x="1305" y="146" fill="#303b44">logical processor count)</text>
+
+  <path class="edge" d="M405 120 H590"/>
+  <rect class="edge-label-background" x="465" y="102" width="66" height="28"/>
+  <text class="edge-label" x="498" y="123">submit</text>
+
+  <path class="edge" d="M840 120 H1115"/>
+  <rect class="edge-label-background" x="945" y="102" width="84" height="28"/>
+  <text class="edge-label" x="987" y="123">enqueue</text>
+
+  <rect class="container" x="30" y="355" width="1740" height="270"/>
+  <text class="container-label" x="900" y="390" text-anchor="middle">Dispatch and execution</text>
+
+  <rect x="120" y="440" width="290" height="115" fill="#edf1f5" stroke="#596773" stroke-width="2"/>
+  <text class="node-label" x="265" y="480" fill="#303b44">BatchDispatchLoop</text>
+  <text class="node-detail" x="265" y="510" fill="#303b44">acquire a free slot</text>
+  <text class="node-detail" x="265" y="536" fill="#303b44">before pulling</text>
+
+  <rect x="570" y="455" width="260" height="85" fill="#edf1f5" stroke="#596773" stroke-width="2"/>
+  <text class="node-label" x="700" y="490" fill="#303b44">H execution slots</text>
+  <text class="node-detail" x="700" y="518" fill="#303b44">H = MaxConcurrency</text>
+
+  <rect x="990" y="440" width="330" height="115" fill="#f4edfb" stroke="#75529b" stroke-width="2"/>
+  <text class="node-label" x="1155" y="480" fill="#422d59">H independent handler batches</text>
+  <text class="node-detail" x="1155" y="510" fill="#422d59">each up to BatchSize items</text>
+
+  <rect x="1480" y="440" width="250" height="115" fill="#edf1f5" stroke="#596773" stroke-width="2"/>
+  <text class="node-label" x="1605" y="480" fill="#303b44">One Task per accepted</text>
+  <text class="node-label" x="1605" y="508" fill="#303b44">request</text>
+  <text class="node-detail" x="1605" y="536" fill="#303b44">actual outcome</text>
+
+  <path class="edge" d="M1305 186 V285 H265 V440"/>
+  <rect class="edge-label-background" x="755" y="260" width="270" height="28"/>
+  <text class="edge-label" x="890" y="281">pull after a slot is acquired</text>
+
+  <path class="edge" d="M410 497 H570"/>
+  <rect class="edge-label-background" x="400" y="407" width="280" height="52"/>
+  <text class="edge-label" x="540" y="428">dispatch one auto-committed</text>
+  <text class="edge-label" x="540" y="450">batch</text>
+
+  <path class="edge" d="M830 497 H990"/>
+  <path class="edge-dashed" d="M1320 497 H1480"/>
+  <rect class="edge-label-background" x="1320" y="462" width="160" height="28"/>
+  <text class="edge-label" x="1400" y="483">complete each request</text>
+</svg>

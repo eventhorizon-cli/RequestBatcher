@@ -7,6 +7,11 @@ All notable changes to RequestBatcher are documented in this file.
 ### Changed
 
 - Reduced explicit batch completion allocations by sharing one completion state across the submission while preserving handler failures, cancellation, and all-request completion semantics.
+- Redesigned dispatch so `MaxConcurrency` limits handler batches while internal queue partitions are capped at the
+  process-visible logical-core count. Pulled batches auto-commit before handler execution, so `MaxPendingRequests`
+  bounds queue-resident requests only.
+- Removed global, partition-local, and partition-key handler execution ordering guarantees. `UsePartitionKey` remains
+  a routing feature only; equal-key batches can execute concurrently. This is a behavioral compatibility change.
 
 ## [0.0.1] - 2026-08-15
 
