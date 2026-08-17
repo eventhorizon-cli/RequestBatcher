@@ -8,10 +8,16 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: request-batcher-release
+  cancel-in-progress: false
+
 env:
   DOTNET_CLI_TELEMETRY_OPTOUT: "true"
   DOTNET_NOLOGO: "true"
+  NUGET_SOURCE: https://api.nuget.org/v3/index.json
   NUGET_PACKAGES: ${{ github.workspace }}/.nuget/packages
+  SOLUTION: RequestBatcher.slnx
 
 jobs:
   publish:
@@ -20,39 +26,20 @@ jobs:
     timeout-minutes: 15
 
     steps:
-      - name: Validate release tag
+      - name: Resolve stable package version
+        id: version
         env:
-          RELEASE_TAG: ${{ github.ref_name }}
+          TAG_NAME: ${{ github.ref_name }}
         shell: bash
         run: |
-          package_version="${RELEASE_TAG#v}"
-          if [[ ! "$package_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
-            echo "Release tag must use the form v1.2.3 or v1.2.3-preview.1."
+          stable_tag_pattern='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+
+          if [[ ! "$TAG_NAME" =~ $stable_tag_pattern ]]; then
+            echo "::error title=Invalid release tag::Expected v<major>.<minor>.<patch> without a prerelease suffix; received '$TAG_NAME'."
             exit 1
           fi
-          echo "PACKAGE_VERSION=$package_version" >> "$GITHUB_ENV"
 
-      - name: Validate draft GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.ref_name }}
-        shell: bash
-        run: |
-          for attempt in {1..12}; do
-            if is_draft="$(gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft' 2>/dev/null)"; then
-              if [[ "$is_draft" == "true" ]]; then
-                exit 0
-              fi
-
-              echo "GitHub Release $RELEASE_TAG must be a draft before package publishing starts."
-              exit 1
-            fi
-
-            sleep 5
-          done
-
-          echo "A draft GitHub Release for $RELEASE_TAG was not found."
-          exit 1
+          echo "value=${TAG_NAME#v}" >> "$GITHUB_OUTPUT"
 
       - name: Checkout release
         uses: actions/checkout@v7
@@ -64,54 +51,79 @@ jobs:
         with:
           global-json-file: global.json
 
+      - name: Validate NuGet credentials
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        shell: bash
+        run: |
+          if [[ -z "$NUGET_API_KEY" ]]; then
+            echo "::error title=Missing NuGet publishing credential::Set the NUGET_API_KEY repository secret."
+            exit 1
+          fi
+
       - name: Restore
-        run: dotnet restore RequestBatcher.slnx
+        run: dotnet restore "$SOLUTION"
 
       - name: Verify formatting
         run: dotnet format RequestBatcher.slnx --no-restore --verify-no-changes --verbosity diagnostic
 
       - name: Build
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
         run: >-
-          dotnet build RequestBatcher.slnx
+          dotnet build "$SOLUTION"
           --configuration Release
           --no-restore
+          -p:Version="$VERSION"
           -p:ContinuousIntegrationBuild=true
 
       - name: Test
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
         run: >-
           dotnet test tests/RequestBatcher.Tests/RequestBatcher.Tests.csproj
           --configuration Release
           --no-build
           --no-restore
+          -p:Version="$VERSION"
 
       - name: Pack
+        env:
+          VERSION: ${{ steps.version.outputs.value }}
         run: >-
           dotnet pack src/RequestBatcher/RequestBatcher.csproj
           --configuration Release
           --no-build
           --no-restore
           --output artifacts
-          -p:PackageVersion=${PACKAGE_VERSION}
+          -p:Version="$VERSION"
           -p:ContinuousIntegrationBuild=true
 
       - name: Publish package to NuGet
-        run: >-
-          dotnet nuget push "artifacts/RequestBatcher.${PACKAGE_VERSION}.nupkg"
-          --source https://api.nuget.org/v3/index.json
-          --api-key "${{ secrets.NUGET_API_KEY }}"
-          --skip-duplicate
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          package="artifacts/RequestBatcher.$VERSION.nupkg"
+          test -f "$package"
+          dotnet nuget push "$package" --api-key "$NUGET_API_KEY" --source "$NUGET_SOURCE" --skip-duplicate
 
-      - name: Upload packages to GitHub Release
+      - name: Create GitHub Release with packages
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: >-
-          gh release upload "$RELEASE_TAG"
-          artifacts/*.nupkg artifacts/*.snupkg
-          --clobber
+          VERSION: ${{ steps.version.outputs.value }}
+        run: |
+          if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
+            gh release create "$GITHUB_REF_NAME" \
+              --draft \
+              --verify-tag \
+              --title "RequestBatcher $VERSION" \
+              --generate-notes
+          fi
 
-      - name: Publish GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.ref_name }}
-        run: gh release edit "$RELEASE_TAG" --draft=false
+          package="artifacts/RequestBatcher.$VERSION.nupkg"
+          symbols="artifacts/RequestBatcher.$VERSION.snupkg"
+          test -f "$package"
+          test -f "$symbols"
+          gh release upload "$GITHUB_REF_NAME" "$package" "$symbols" --clobber
+          gh release edit "$GITHUB_REF_NAME" --draft=false
