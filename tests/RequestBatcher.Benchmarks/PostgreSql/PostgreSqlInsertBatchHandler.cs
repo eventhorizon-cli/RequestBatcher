@@ -4,7 +4,7 @@ using RequestBatcher.Benchmarks.Infrastructure;
 
 namespace RequestBatcher.Benchmarks.PostgreSql;
 
-internal sealed class PostgreSqlBatchHandler(
+internal sealed class PostgreSqlInsertBatchHandler(
     NpgsqlDataSource dataSource,
     BatchStartGate startGate,
     BatchExecutionCounter executionCounter) : IRequestBatchHandler<InsertRequest>
