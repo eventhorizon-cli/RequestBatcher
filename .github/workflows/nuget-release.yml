@@ -1,9 +1,9 @@
 name: NuGet Release
 
 on:
-  release:
-    types:
-      - published
+  push:
+    tags:
+      - "v*"
 
 permissions:
   contents: write
@@ -16,14 +16,13 @@ env:
 jobs:
   publish:
     name: Build and publish package
-    if: startsWith(github.event.release.tag_name, 'v')
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
     steps:
       - name: Validate release tag
         env:
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_TAG: ${{ github.ref_name }}
         shell: bash
         run: |
           package_version="${RELEASE_TAG#v}"
@@ -36,7 +35,7 @@ jobs:
       - name: Checkout release
         uses: actions/checkout@v7
         with:
-          ref: ${{ github.event.release.tag_name }}
+          ref: ${{ github.ref }}
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v6
@@ -73,15 +72,21 @@ jobs:
           -p:PackageVersion=${PACKAGE_VERSION}
           -p:ContinuousIntegrationBuild=true
 
-      - name: Upload packages to GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TAG: ${{ github.event.release.tag_name }}
-        run: gh release upload "$RELEASE_TAG" artifacts/*.nupkg artifacts/*.snupkg --clobber
-
       - name: Publish package to NuGet
         run: >-
           dotnet nuget push "artifacts/RequestBatcher.${PACKAGE_VERSION}.nupkg"
           --source https://api.nuget.org/v3/index.json
           --api-key "${{ secrets.NUGET_API_KEY }}"
           --skip-duplicate
+
+      - name: Create GitHub Release with packages
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: >-
+          gh release create "$RELEASE_TAG"
+          artifacts/*.nupkg
+          artifacts/*.snupkg
+          --title "$RELEASE_TAG"
+          --generate-notes
+          --verify-tag
