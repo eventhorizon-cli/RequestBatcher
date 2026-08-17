@@ -32,6 +32,28 @@ jobs:
           fi
           echo "PACKAGE_VERSION=$package_version" >> "$GITHUB_ENV"
 
+      - name: Validate draft GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          for attempt in {1..12}; do
+            if is_draft="$(gh release view "$RELEASE_TAG" --json isDraft --jq '.isDraft' 2>/dev/null)"; then
+              if [[ "$is_draft" == "true" ]]; then
+                exit 0
+              fi
+
+              echo "GitHub Release $RELEASE_TAG must be a draft before package publishing starts."
+              exit 1
+            fi
+
+            sleep 5
+          done
+
+          echo "A draft GitHub Release for $RELEASE_TAG was not found."
+          exit 1
+
       - name: Checkout release
         uses: actions/checkout@v7
         with:
@@ -79,14 +101,17 @@ jobs:
           --api-key "${{ secrets.NUGET_API_KEY }}"
           --skip-duplicate
 
-      - name: Create GitHub Release with packages
+      - name: Upload packages to GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TAG: ${{ github.ref_name }}
         run: >-
-          gh release create "$RELEASE_TAG"
-          artifacts/*.nupkg
-          artifacts/*.snupkg
-          --title "$RELEASE_TAG"
-          --generate-notes
-          --verify-tag
+          gh release upload "$RELEASE_TAG"
+          artifacts/*.nupkg artifacts/*.snupkg
+          --clobber
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: gh release edit "$RELEASE_TAG" --draft=false
