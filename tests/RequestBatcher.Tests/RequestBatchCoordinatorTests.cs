@@ -431,9 +431,9 @@ public sealed class RequestBatchCoordinatorTests
             .Verifiable();
 
         var services = new ServiceCollection();
-        services.AddRequestBatcher<int>(
-            handler.Object.HandleAsync,
-            ServiceLifetime.Singleton);
+        services.AddSingleton<Func<IReadOnlyList<int>, CancellationToken, ValueTask>>(
+            handler.Object.HandleAsync);
+        services.AddRequestBatcher<int, TestBatchHandler<int>>(ServiceLifetime.Singleton);
 
         await using var provider = services.BuildServiceProvider(
             new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
@@ -452,14 +452,12 @@ public sealed class RequestBatchCoordinatorTests
     public void AddRequestBatcher_SameRequestTypeRegisteredTwice_Throws()
     {
         var services = new ServiceCollection();
-        services.AddRequestBatcher<int>(
-            (_, _) => ValueTask.CompletedTask,
-            ServiceLifetime.Singleton);
+        services.AddSingleton<Func<IReadOnlyList<int>, CancellationToken, ValueTask>>(
+            static (_, _) => ValueTask.CompletedTask);
+        services.AddRequestBatcher<int, TestBatchHandler<int>>(ServiceLifetime.Singleton);
 
         var exception = Assert.Throws<InvalidOperationException>(() =>
-            services.AddRequestBatcher<int>(
-                (_, _) => ValueTask.CompletedTask,
-                ServiceLifetime.Singleton));
+            services.AddRequestBatcher<int, TestBatchHandler<int>>(ServiceLifetime.Singleton));
 
         Assert.Contains(typeof(int).ToString(), exception.Message, StringComparison.Ordinal);
     }
@@ -509,8 +507,9 @@ public sealed class RequestBatchCoordinatorTests
     {
         var configureCallCount = 0;
         var services = new ServiceCollection();
-        services.AddRequestBatcher<int>(
-            (_, _) => ValueTask.CompletedTask,
+        services.AddSingleton<Func<IReadOnlyList<int>, CancellationToken, ValueTask>>(
+            static (_, _) => ValueTask.CompletedTask);
+        services.AddRequestBatcher<int, TestBatchHandler<int>>(
             ServiceLifetime.Singleton,
             options =>
             {
@@ -562,8 +561,7 @@ public sealed class RequestBatchCoordinatorTests
         var services = new ServiceCollection();
 
         var exception = Assert.Throws<ArgumentOutOfRangeException>(() =>
-            services.AddRequestBatcher<int>(
-                (_, _) => ValueTask.CompletedTask,
+            services.AddRequestBatcher<int, TestBatchHandler<int>>(
                 ServiceLifetime.Singleton,
                 options =>
                 {
@@ -592,12 +590,12 @@ public sealed class RequestBatchCoordinatorTests
             .Returns(ValueTask.CompletedTask);
 
         var services = new ServiceCollection();
-        services.AddRequestBatcher<int>(
-            integerHandler.Object.HandleAsync,
-            ServiceLifetime.Singleton);
-        services.AddRequestBatcher<string>(
-            stringHandler.Object.HandleAsync,
-            ServiceLifetime.Singleton);
+        services.AddSingleton<Func<IReadOnlyList<int>, CancellationToken, ValueTask>>(
+            integerHandler.Object.HandleAsync);
+        services.AddSingleton<Func<IReadOnlyList<string>, CancellationToken, ValueTask>>(
+            stringHandler.Object.HandleAsync);
+        services.AddRequestBatcher<int, TestBatchHandler<int>>(ServiceLifetime.Singleton);
+        services.AddRequestBatcher<string, TestBatchHandler<string>>(ServiceLifetime.Singleton);
 
         await using var provider = services.BuildServiceProvider(
             new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
@@ -619,9 +617,9 @@ public sealed class RequestBatchCoordinatorTests
 
         var services = new ServiceCollection();
         services.AddSingleton<ILogger<RequestBatchCoordinator<int>>>(logger);
-        services.AddRequestBatcher<int>(
-            (_, _) => ValueTask.FromException(expected),
-            ServiceLifetime.Singleton);
+        services.AddSingleton<Func<IReadOnlyList<int>, CancellationToken, ValueTask>>(
+            (_, _) => ValueTask.FromException(expected));
+        services.AddRequestBatcher<int, TestBatchHandler<int>>(ServiceLifetime.Singleton);
 
         await using var provider = services.BuildServiceProvider(
             new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
@@ -639,11 +637,14 @@ public sealed class RequestBatchCoordinatorTests
     }
 
     private static ServiceProvider CreateProvider<TRequest>(
-        RequestBatchHandler<TRequest> handler,
+        Func<IReadOnlyList<TRequest>, CancellationToken, ValueTask> handler,
         Action<RequestBatchOptions<TRequest>>? configure = null)
     {
         var services = new ServiceCollection();
-        services.AddRequestBatcher(handler, ServiceLifetime.Singleton, configure);
+        services.AddSingleton(handler);
+        services.AddRequestBatcher<TRequest, TestBatchHandler<TRequest>>(
+            ServiceLifetime.Singleton,
+            configure);
         return services.BuildServiceProvider(
             new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
     }
@@ -667,6 +668,16 @@ public sealed class RequestBatchCoordinatorTests
     }
 
     private sealed class TestBatchException : Exception;
+
+    private sealed class TestBatchHandler<TRequest>(
+        Func<IReadOnlyList<TRequest>, CancellationToken, ValueTask> handler)
+        : IRequestBatchHandler<TRequest>
+    {
+        public ValueTask HandleAsync(
+            IReadOnlyList<TRequest> requests,
+            CancellationToken cancellationToken = default) =>
+            handler(requests, cancellationToken);
+    }
 
     private sealed record KeyedRequest(int Key, int Sequence);
 

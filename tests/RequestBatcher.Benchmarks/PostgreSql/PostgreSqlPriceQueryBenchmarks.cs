@@ -65,8 +65,10 @@ public class PostgreSqlPriceQueryBenchmarks
             .ToArray();
 
         var services = new ServiceCollection();
-        services.AddRequestBatcher<PriceQueryRequest>(
-            new PostgreSqlPriceQueryBatchHandler(DataSource, _startGate, _executionCounter).HandleAsync,
+        services.AddSingleton(DataSource);
+        services.AddSingleton(_startGate);
+        services.AddSingleton(_executionCounter);
+        services.AddRequestBatcher<PriceQueryRequest, PostgreSqlPriceQueryBatchHandler>(
             ServiceLifetime.Singleton,
             options =>
             {

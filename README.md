@@ -147,8 +147,7 @@ public sealed class OrderService(IRequestBatcher<OrderWriteRequest> batcher)
 ```
 
 `SaveAsync` returns the same `Task` produced by RequestBatcher. It completes only after the handler has processed the
-request; the caller does not need to know which batch or partition contained it. A handler delegate can also be
-registered when a separate handler class is unnecessary.
+request; the caller does not need to know which batch or partition contained it.
 
 ### Returning a Value
 

@@ -60,8 +60,10 @@ public class RedisWriteBenchmarks
         _keys = _requests.Select(request => request.Key).ToArray();
 
         var services = new ServiceCollection();
-        services.AddRequestBatcher<RedisWriteRequest>(
-            new RedisWriteBatchHandler(Database, _startGate, _executionCounter).HandleAsync,
+        services.AddSingleton(Database);
+        services.AddSingleton(_startGate);
+        services.AddSingleton(_executionCounter);
+        services.AddRequestBatcher<RedisWriteRequest, RedisWriteBatchHandler>(
             ServiceLifetime.Singleton,
             options =>
             {

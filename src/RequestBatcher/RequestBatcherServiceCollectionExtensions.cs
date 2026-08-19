@@ -39,34 +39,6 @@ public static class RequestBatcherServiceCollectionExtensions
     }
 
     /// <summary>
-    /// Registers one singleton request batcher backed by a handler delegate.
-    /// </summary>
-    /// <param name="services">The application-owned service collection.</param>
-    /// <param name="handler">The function that processes one batch.</param>
-    /// <param name="handlerLifetime">The handler lifetime. Scoped and transient handlers are resolved once per batch.</param>
-    /// <param name="configure">An optional callback that configures batching.</param>
-    public static IServiceCollection AddRequestBatcher<TRequest>(
-        this IServiceCollection services,
-        RequestBatchHandler<TRequest> handler,
-        ServiceLifetime handlerLifetime,
-        Action<RequestBatchOptions<TRequest>>? configure = null)
-    {
-        ArgumentNullException.ThrowIfNull(services);
-        ArgumentNullException.ThrowIfNull(handler);
-        ValidateHandlerLifetime(handlerLifetime);
-        RegisterBatcherPipeline<TRequest>(services);
-
-        return AddRequestBatcherCore<TRequest>(
-            services,
-            handlerLifetime,
-            configure,
-            services => services.Add(new ServiceDescriptor(
-                typeof(IRequestBatchHandler<TRequest>),
-                _ => new DelegateRequestBatchHandler<TRequest>(handler),
-                handlerLifetime)));
-    }
-
-    /// <summary>
     /// Registers one singleton request/response batcher and its handler for <typeparamref name="TRequest"/>.
     /// </summary>
     /// <param name="services">The application-owned service collection.</param>
@@ -91,35 +63,6 @@ public static class RequestBatcherServiceCollectionExtensions
             services => services.Add(new ServiceDescriptor(
                 typeof(IRequestBatchHandler<TRequest, TResponse>),
                 typeof(THandler),
-                handlerLifetime)));
-    }
-
-    /// <summary>
-    /// Registers one singleton request/response batcher backed by a handler delegate.
-    /// </summary>
-    /// <param name="services">The application-owned service collection.</param>
-    /// <param name="handler">The function that processes one response-bearing batch.</param>
-    /// <param name="handlerLifetime">The handler lifetime. Scoped and transient handlers are resolved once per batch.</param>
-    /// <param name="configure">An optional callback that configures batching.</param>
-    /// <typeparam name="TRequest">The request type.</typeparam>
-    /// <typeparam name="TResponse">The response type.</typeparam>
-    public static IServiceCollection AddRequestBatcher<TRequest, TResponse>(
-        this IServiceCollection services,
-        RequestBatchHandler<TRequest, TResponse> handler,
-        ServiceLifetime handlerLifetime,
-        Action<RequestBatchOptions<TRequest>>? configure = null)
-    {
-        ArgumentNullException.ThrowIfNull(services);
-        ArgumentNullException.ThrowIfNull(handler);
-        ValidateHandlerLifetime(handlerLifetime);
-
-        return AddResponseBatcherCore<TRequest, TResponse>(
-            services,
-            handlerLifetime,
-            configure,
-            services => services.Add(new ServiceDescriptor(
-                typeof(IRequestBatchHandler<TRequest, TResponse>),
-                _ => new DelegateResponseRequestBatchHandler<TRequest, TResponse>(handler),
                 handlerLifetime)));
     }
 
@@ -278,22 +221,4 @@ public static class RequestBatcherServiceCollectionExtensions
         }
     }
 
-    private sealed class DelegateRequestBatchHandler<TRequest>(RequestBatchHandler<TRequest> handler)
-        : IRequestBatchHandler<TRequest>
-    {
-        public ValueTask HandleAsync(
-            IReadOnlyList<TRequest> requests,
-            CancellationToken cancellationToken = default) =>
-            handler(requests, cancellationToken);
-    }
-
-    private sealed class DelegateResponseRequestBatchHandler<TRequest, TResponse>(
-        RequestBatchHandler<TRequest, TResponse> handler)
-        : IRequestBatchHandler<TRequest, TResponse>
-    {
-        public ValueTask HandleAsync(
-            IReadOnlyList<RequestBatchItem<TRequest, TResponse>> requests,
-            CancellationToken cancellationToken = default) =>
-            handler(requests, cancellationToken);
-    }
 }

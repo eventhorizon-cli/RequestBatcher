@@ -24,9 +24,7 @@ public sealed class RequestResponseBatcherTests
             .Verifiable();
 
         var services = new ServiceCollection();
-        services.AddRequestBatcher<ResponseRequest, string>(
-            handler.Object.HandleAsync,
-            ServiceLifetime.Singleton);
+        AddResponseHandler<ResponseRequest, string>(services, handler.Object.HandleAsync);
         await using var provider = services.BuildServiceProvider(
             new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
         var batcher = provider.GetRequiredService<IRequestBatcher<ResponseRequest, string>>();
@@ -247,18 +245,16 @@ public sealed class RequestResponseBatcherTests
     public void AddRequestBatcher_ResponseAndVoidForSameRequestType_RejectsDuplicatePipeline()
     {
         var services = new ServiceCollection();
-        services.AddRequestBatcher<int, string>(
+        AddResponseHandler<int, string>(
+            services,
             (items, _) =>
             {
                 items.SetResponses(static request => request.ToString());
                 return ValueTask.CompletedTask;
-            },
-            ServiceLifetime.Singleton);
+            });
 
         var exception = Assert.Throws<InvalidOperationException>(() =>
-            services.AddRequestBatcher<int>(
-                (_, _) => ValueTask.CompletedTask,
-                ServiceLifetime.Singleton));
+            services.AddRequestBatcher<int, NoResponseHandler>(ServiceLifetime.Singleton));
 
         Assert.Contains("already been registered", exception.Message, StringComparison.Ordinal);
     }
@@ -291,7 +287,8 @@ public sealed class RequestResponseBatcherTests
     {
         var configureCallCount = 0;
         var services = new ServiceCollection();
-        services.AddRequestBatcher<int, string>(
+        AddResponseHandler<int, string>(
+            services,
             (items, _) =>
             {
                 items.SetResponses(static request => request.ToString());
@@ -392,12 +389,24 @@ public sealed class RequestResponseBatcherTests
         await stopping.WaitAsync(TimeSpan.FromSeconds(5));
     }
 
+    private static void AddResponseHandler<TRequest, TResponse>(
+        IServiceCollection services,
+        Func<IReadOnlyList<RequestBatchItem<TRequest, TResponse>>, CancellationToken, ValueTask> handler,
+        ServiceLifetime handlerLifetime = ServiceLifetime.Singleton,
+        Action<RequestBatchOptions<TRequest>>? configure = null)
+    {
+        services.AddSingleton(handler);
+        services.AddRequestBatcher<TRequest, TResponse, TestResponseHandler<TRequest, TResponse>>(
+            handlerLifetime,
+            configure);
+    }
+
     private static ServiceProvider CreateProvider<TRequest, TResponse>(
-        RequestBatchHandler<TRequest, TResponse> handler,
+        Func<IReadOnlyList<RequestBatchItem<TRequest, TResponse>>, CancellationToken, ValueTask> handler,
         Action<RequestBatchOptions<TRequest>>? configure = null)
     {
         var services = new ServiceCollection();
-        services.AddRequestBatcher(handler, ServiceLifetime.Singleton, configure);
+        AddResponseHandler(services, handler, ServiceLifetime.Singleton, configure);
         return services.BuildServiceProvider(
             new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
     }
@@ -419,6 +428,24 @@ public sealed class RequestResponseBatcherTests
     private sealed record KeyedResponseRequest(int Key, int Value);
 
     private sealed class TestBatchException : Exception;
+
+    private sealed class TestResponseHandler<TRequest, TResponse>(
+        Func<IReadOnlyList<RequestBatchItem<TRequest, TResponse>>, CancellationToken, ValueTask> handler)
+        : IRequestBatchHandler<TRequest, TResponse>
+    {
+        public ValueTask HandleAsync(
+            IReadOnlyList<RequestBatchItem<TRequest, TResponse>> requests,
+            CancellationToken cancellationToken = default) =>
+            handler(requests, cancellationToken);
+    }
+
+    private sealed class NoResponseHandler : IRequestBatchHandler<int>
+    {
+        public ValueTask HandleAsync(
+            IReadOnlyList<int> requests,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.CompletedTask;
+    }
 
     private sealed class ResponseHandlerLifetimeProbe
     {

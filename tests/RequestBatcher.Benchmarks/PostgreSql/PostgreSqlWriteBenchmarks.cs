@@ -86,8 +86,10 @@ public class PostgreSqlWriteBenchmarks
             .ToArray();
 
         var services = new ServiceCollection();
-        services.AddRequestBatcher<InsertRequest>(
-            new PostgreSqlInsertBatchHandler(DataSource, _startGate, _executionCounter).HandleAsync,
+        services.AddSingleton(DataSource);
+        services.AddSingleton(_startGate);
+        services.AddSingleton(_executionCounter);
+        services.AddRequestBatcher<InsertRequest, PostgreSqlInsertBatchHandler>(
             ServiceLifetime.Singleton,
             options =>
             {

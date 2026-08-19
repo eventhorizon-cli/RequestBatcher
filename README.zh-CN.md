@@ -138,7 +138,7 @@ public sealed class OrderService(IRequestBatcher<OrderWriteRequest> batcher)
 ```
 
 `SaveAsync` 直接返回 RequestBatcher 创建的 `Task`。只有 Handler 完成包含该请求的批次后，这个 `Task` 才会
-完成；调用方无需知道请求进入了哪个批次或分区。如果不希望为 Handler 单独定义类型，也可以注册 Handler 委托。
+完成；调用方无需知道请求进入了哪个批次或分区。
 
 ### 返回值
 

@@ -56,6 +56,8 @@ You are an AI coding assistant for this repository.
 - For a feature, public API, behavior, or architectural change, create or update the relevant design document before
   editing production code. The design must state the intended contract, internal flow, compatibility impact, and test
   coverage; implementation must follow that documented design.
+- Design documents describe only the current intended design. Do not retain implementation history, rejected
+  alternatives, superseded behavior, or APIs that no longer exist.
 - Update the README when behavior, configuration, public APIs, lifecycle, or user-facing functionality changes.
 - Keep `src/RequestBatcher/README.md`, the NuGet package README, synchronized with relevant user-facing behavior,
   configuration, and usage guidance in the root README.

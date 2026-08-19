@@ -2,31 +2,26 @@
 
 ## Status
 
-Approved implementation design. This document records the request/response
-batching contract and the internal adaptation direction before code changes.
+Implementation design for the current request/response batching API.
 
-## Context
+## Goals
 
-`IRequestBatcher<TRequest>` and `IRequestBatchHandler<TRequest>` are the
-existing no-response API. A new request/response API must return one result for
-each accepted request without creating a second queue, dispatcher, lifecycle,
-or backpressure implementation.
+- Return one typed response for every successfully processed request.
+- Reuse the same coordinator, BufferQueue topic, admission control, dispatch,
+  cancellation, failure, and shutdown implementation as request-only batching.
+- Keep BufferQueue and response completion details out of the caller-facing API.
+- Resolve each handler according to the lifetime supplied at registration.
 
-The existing coordinator, pending-request producer, BufferQueue topic, and
-dispatch loop intentionally remain the execution core. They are generic over a
-request type and have no response-specific behavior. For the request/response
-API, `RequestBatchItem<TRequest, TResponse>` becomes that existing request
-type. The old no-response handler interface is therefore adapted internally to
-forward each batch of items to the new response-bearing handler.
+## Public API
 
-## Public Contract
-
-The existing API remains source and behavior compatible:
+Request-only callers submit one request or an explicit request sequence:
 
 ```csharp
 public interface IRequestBatcher<TRequest>
 {
-    Task ProcessAsync(TRequest request, CancellationToken cancellationToken = default);
+    Task ProcessAsync(
+        TRequest request,
+        CancellationToken cancellationToken = default);
 
     Task ProcessAsync(
         IEnumerable<TRequest> requests,
@@ -34,8 +29,7 @@ public interface IRequestBatcher<TRequest>
 }
 ```
 
-The response API is first-class and has matching single and explicit-batch
-submission methods:
+Request/response callers use the corresponding response-bearing interface:
 
 ```csharp
 public interface IRequestBatcher<TRequest, TResponse>
@@ -50,19 +44,74 @@ public interface IRequestBatcher<TRequest, TResponse>
 }
 ```
 
-Handlers receive `RequestBatchItem<TRequest, TResponse>`, which exposes the
-request and provides `SetResponse(TResponse)`. A handler must set exactly one
-response for every item in a successfully completed handler batch. The
-`SetResponses(IEnumerable<TResponse>)` extension is an ordered convenience
-method: the first enumerated response is assigned to the first item, and so
-on. It validates the complete sequence before changing any item.
+Handlers are application service types:
 
-## Internal Adaptation
+```csharp
+public interface IRequestBatchHandler<TRequest>
+{
+    ValueTask HandleAsync(
+        IReadOnlyList<TRequest> requests,
+        CancellationToken cancellationToken = default);
+}
 
-The legacy execution pipeline stays unchanged. Its generic `TRequest` is the
-physical item carried by pending requests, BufferQueue, and `BatchDispatchLoop`.
-For a response registration, that physical request is
-`RequestBatchItem<TRequest, TResponse>`.
+public interface IRequestBatchHandler<TRequest, TResponse>
+{
+    ValueTask HandleAsync(
+        IReadOnlyList<RequestBatchItem<TRequest, TResponse>> requests,
+        CancellationToken cancellationToken = default);
+}
+```
+
+Registration names the handler type and its lifetime explicitly:
+
+```csharp
+services.AddRequestBatcher<TRequest, THandler>(
+    handlerLifetime,
+    configure);
+
+services.AddRequestBatcher<TRequest, TResponse, THandler>(
+    handlerLifetime,
+    configure);
+```
+
+One logical pipeline may be registered for a request type. Registering both
+forms for the same `TRequest` is invalid because their queue topology and
+capacity configuration would conflict.
+
+## Compatibility
+
+The public registration surface is type-based: applications provide an
+`IRequestBatchHandler` implementation and choose its service lifetime when
+registering the batcher. Request-only and request/response pipelines retain
+their respective submission contracts shown above.
+
+## Response Items
+
+`RequestBatchItem<TRequest, TResponse>` is the physical request type carried by
+the response pipeline. It exposes the submitted `Request` and one response
+slot.
+
+The handler sets a response with `SetResponse(TResponse)`. The response slot
+accepts exactly one assignment. A second assignment throws and preserves the
+first value.
+
+`SetResponses(IEnumerable<TResponse>)` assigns a complete ordered result set:
+
+- the first response maps to the first item, the second to the second item,
+  and so on;
+- the response count must equal the item count;
+- the response sequence is fully materialized and validated before any item is
+  changed;
+- an enumeration failure, count mismatch, or existing assignment leaves all
+  previously unset items unchanged.
+
+After a response handler completes successfully, every item is validated. An
+unset item fails its handler batch.
+
+## Internal Flow
+
+The response facade creates one item for every caller request and submits those
+items through the request-only batching pipeline:
 
 ```text
 IRequestBatcher<TRequest, TResponse>
@@ -76,6 +125,10 @@ IRequestBatcher<RequestBatchItem<TRequest, TResponse>>
         v
 RequestBatchCoordinator<RequestBatchItem<TRequest, TResponse>>
         |
+        +--> PendingRequestProducer
+        +--> BufferQueue
+        +--> BatchDispatchLoop
+        |
         v
 IRequestBatchHandler<RequestBatchItem<TRequest, TResponse>>
         |
@@ -86,91 +139,63 @@ ResponseRequestBatchHandler<TRequest, TResponse>
 IRequestBatchHandler<TRequest, TResponse>
 ```
 
-`ResponseRequestBatchHandler<TRequest, TResponse>` implements the original
-no-response handler interface whose request type is `RequestBatchItem<TRequest,
-TResponse>`. It forwards the batch directly to
-`IRequestBatchHandler<TRequest, TResponse>`, then verifies that every item has
-one response before returning successfully. That preserves the original
-handler-success/failure completion rules without duplicating scheduler code.
+`ResponseRequestBatchHandler<TRequest, TResponse>` is the internal adapter. It
+forwards the item batch to the application handler and validates every response
+slot before the coordinator marks the physical requests successful.
 
-The legacy no-response registration keeps its existing physical request type:
+The explicit-batch facade retains its item sequence until processing finishes,
+then reads responses in that same sequence. The returned
+`IReadOnlyList<TResponse>` therefore follows caller input order even when queue
+routing splits items across partitions or handler invocations.
 
-```text
-IRequestBatcher<TRequest>
-        |
-        v
-RequestBatchCoordinator<TRequest>
-        |
-        v
-IRequestBatchHandler<TRequest>
-```
+## Configuration and Routing
 
-There is no private `NoResponse` response marker, no second coordinator, and
-no second dispatch implementation. The existing no-response coordinator runs
-unchanged for legacy registrations; response registrations reuse it with
-`RequestBatchItem<TRequest, TResponse>` as its request payload.
+The configuration callback produces one validated
+`RequestBatchOptions<TRequest>` snapshot. That snapshot is registered for
+application inspection and projected to
+`RequestBatchOptions<RequestBatchItem<TRequest, TResponse>>` for the internal
+queue.
 
-## Registration and Scoping
+`UsePartitionKey` always receives the original `TRequest`. The projected queue
+selector reads `RequestBatchItem.Request` before calculating the key. Equal
+keys route to the same queue partition but do not guarantee serialized handler
+execution or ordering.
 
-Each `AddRequestBatcher` call registers exactly one logical pipeline for a
-request type. Registering both the legacy and response-bearing forms for the
-same `TRequest` remains invalid because their queue topic and pending-capacity
-settings would otherwise conflict.
+## Handler Lifetime
 
-For singleton handlers, the response handler is resolved once when the
-coordinator is composed. For scoped and transient handlers, a fresh async scope
-is created for each dispatched batch and the handler is resolved inside that
-scope. `ResponseRequestBatchHandler<TRequest, TResponse>` forwards into that
-scoped response handler as part of the original handler invocation.
+The handler type is registered in the application-owned service collection
+with the supplied `ServiceLifetime`.
 
-`UsePartitionKey` is configured from the original `TRequest` and projected to
-`RequestBatchItem<TRequest, TResponse>.Request` before the BufferQueue topic is
-created. This preserves routing behavior without exposing queue details in the
-public response API.
+- A singleton handler is resolved when the singleton coordinator is composed.
+- A scoped or transient handler is resolved in a new async scope owned by one
+  dispatched handler batch.
+- That async scope is disposed after the handler batch completes.
 
-The response registration invokes its configuration callback once and registers
-the validated `RequestBatchOptions<TRequest>` snapshot as
-`IOptions<RequestBatchOptions<TRequest>>`, just as the legacy registration
-does. A projected internal snapshot configures the item-based queue.
+No nested service provider is created.
 
-## Completion and Lifecycle
+## Completion, Cancellation, and Shutdown
 
-- A response call completes only after its batch handler has completed and its
-  item has exactly one assigned response.
-- A missing response is a handler contract violation. Every active request in
-  that handler batch faults with the same failure.
-- Duplicate assignment is a handler contract violation and preserves the first
-  assigned value.
-- Caller cancellation can remove a request only before dispatch. Once a batch
-  starts, completion reports the handler's actual success or failure.
-- A legacy no-response call keeps its existing completion behavior.
-- `StopAsync` and `DisposeAsync` on the coordinator continue to stop admission
-  before draining accepted work. The response facade is backed by that same
-  coordinator and is disposed with it by the service provider.
+- A caller completes successfully only after its handler batch succeeds and
+  its response slot contains a value. A null response is valid.
+- A handler exception faults every active request in that handler batch with
+  the same exception.
+- Caller cancellation removes work only before handler dispatch.
+- Once dispatch begins, the caller observes the actual handler outcome.
+- `StopAsync` stops admission, drains accepted work, and then stops dispatch.
+- `DisposeAsync` follows the same drain path and releases coordinator-owned
+  resources.
+- Pending work is in-process and is not recovered after process failure.
 
-## Compatibility and Scope
+## Validation
 
-No existing public API is removed or changed. `RequestBatchCoordinator<TRequest>`
-remains the execution coordinator for both registrations, instantiated with
-`RequestBatchItem<TRequest, TResponse>` only for the response registration.
-BufferQueue topics, partitions, producers, consumers, and handler adapters
-remain implementation details.
+Deterministic tests cover:
 
-This change does not alter scheduling, partition-count calculation,
-backpressure, ordering, or durability contracts. It changes only the internal
-completion representation so both public API families reuse the same pipeline.
-
-## Test Plan
-
-The implementation must prove all of the following deterministically:
-
-- a response handler returns single and batch results in submission order;
-- missing and duplicate responses fault the affected handler batch;
-- `SetResponses(IEnumerable<TResponse>)` preserves ordered mapping and makes
-  no partial changes when enumeration or count validation fails;
-- a response handler is invoked through the existing no-response coordinator
-  pipeline and keeps its existing success, failure, cancellation, and shutdown
-  behavior;
-- response and legacy registrations for the same request type are rejected;
-- scoped response and legacy handlers are resolved once per dispatched batch;
-- partition-key projection still routes using the original request value.
+- single and explicit-batch response ordering;
+- missing and duplicate response assignment;
+- ordered bulk assignment and all-or-nothing validation;
+- handler failure and caller cancellation;
+- stop and drain behavior;
+- handler registration and per-batch scope ownership;
+- duplicate logical-pipeline registration;
+- partition-key projection from the original request;
+- public and projected option snapshots.

@@ -66,8 +66,10 @@ public class RedisReadBenchmarks
         }
 
         var services = new ServiceCollection();
-        services.AddRequestBatcher<RedisReadRequest>(
-            new RedisReadBatchHandler(Database, _startGate, _executionCounter).HandleAsync,
+        services.AddSingleton(Database);
+        services.AddSingleton(_startGate);
+        services.AddSingleton(_executionCounter);
+        services.AddRequestBatcher<RedisReadRequest, RedisReadBatchHandler>(
             ServiceLifetime.Singleton,
             options =>
             {
