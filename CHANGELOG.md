@@ -13,6 +13,12 @@ All notable changes to RequestBatcher are documented in this file.
 - Removed global, partition-local, and partition-key handler execution ordering guarantees. `UsePartitionKey` remains
   a routing feature only; equal-key batches can execute concurrently. This is a behavioral compatibility change.
 
+### Added
+
+- Added first-class request/response batching through `IRequestBatcher<TRequest, TResponse>` and
+  `IRequestBatchHandler<TRequest, TResponse>`. Response batches use `RequestBatchItem<TRequest, TResponse>` and can
+  assign responses directly or map the nth response in an ordered enumeration to the nth request item with `SetResponses`.
+
 ## [0.0.1] - 2026-08-15
 
 First public release.

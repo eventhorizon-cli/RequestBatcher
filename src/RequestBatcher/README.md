@@ -1,7 +1,8 @@
 # RequestBatcher
 
-RequestBatcher lets application code submit one request and await one `Task`, while an application handler receives
-multiple queued requests as an `IReadOnlyList<TRequest>`.
+RequestBatcher lets application code submit one request and await one `Task` or `Task<TResponse>`, while an
+application handler receives multiple queued requests as an `IReadOnlyList<TRequest>` or
+`IReadOnlyList<RequestBatchItem<TRequest, TResponse>>`.
 
 > **Batching does not require callers to assemble a collection.** Separate callers can each submit one `TRequest`
 > concurrently. RequestBatcher coalesces requests already queued for the same partition into handler batches of up to
@@ -24,8 +25,8 @@ writes that have already been committed.
 
 ## When Not to Use It
 
-Do not use RequestBatcher when work must survive process failure, remain inside the caller's transaction, return a
-direct `TResult`, wait for a minimum batch size, or rely on automatic retries or exactly-once effects. It is also not
+Do not use RequestBatcher when work must survive process failure, remain inside the caller's transaction, wait for a
+minimum batch size, or rely on automatic retries or exactly-once effects. It is also not
 suitable when an in-flight downstream operation must stop as soon as its individual caller disconnects, times out, or
 cancels. One handler batch can contain requests from several callers, so caller cancellation tokens are not forwarded
 to the handler and cannot cancel the shared handler call.
@@ -91,9 +92,60 @@ public sealed class OrderService(IRequestBatcher<OrderWriteRequest> batcher)
 The returned `Task` completes after the handler has processed that request. If the handler fails, the caller receives
 the original exception.
 
-If several handler calls fail for one explicit group, `await` follows normal `Task` semantics and throws one original
-exception. All distinct exception instances remain available through `Task.Exception.InnerExceptions`; one handler
-exception fanned out to several requests is recorded once.
+### Returning a Value
+
+Use the response-enabled API when each request should return a value. The handler receives an item containing the
+original request and its response slot:
+
+```csharp
+public sealed record PriceQuery(long ProductId);
+public sealed record PriceUpdate(long ProductId, decimal Price);
+
+public interface IPriceStore
+{
+    // The store returns one entry per input ID, in the same order.
+    Task<IReadOnlyList<PriceUpdate?>> FindAsync(
+        IEnumerable<long> productIds,
+        CancellationToken cancellationToken);
+}
+
+public sealed class PriceQueryHandler(IPriceStore store)
+    : IRequestBatchHandler<PriceQuery, PriceUpdate?>
+{
+    public async ValueTask HandleAsync(
+        IReadOnlyList<RequestBatchItem<PriceQuery, PriceUpdate?>> items,
+        CancellationToken cancellationToken = default)
+    {
+        var responses = await store.FindAsync(
+            items.Select(item => item.Request.ProductId),
+            cancellationToken);
+        items.SetResponses(responses);
+    }
+}
+
+services.AddRequestBatcher<PriceQuery, PriceUpdate?, PriceQueryHandler>(
+    ServiceLifetime.Scoped,
+    options => options.BatchSize = 256);
+
+public sealed class PriceService(IRequestBatcher<PriceQuery, PriceUpdate?> priceBatcher)
+{
+    public Task<PriceUpdate?> FindAsync(
+        long productId,
+        CancellationToken cancellationToken = default) =>
+        priceBatcher.ProcessAsync(new PriceQuery(productId), cancellationToken);
+}
+```
+
+The handler must set exactly one response for every item before it returns. `item.SetResponse(response)` sets one item
+directly; `items.SetResponses(responses)` maps the nth response in the enumeration to the nth request item. The response
+enumeration must have the same order and one entry per item. The caller's `Task<TResponse>` completes only after the
+handler succeeds and its item's response has been set.
+
+For a response-enabled batcher, the explicit-group overload returns one response per input request in the same order,
+even when the requests are split across handler batches or queue partitions. If several handler calls fail for one
+explicit group, `await` follows normal `Task` semantics and throws one original exception. All distinct exception
+instances remain available through `Task.Exception.InnerExceptions`; one handler exception fanned out to several
+requests is recorded once.
 
 When requests already exist as a group, submit them together:
 
@@ -147,7 +199,7 @@ handoff queue behind BufferQueue.
 | --- | --- |
 | `MaxConcurrency = 1` | All requests use one queue partition; one handler batch can execute at a time. |
 | `MaxConcurrency > 1`, no partition key | Requests advance round-robin across the capped partition count; batches compete for global execution slots. |
-| `MaxConcurrency > 1`, with `UsePartitionKey` | The selector runs for every item. Equal keys use one queue partition, but separate handler batches for that key can execute concurrently. |
+| `MaxConcurrency > 1`, with `UsePartitionKey` | The partition-key function runs for every item. Equal keys use one queue partition, but separate handler batches for that key can execute concurrently. |
 
 RequestBatcher provides no global, partition-local, or partition-key handler execution ordering guarantee.
 
@@ -161,7 +213,7 @@ services.AddRequestBatcher<OrderWriteRequest, OrderWriteBatchHandler>(
         options.BatchSize = 256;
         options.MaxConcurrency = 4;
 
-        // Optional. Without this selector, routing is round-robin.
+        // Optional. Without a partition-key function, routing is round-robin.
         options.UsePartitionKey(request => request.OrderId);
     });
 ```

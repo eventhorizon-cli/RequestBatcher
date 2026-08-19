@@ -43,8 +43,6 @@ RequestBatcher is not a durable background queue or a transaction coordinator:
 
 - Accepted work must survive process failure. Use durable storage or a reliable message broker.
 - The operation must commit or roll back with the caller's transaction. Keep it in that transaction.
-- Every call needs a direct `TResult`. RequestBatcher returns completion through `Task`; a batched query must carry its
-  own result holder or update application state.
 - The downstream operation requires automatic retries or exactly-once effects. RequestBatcher provides neither.
 - The handler requires a minimum batch size or a fixed collection window. RequestBatcher dispatches currently queued
   work without waiting to fill a batch.
@@ -82,12 +80,15 @@ The two sides of the API have different responsibilities:
 | Side | API | Meaning |
 | --- | --- | --- |
 | Caller | `ProcessAsync(TRequest)` | Submits one request and returns a `Task` for that request's actual outcome. |
+| Caller | `IRequestBatcher<TRequest, TResponse>.ProcessAsync(TRequest)` | Submits one request and returns a `Task<TResponse>` for its response. |
 | Caller | `ProcessAsync(IEnumerable<TRequest>)` | Submits an existing group and returns one `Task` that waits for the whole submission. |
-| Handler | `HandleAsync(IReadOnlyList<TRequest>)` | Processes one batch selected by RequestBatcher and returns a `ValueTask` as its completion signal. |
+| Caller | `IRequestBatcher<TRequest, TResponse>.ProcessAsync(IEnumerable<TRequest>)` | Submits a group and returns responses in the same order as the input requests. |
+| Handler | `HandleAsync(IReadOnlyList<RequestBatchItem<TRequest, TResponse>>)` | Processes one response batch and sets one response for every item before returning. |
 
 The handler's `ValueTask` is awaited once inside RequestBatcher and is never returned to the caller. It allows a
 handler that completes synchronously to avoid allocating a `Task`; regular asynchronous I/O can still be implemented
-with `async ValueTask`.
+with `async ValueTask`. Request-only handlers continue to use `IRequestBatchHandler<TRequest>` and receive
+`IReadOnlyList<TRequest>`.
 
 ## Installation
 
@@ -149,6 +150,55 @@ public sealed class OrderService(IRequestBatcher<OrderWriteRequest> batcher)
 request; the caller does not need to know which batch or partition contained it. A handler delegate can also be
 registered when a separate handler class is unnecessary.
 
+### Returning a Value
+
+Use the response-enabled API when each request should return a value. The handler receives an item containing the
+original request and its response slot:
+
+```csharp
+public sealed record PriceQuery(long ProductId);
+public sealed record PriceUpdate(long ProductId, decimal Price);
+
+public interface IPriceStore
+{
+    // The store returns one entry per input ID, in the same order.
+    Task<IReadOnlyList<PriceUpdate?>> FindAsync(
+        IEnumerable<long> productIds,
+        CancellationToken cancellationToken);
+}
+
+public sealed class PriceQueryHandler(IPriceStore store)
+    : IRequestBatchHandler<PriceQuery, PriceUpdate?>
+{
+    public async ValueTask HandleAsync(
+        IReadOnlyList<RequestBatchItem<PriceQuery, PriceUpdate?>> items,
+        CancellationToken cancellationToken = default)
+    {
+        var responses = await store.FindAsync(
+            items.Select(item => item.Request.ProductId),
+            cancellationToken);
+        items.SetResponses(responses);
+    }
+}
+
+services.AddRequestBatcher<PriceQuery, PriceUpdate?, PriceQueryHandler>(
+    ServiceLifetime.Scoped,
+    options => options.BatchSize = 256);
+
+public sealed class PriceService(IRequestBatcher<PriceQuery, PriceUpdate?> priceBatcher)
+{
+    public Task<PriceUpdate?> FindAsync(
+        long productId,
+        CancellationToken cancellationToken = default) =>
+        priceBatcher.ProcessAsync(new PriceQuery(productId), cancellationToken);
+}
+```
+
+The handler must set exactly one response for every item before it returns. `item.SetResponse(response)` sets one
+item directly; `items.SetResponses(responses)` maps the nth response in the enumeration to the nth request item. The
+response enumeration must therefore have the same request order and one entry per item.
+The caller's `Task<TResponse>` completes only after the handler succeeds and its item's response has been set.
+
 ### Submitting an Existing Group
 
 When the caller already has multiple requests, it can submit them with one call:
@@ -170,7 +220,8 @@ request from the submission. This does not force the sequence into one handler c
 ## Single and Group Submission
 
 In this documentation, a **submission** is one caller invocation of `ProcessAsync`. A **handler batch** is the
-`IReadOnlyList<TRequest>` passed to one `HandleAsync` invocation. They are not the same boundary.
+`IReadOnlyList<TRequest>` or `IReadOnlyList<RequestBatchItem<TRequest, TResponse>>` passed to one `HandleAsync`
+invocation. They are not the same boundary.
 
 | Behavior | Single request | Explicit group |
 | --- | --- | --- |
@@ -191,7 +242,7 @@ is `min(MaxConcurrency, max(1, Environment.ProcessorCount))`, and one `BatchDisp
 | --- | --- | --- |
 | `MaxConcurrency = 1` | Every request uses one queue partition. | One handler batch can execute at a time. |
 | `MaxConcurrency > 1`, no partition key | Round-robin advances once per request across the capped partition count. | Batches from any partition compete for the same global execution slots. |
-| `MaxConcurrency > 1`, with `UsePartitionKey` | The selector is applied to every request; equal keys route to one queue partition. | Equal keys can still be dispatched in separate handler batches at the same time. |
+| `MaxConcurrency > 1`, with `UsePartitionKey` | The partition-key function is applied to every request; equal keys route to one queue partition. | Equal keys can still be dispatched in separate handler batches at the same time. |
 
 RequestBatcher provides no global, partition-local, or partition-key ordering guarantee. A partition key controls only
 queue routing; it is not a serialization mechanism.

@@ -1,5 +1,6 @@
 using System.Runtime.CompilerServices;
 using BufferQueue;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
 using RequestBatcher.PendingRequests;
@@ -35,7 +36,8 @@ public sealed class ConsumerFailureTests
         var coordinator = new RequestBatchCoordinator<int>(
             bufferQueue.Object,
             (_, _) => ValueTask.CompletedTask,
-            Options.Create(new RequestBatchOptions<int> { MaxConcurrency = 64 }));
+            Options.Create(new RequestBatchOptions<int> { MaxConcurrency = 64 }),
+            NullLogger<RequestBatchCoordinator<int>>.Instance);
 
         var processing = coordinator.ProcessAsync(42);
 

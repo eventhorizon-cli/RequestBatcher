@@ -39,8 +39,6 @@ RequestBatcher 既不是持久化后台队列，也不是事务协调器：
 
 - 已接收的请求必须在进程故障后仍可恢复。此时应使用持久化存储或可靠消息队列。
 - 操作必须随调用方事务一起提交或回滚。应将它留在原事务中。
-- 每次调用都必须直接得到 `TResult`。RequestBatcher 只通过 `Task` 返回完成状态；批量查询需要让请求携带
-  自己的结果容器，或更新应用状态。
 - 下游操作必须依赖自动重试，或副作用必须严格恰好一次（exactly-once）。RequestBatcher 不提供这些保证。
 - 下游操作必须等待最小批量凑齐，或者依赖固定的收集窗口。RequestBatcher 会直接处理当前已排队的请求。
 - 单个调用方断开、超时或取消后，正在执行的下游操作也必须立即停止。一个处理批次可能包含来自多个调用方的
@@ -75,11 +73,14 @@ RequestBatcher 既不是持久化后台队列，也不是事务协调器：
 | 使用方 | API | 含义 |
 | --- | --- | --- |
 | 调用方 | `ProcessAsync(TRequest)` | 提交一个请求，返回反映该请求实际处理结果的 `Task`。 |
+| 调用方 | `IRequestBatcher<TRequest, TResponse>.ProcessAsync(TRequest)` | 提交一个请求，返回其结果的 `Task<TResponse>`。 |
 | 调用方 | `ProcessAsync(IEnumerable<TRequest>)` | 提交调用方已持有的一组请求，返回等待整次提交完成的 `Task`。 |
-| Handler | `HandleAsync(IReadOnlyList<TRequest>)` | 处理 RequestBatcher 选出的一个批次，并用 `ValueTask` 表示完成。 |
+| 调用方 | `IRequestBatcher<TRequest, TResponse>.ProcessAsync(IEnumerable<TRequest>)` | 提交一组请求，并按输入请求的相同顺序返回结果。 |
+| Handler | `HandleAsync(IReadOnlyList<RequestBatchItem<TRequest, TResponse>>)` | 处理一个结果批次，并在返回前为每个 item 设置一个结果。 |
 
 RequestBatcher 只会在内部等待 Handler 返回的 `ValueTask` 一次，不会将它返回给调用方。同步完成的 Handler 可以
-因此避免分配 `Task`；普通异步 I/O 仍可直接使用 `async ValueTask` 实现。
+因此避免分配 `Task`；普通异步 I/O 仍可直接使用 `async ValueTask` 实现。只处理请求、不返回结果的 Handler
+仍使用 `IRequestBatchHandler<TRequest>`，并接收 `IReadOnlyList<TRequest>`。
 
 ## 安装
 
@@ -139,6 +140,54 @@ public sealed class OrderService(IRequestBatcher<OrderWriteRequest> batcher)
 `SaveAsync` 直接返回 RequestBatcher 创建的 `Task`。只有 Handler 完成包含该请求的批次后，这个 `Task` 才会
 完成；调用方无需知道请求进入了哪个批次或分区。如果不希望为 Handler 单独定义类型，也可以注册 Handler 委托。
 
+### 返回值
+
+如果每个请求都需要返回一个值，请使用带结果类型的 API。Handler 会收到包含原始请求和结果槽位的 item：
+
+```csharp
+public sealed record PriceQuery(long ProductId);
+public sealed record PriceUpdate(long ProductId, decimal Price);
+
+public interface IPriceStore
+{
+    // 存储层按相同顺序为每个输入 ID 返回一个结果。
+    Task<IReadOnlyList<PriceUpdate?>> FindAsync(
+        IEnumerable<long> productIds,
+        CancellationToken cancellationToken);
+}
+
+public sealed class PriceQueryHandler(IPriceStore store)
+    : IRequestBatchHandler<PriceQuery, PriceUpdate?>
+{
+    public async ValueTask HandleAsync(
+        IReadOnlyList<RequestBatchItem<PriceQuery, PriceUpdate?>> items,
+        CancellationToken cancellationToken = default)
+    {
+        var responses = await store.FindAsync(
+            items.Select(item => item.Request.ProductId),
+            cancellationToken);
+        items.SetResponses(responses);
+    }
+}
+
+services.AddRequestBatcher<PriceQuery, PriceUpdate?, PriceQueryHandler>(
+    ServiceLifetime.Scoped,
+    options => options.BatchSize = 256);
+
+public sealed class PriceService(IRequestBatcher<PriceQuery, PriceUpdate?> priceBatcher)
+{
+    public Task<PriceUpdate?> FindAsync(
+        long productId,
+        CancellationToken cancellationToken = default) =>
+        priceBatcher.ProcessAsync(new PriceQuery(productId), cancellationToken);
+}
+```
+
+Handler 返回前必须为每个 item 设置且只设置一个结果。`item.SetResponse(response)` 可以直接设置单个 item；
+`items.SetResponses(responses)` 会按位置将枚举中的第 n 个结果设置给第 n 个请求 item。因此，结果枚举必须与请求
+保持相同顺序，并且每个 item 都有一个结果。调用方的 `Task<TResponse>` 只有在 Handler 成功完成且对应 item 已设置
+结果后才会完成。
+
 ### 提交已有的请求组
 
 调用方已经持有多个请求时，可以一次提交：
@@ -158,7 +207,7 @@ Handler 调用：请求仍可能按 `BatchSize` 或分区路由拆成多个处�
 ## 单次提交与批量提交
 
 本文中的**提交**是指调用方执行一次 `ProcessAsync`；**处理批次**是指一次 `HandleAsync` 收到的
-`IReadOnlyList<TRequest>`。两者不是同一个边界。
+`IReadOnlyList<TRequest>` 或 `IReadOnlyList<RequestBatchItem<TRequest, TResponse>>`。两者不是同一个边界。
 
 | 行为 | 单次提交 | 显式批量提交 |
 | --- | --- | --- |
@@ -179,7 +228,7 @@ Handler 调用：请求仍可能按 `BatchSize` 或分区路由拆成多个处�
 | --- | --- | --- |
 | `MaxConcurrency = 1` | 所有请求进入一个队列分区。 | 同时最多执行一个 Handler 批次。 |
 | `MaxConcurrency > 1`，未配置分区键 | 每个请求按轮询方式在受上限约束的分区间分配。 | 任一分区的批次都会竞争同一组全局执行槽位。 |
-| `MaxConcurrency > 1`，配置 `UsePartitionKey` | 每个请求都会调用选择器；相同键值进入同一队列分区。 | 相同键值的不同 Handler 批次仍可同时分发执行。 |
+| `MaxConcurrency > 1`，配置 `UsePartitionKey` | 每个请求都会调用分区键函数；相同键值进入同一队列分区。 | 相同键值的不同 Handler 批次仍可同时分发执行。 |
 
 RequestBatcher 不提供全局、分区内或分区键级别的 Handler 执行顺序保证。分区键只决定队列路由，不能用于串行化处理。
 
@@ -232,7 +281,7 @@ RequestBatcher 不提供全局、分区内或分区键级别的 Handler 执行�
 | `MaxConcurrency` | `1` | Handler 批次最大并发数；队列分区数最多为逻辑处理器数。 |
 | `MaxPendingRequests` | `8192` | 内部 BufferQueue 中尚未被拉取执行的请求容量上限。 |
 | `FullMode` | `Wait` | 默认等待容量；`Fail` 在容量不足时立即拒绝。 |
-| `UsePartitionKey(...)` | 未配置 | 未配置时按轮询方式分配；选择器返回相同键值的请求进入同一队列分区。 |
+| `UsePartitionKey(...)` | 未配置 | 未配置时按轮询方式分配；分区键函数返回相同键值的请求进入同一队列分区。 |
 
 Handler 执行不保证顺序，包括 `MaxConcurrency = 1` 的情况。
 

@@ -1,7 +1,6 @@
 using System.Runtime.ExceptionServices;
 using BufferQueue;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using RequestBatcher.Diagnostics;
 using RequestBatcher.PendingRequests;
@@ -43,28 +42,11 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
 
     internal RequestBatchCoordinator(
         IBufferQueue bufferQueue,
-        IRequestBatchHandler<TRequest> handler,
-        IOptions<RequestBatchOptions<TRequest>> options,
-        ILogger<RequestBatchCoordinator<TRequest>>? logger = null)
-        : this(
-            bufferQueue,
-            handler is null ? throw new ArgumentNullException(nameof(handler)) : handler.HandleAsync,
-            options,
-            logger)
-    {
-    }
-
-    internal RequestBatchCoordinator(
-        IBufferQueue bufferQueue,
         RequestBatchHandler<TRequest> handler,
         IOptions<RequestBatchOptions<TRequest>> options,
-        ILogger<RequestBatchCoordinator<TRequest>>? logger = null)
+        ILogger<RequestBatchCoordinator<TRequest>> logger)
     {
-        ArgumentNullException.ThrowIfNull(bufferQueue);
-        ArgumentNullException.ThrowIfNull(handler);
-        ArgumentNullException.ThrowIfNull(options);
-
-        _logger = logger ?? NullLogger<RequestBatchCoordinator<TRequest>>.Instance;
+        _logger = logger;
         _options = options.Value.ValidateAndClone();
 
         _producer = new PendingRequestProducer<TRequest>(

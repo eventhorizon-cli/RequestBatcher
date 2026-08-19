@@ -26,6 +26,7 @@ public static class RequestBatcherServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
         ValidateHandlerLifetime(handlerLifetime);
+        RegisterBatcherPipeline<TRequest>(services);
 
         return AddRequestBatcherCore<TRequest>(
             services,
@@ -53,6 +54,7 @@ public static class RequestBatcherServiceCollectionExtensions
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(handler);
         ValidateHandlerLifetime(handlerLifetime);
+        RegisterBatcherPipeline<TRequest>(services);
 
         return AddRequestBatcherCore<TRequest>(
             services,
@@ -61,6 +63,63 @@ public static class RequestBatcherServiceCollectionExtensions
             services => services.Add(new ServiceDescriptor(
                 typeof(IRequestBatchHandler<TRequest>),
                 _ => new DelegateRequestBatchHandler<TRequest>(handler),
+                handlerLifetime)));
+    }
+
+    /// <summary>
+    /// Registers one singleton request/response batcher and its handler for <typeparamref name="TRequest"/>.
+    /// </summary>
+    /// <param name="services">The application-owned service collection.</param>
+    /// <param name="handlerLifetime">The handler lifetime. Scoped and transient handlers are resolved once per batch.</param>
+    /// <param name="configure">An optional callback that configures batching.</param>
+    /// <typeparam name="TRequest">The request type.</typeparam>
+    /// <typeparam name="TResponse">The response type.</typeparam>
+    /// <typeparam name="THandler">The response-bearing handler type.</typeparam>
+    public static IServiceCollection AddRequestBatcher<TRequest, TResponse, THandler>(
+        this IServiceCollection services,
+        ServiceLifetime handlerLifetime,
+        Action<RequestBatchOptions<TRequest>>? configure = null)
+        where THandler : class, IRequestBatchHandler<TRequest, TResponse>
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ValidateHandlerLifetime(handlerLifetime);
+
+        return AddResponseBatcherCore<TRequest, TResponse>(
+            services,
+            handlerLifetime,
+            configure,
+            services => services.Add(new ServiceDescriptor(
+                typeof(IRequestBatchHandler<TRequest, TResponse>),
+                typeof(THandler),
+                handlerLifetime)));
+    }
+
+    /// <summary>
+    /// Registers one singleton request/response batcher backed by a handler delegate.
+    /// </summary>
+    /// <param name="services">The application-owned service collection.</param>
+    /// <param name="handler">The function that processes one response-bearing batch.</param>
+    /// <param name="handlerLifetime">The handler lifetime. Scoped and transient handlers are resolved once per batch.</param>
+    /// <param name="configure">An optional callback that configures batching.</param>
+    /// <typeparam name="TRequest">The request type.</typeparam>
+    /// <typeparam name="TResponse">The response type.</typeparam>
+    public static IServiceCollection AddRequestBatcher<TRequest, TResponse>(
+        this IServiceCollection services,
+        RequestBatchHandler<TRequest, TResponse> handler,
+        ServiceLifetime handlerLifetime,
+        Action<RequestBatchOptions<TRequest>>? configure = null)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+        ArgumentNullException.ThrowIfNull(handler);
+        ValidateHandlerLifetime(handlerLifetime);
+
+        return AddResponseBatcherCore<TRequest, TResponse>(
+            services,
+            handlerLifetime,
+            configure,
+            services => services.Add(new ServiceDescriptor(
+                typeof(IRequestBatchHandler<TRequest, TResponse>),
+                _ => new DelegateResponseRequestBatchHandler<TRequest, TResponse>(handler),
                 handlerLifetime)));
     }
 
@@ -76,6 +135,7 @@ public static class RequestBatcherServiceCollectionExtensions
                 $"A request batcher for '{typeof(TRequest)}' has already been registered.");
         }
 
+        services.AddLogging();
         var optionsSnapshot = ConfigureOptions(services, configure);
 
         registerHandler(services);
@@ -85,9 +145,37 @@ public static class RequestBatcherServiceCollectionExtensions
                 provider.GetRequiredService<IBufferQueue>(),
                 CreateHandler<TRequest>(provider, handlerLifetime),
                 provider.GetRequiredService<IOptions<RequestBatchOptions<TRequest>>>(),
-                provider.GetService<ILogger<RequestBatchCoordinator<TRequest>>>()));
+                provider.GetRequiredService<ILogger<RequestBatchCoordinator<TRequest>>>()));
         services.AddSingleton<IRequestBatcher<TRequest>>(
             static provider => provider.GetRequiredService<RequestBatchCoordinator<TRequest>>());
+
+        return services;
+    }
+
+    private static IServiceCollection AddResponseBatcherCore<TRequest, TResponse>(
+        IServiceCollection services,
+        ServiceLifetime handlerLifetime,
+        Action<RequestBatchOptions<TRequest>>? configure,
+        Action<IServiceCollection> registerHandler)
+    {
+        var configuredOptions = ConfigureOptions(services, configure);
+        var itemOptions = configuredOptions
+            .Project<RequestBatchItem<TRequest, TResponse>>(static item => item.Request);
+
+        RegisterBatcherPipeline<TRequest>(services);
+        registerHandler(services);
+        AddRequestBatcherCore<RequestBatchItem<TRequest, TResponse>>(
+            services,
+            handlerLifetime,
+            options => options.CopyFrom(itemOptions),
+            services => services.Add(new ServiceDescriptor(
+                typeof(IRequestBatchHandler<RequestBatchItem<TRequest, TResponse>>),
+                provider => new ResponseRequestBatchHandler<TRequest, TResponse>(
+                    provider.GetRequiredService<IRequestBatchHandler<TRequest, TResponse>>()),
+                handlerLifetime)));
+        services.AddSingleton<IRequestBatcher<TRequest, TResponse>>(
+            provider => new ResponseRequestBatcher<TRequest, TResponse>(
+                provider.GetRequiredService<IRequestBatcher<RequestBatchItem<TRequest, TResponse>>>()));
 
         return services;
     }
@@ -140,8 +228,19 @@ public static class RequestBatcherServiceCollectionExtensions
                         RequestBatchFullMode.Fail => BufferQueueFullMode.Fail,
                         _ => throw new ArgumentOutOfRangeException(nameof(options.FullMode)),
                     };
-                    options.ConfigurePartitionKey?.Invoke(topic);
+                    options.PartitionKey?.Configure(topic);
                 })));
+    }
+
+    private static void RegisterBatcherPipeline<TRequest>(IServiceCollection services)
+    {
+        if (services.Any(descriptor => descriptor.ServiceType == typeof(RequestBatcherRegistration<TRequest>)))
+        {
+            throw new InvalidOperationException(
+                $"A request batcher for '{typeof(TRequest)}' has already been registered.");
+        }
+
+        services.AddSingleton<RequestBatcherRegistration<TRequest>>();
     }
 
     private static RequestBatchHandler<TRequest> CreateHandler<TRequest>(
@@ -184,6 +283,16 @@ public static class RequestBatcherServiceCollectionExtensions
     {
         public ValueTask HandleAsync(
             IReadOnlyList<TRequest> requests,
+            CancellationToken cancellationToken = default) =>
+            handler(requests, cancellationToken);
+    }
+
+    private sealed class DelegateResponseRequestBatchHandler<TRequest, TResponse>(
+        RequestBatchHandler<TRequest, TResponse> handler)
+        : IRequestBatchHandler<TRequest, TResponse>
+    {
+        public ValueTask HandleAsync(
+            IReadOnlyList<RequestBatchItem<TRequest, TResponse>> requests,
             CancellationToken cancellationToken = default) =>
             handler(requests, cancellationToken);
     }

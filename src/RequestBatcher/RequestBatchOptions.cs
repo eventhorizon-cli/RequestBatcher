@@ -1,6 +1,4 @@
 using System.Numerics;
-using BufferQueue.Memory;
-using RequestBatcher.PendingRequests;
 
 namespace RequestBatcher;
 
@@ -32,7 +30,7 @@ public sealed class RequestBatchOptions<TRequest>
     /// </summary>
     public RequestBatchFullMode FullMode { get; set; } = RequestBatchFullMode.Wait;
 
-    internal Action<MemoryBufferQueueOptions<PendingBatchRequest<TRequest>>>? ConfigurePartitionKey
+    internal RequestBatchPartitionKey<TRequest>? PartitionKey
     {
         get;
         private set;
@@ -48,8 +46,7 @@ public sealed class RequestBatchOptions<TRequest>
         where TNumber : INumber<TNumber>
     {
         ArgumentNullException.ThrowIfNull(partitionKeySelector);
-        ConfigurePartitionKey = options =>
-            options.UsePartitionKey(pendingRequest => partitionKeySelector(pendingRequest.Request));
+        PartitionKey = RequestBatchPartitionKey<TRequest>.Create(partitionKeySelector);
     }
 
     /// <summary>
@@ -62,8 +59,7 @@ public sealed class RequestBatchOptions<TRequest>
     public void UsePartitionKey(Func<TRequest, string> partitionKeySelector)
     {
         ArgumentNullException.ThrowIfNull(partitionKeySelector);
-        ConfigurePartitionKey = options =>
-            options.UsePartitionKey(pendingRequest => partitionKeySelector(pendingRequest.Request));
+        PartitionKey = RequestBatchPartitionKey<TRequest>.Create(partitionKeySelector);
     }
 
     internal RequestBatchOptions<TRequest> ValidateAndClone()
@@ -97,7 +93,21 @@ public sealed class RequestBatchOptions<TRequest>
             MaxConcurrency = MaxConcurrency,
             MaxPendingRequests = MaxPendingRequests,
             FullMode = FullMode,
-            ConfigurePartitionKey = ConfigurePartitionKey,
+            PartitionKey = PartitionKey,
+        };
+    }
+
+    internal RequestBatchOptions<TWrapped> Project<TWrapped>(Func<TWrapped, TRequest> requestSelector)
+    {
+        ArgumentNullException.ThrowIfNull(requestSelector);
+
+        return new RequestBatchOptions<TWrapped>
+        {
+            BatchSize = BatchSize,
+            MaxConcurrency = MaxConcurrency,
+            MaxPendingRequests = MaxPendingRequests,
+            FullMode = FullMode,
+            PartitionKey = PartitionKey?.Project(requestSelector),
         };
     }
 
@@ -109,6 +119,6 @@ public sealed class RequestBatchOptions<TRequest>
         MaxConcurrency = source.MaxConcurrency;
         MaxPendingRequests = source.MaxPendingRequests;
         FullMode = source.FullMode;
-        ConfigurePartitionKey = source.ConfigurePartitionKey;
+        PartitionKey = source.PartitionKey;
     }
 }
