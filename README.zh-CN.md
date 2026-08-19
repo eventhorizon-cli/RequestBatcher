@@ -61,26 +61,35 @@ RequestBatcher 既不是持久化后台队列，也不是事务协调器：
 
 ### 内部调度设计
 
-![内部调度设计](docs/assets/request-batcher-dispatch-scheduling.svg)
+![内部调度设计](docs/assets/request-batcher-dispatch-scheduling.png)
 
 `MaxConcurrency` 限制并发执行的 Handler 批次数。队列内部使用
 `min(MaxConcurrency, max(1, Environment.ProcessorCount))` 个分区；一个 `BatchDispatchLoop` 负责所有分区并共享
 同一个全局执行槽位池。它只有在拿到槽位后才会从队列拉取批次，因此请求只在 BufferQueue 中等待，不会进入应用自行
 维护的转交队列。
 
-调用方和 Handler 的 API 职责不同：
+### 无返回值 API
 
-| 使用方 | API | 含义 |
+调用方只需要知道 Handler 是否成功完成时，使用 `IRequestBatcher<TRequest>`：
+
+| 使用方 | 契约 | 含义 |
 | --- | --- | --- |
 | 调用方 | `ProcessAsync(TRequest)` | 提交一个请求，返回反映该请求实际处理结果的 `Task`。 |
-| 调用方 | `IRequestBatcher<TRequest, TResponse>.ProcessAsync(TRequest)` | 提交一个请求，返回其结果的 `Task<TResponse>`。 |
 | 调用方 | `ProcessAsync(IEnumerable<TRequest>)` | 提交调用方已持有的一组请求，返回等待整次提交完成的 `Task`。 |
-| 调用方 | `IRequestBatcher<TRequest, TResponse>.ProcessAsync(IEnumerable<TRequest>)` | 提交一组请求，并按输入请求的相同顺序返回结果。 |
-| Handler | `HandleAsync(IReadOnlyList<RequestBatchItem<TRequest, TResponse>>)` | 处理一个结果批次，并在返回前为每个 item 设置一个结果。 |
+| Handler | `IRequestBatchHandler<TRequest>.HandleAsync(IReadOnlyList<TRequest>)` | 处理一个请求批次，不为每一项设置返回值。 |
 
-RequestBatcher 只会在内部等待 Handler 返回的 `ValueTask` 一次，不会将它返回给调用方。同步完成的 Handler 可以
-因此避免分配 `Task`；普通异步 I/O 仍可直接使用 `async ValueTask` 实现。只处理请求、不返回结果的 Handler
-仍使用 `IRequestBatchHandler<TRequest>`，并接收 `IReadOnlyList<TRequest>`。
+### 带返回值 API
+
+每个已接收请求都需要一个强类型返回值时，使用 `IRequestBatcher<TRequest, TResponse>`：
+
+| 使用方 | 契约 | 含义 |
+| --- | --- | --- |
+| 调用方 | `ProcessAsync(TRequest)` | 提交一个请求，返回其 `Task<TResponse>`。 |
+| 调用方 | `ProcessAsync(IEnumerable<TRequest>)` | 提交调用方已持有的一组请求，按输入顺序返回结果。 |
+| Handler | `IRequestBatchHandler<TRequest, TResponse>.HandleAsync(IReadOnlyList<RequestBatchItem<TRequest, TResponse>>)` | 处理一个结果批次，并为每个 item 设置且只设置一个结果。 |
+
+RequestBatcher 只会在内部等待每次 Handler 调用返回的 `ValueTask` 一次，不会将它返回给调用方。同步完成的 Handler
+可以因此避免分配 `Task`；普通异步 I/O 仍可直接使用 `async ValueTask` 实现。
 
 ## 安装
 
@@ -88,7 +97,7 @@ RequestBatcher 只会在内部等待 Handler 返回的 `ValueTask` 一次，不�
 dotnet add package RequestBatcher
 ```
 
-## 快速开始
+## 无返回值批处理
 
 先定义请求类型和批量 Handler：
 
@@ -140,27 +149,27 @@ public sealed class OrderService(IRequestBatcher<OrderWriteRequest> batcher)
 `SaveAsync` 直接返回 RequestBatcher 创建的 `Task`。只有 Handler 完成包含该请求的批次后，这个 `Task` 才会
 完成；调用方无需知道请求进入了哪个批次或分区。
 
-### 返回值
+## 带返回值批处理
 
 如果每个请求都需要返回一个值，请使用带结果类型的 API。Handler 会收到包含原始请求和结果槽位的 item：
 
 ```csharp
 public sealed record PriceQuery(long ProductId);
-public sealed record PriceUpdate(long ProductId, decimal Price);
+public sealed record PriceQuote(long ProductId, decimal Price);
 
 public interface IPriceStore
 {
     // 存储层按相同顺序为每个输入 ID 返回一个结果。
-    Task<IReadOnlyList<PriceUpdate?>> FindAsync(
+    Task<IReadOnlyList<PriceQuote?>> FindAsync(
         IEnumerable<long> productIds,
         CancellationToken cancellationToken);
 }
 
 public sealed class PriceQueryHandler(IPriceStore store)
-    : IRequestBatchHandler<PriceQuery, PriceUpdate?>
+    : IRequestBatchHandler<PriceQuery, PriceQuote?>
 {
     public async ValueTask HandleAsync(
-        IReadOnlyList<RequestBatchItem<PriceQuery, PriceUpdate?>> items,
+        IReadOnlyList<RequestBatchItem<PriceQuery, PriceQuote?>> items,
         CancellationToken cancellationToken = default)
     {
         var responses = await store.FindAsync(
@@ -170,13 +179,13 @@ public sealed class PriceQueryHandler(IPriceStore store)
     }
 }
 
-services.AddRequestBatcher<PriceQuery, PriceUpdate?, PriceQueryHandler>(
+services.AddRequestBatcher<PriceQuery, PriceQuote?, PriceQueryHandler>(
     ServiceLifetime.Scoped,
     options => options.BatchSize = 256);
 
-public sealed class PriceService(IRequestBatcher<PriceQuery, PriceUpdate?> priceBatcher)
+public sealed class PriceService(IRequestBatcher<PriceQuery, PriceQuote?> priceBatcher)
 {
-    public Task<PriceUpdate?> FindAsync(
+    public Task<PriceQuote?> FindAsync(
         long productId,
         CancellationToken cancellationToken = default) =>
         priceBatcher.ProcessAsync(new PriceQuery(productId), cancellationToken);
@@ -188,7 +197,7 @@ Handler 返回前必须为每个 item 设置且只设置一个结果。`item.Set
 保持相同顺序，并且每个 item 都有一个结果。调用方的 `Task<TResponse>` 只有在 Handler 成功完成且对应 item 已设置
 结果后才会完成。
 
-### 提交已有的请求组
+## 显式批量提交
 
 调用方已经持有多个请求时，可以一次提交：
 
