@@ -18,7 +18,7 @@ builder.Services.AddRequestBatcher<PriceUpdate, PriceUpdateHandler>(
         // Optional: equal product IDs share a partition; omit this line for round-robin routing.
         options.UsePartitionKey(static update => update.ProductId);
     });
-builder.Services.AddRequestBatcher<PriceQuery, PriceQueryHandler>(
+builder.Services.AddRequestBatcher<PriceQuery, PriceUpdate?, PriceQueryHandler>(
     ServiceLifetime.Scoped,
     options =>
     {
@@ -60,7 +60,7 @@ static async Task<IResult> ProcessAsync(
 
 static async Task<IResult> FindAsync(
     long productId,
-    IRequestBatcher<PriceQuery> batcher,
+    IRequestBatcher<PriceQuery, PriceUpdate?> batcher,
     CancellationToken cancellationToken)
 {
     if (productId <= 0)
@@ -68,9 +68,8 @@ static async Task<IResult> FindAsync(
         return Results.BadRequest("ProductId must be positive.");
     }
 
-    var query = new PriceQuery(productId);
-    await batcher.ProcessAsync(query, cancellationToken).ConfigureAwait(false);
-    return query.Result is null ? Results.NotFound() : Results.Ok(query.Result);
+    var result = await batcher.ProcessAsync(new PriceQuery(productId), cancellationToken).ConfigureAwait(false);
+    return result is null ? Results.NotFound() : Results.Ok(result);
 }
 
 static async Task InitializeDatabaseAsync(NpgsqlDataSource dataSource)

@@ -688,11 +688,14 @@ public sealed class RequestBatchSubmissionTests
     }
 
     private static ServiceProvider CreateProvider<TRequest>(
-        RequestBatchHandler<TRequest> handler,
+        Func<IReadOnlyList<TRequest>, CancellationToken, ValueTask> handler,
         Action<RequestBatchOptions<TRequest>>? configure = null)
     {
         var services = new ServiceCollection();
-        services.AddRequestBatcher(handler, ServiceLifetime.Singleton, configure);
+        services.AddSingleton(handler);
+        services.AddRequestBatcher<TRequest, TestBatchHandler<TRequest>>(
+            ServiceLifetime.Singleton,
+            configure);
         return services.BuildServiceProvider(
             new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
     }
@@ -716,6 +719,16 @@ public sealed class RequestBatchSubmissionTests
     }
 
     private sealed class TestBatchException : Exception;
+
+    private sealed class TestBatchHandler<TRequest>(
+        Func<IReadOnlyList<TRequest>, CancellationToken, ValueTask> handler)
+        : IRequestBatchHandler<TRequest>
+    {
+        public ValueTask HandleAsync(
+            IReadOnlyList<TRequest> requests,
+            CancellationToken cancellationToken = default) =>
+            handler(requests, cancellationToken);
+    }
 
     private sealed record KeyedRequest(int Key, int Sequence = 0);
 }

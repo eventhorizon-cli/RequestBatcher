@@ -4,7 +4,7 @@ using Npgsql;
 namespace RequestBatcher.Deduplication;
 
 internal sealed class PriceQueryHandler(NpgsqlDataSource dataSource)
-    : IRequestBatchHandler<PriceQuery>
+    : IRequestBatchHandler<PriceQuery, PriceUpdate?>
 {
     private const string QuerySql = """
         SELECT product_id AS "ProductId",
@@ -15,12 +15,12 @@ internal sealed class PriceQueryHandler(NpgsqlDataSource dataSource)
         """;
 
     public async ValueTask HandleAsync(
-        IReadOnlyList<PriceQuery> requests,
+        IReadOnlyList<RequestBatchItem<PriceQuery, PriceUpdate?>> items,
         CancellationToken cancellationToken = default)
     {
         // Duplicate callers share one database lookup for their product ID.
-        var productIds = requests
-            .Select(request => request.ProductId)
+        var productIds = items
+            .Select(item => item.Request.ProductId)
             .Distinct()
             .ToArray();
 
@@ -35,9 +35,6 @@ internal sealed class PriceQueryHandler(NpgsqlDataSource dataSource)
         var pricesByProductId = prices.ToDictionary(price => price.ProductId);
 
         // Publish results only after the query succeeds, so a failed batch cannot expose partial results.
-        foreach (var request in requests)
-        {
-            request.SetResult(pricesByProductId.GetValueOrDefault(request.ProductId));
-        }
+        items.SetResponses(items.Select(item => pricesByProductId.GetValueOrDefault(item.Request.ProductId)));
     }
 }

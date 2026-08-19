@@ -43,8 +43,9 @@ You are an AI coding assistant for this repository.
   package metadata.
 - Write code comments and XML documentation in English. Document every public API type and member; do not suppress
   `CS1591` project-wide.
-- Prefer concise modern C# when it clarifies the code. Retain explicit constructors when validation, defensive copies,
-  resource ownership, or cleanup make the lifecycle clearer.
+- Prefer concise modern C# when it clarifies the code. Use primary constructors when a type only captures dependencies
+  or state and doing so does not broaden constructor accessibility. Retain explicit constructors when validation,
+  defensive copies, resource ownership, cleanup, or non-public constructor visibility make the lifecycle clearer.
 - Prefer base libraries and existing dependencies. Explain any new production dependency and compatibility impact.
 - Do not add a repository `NuGet.config` or hard-code a package source.
 - Do not decompile NuGet package assemblies. When implementation details of a dependency are necessary, inspect the
@@ -52,6 +53,11 @@ You are an AI coding assistant for this repository.
 
 ## Documentation
 
+- For a feature, public API, behavior, or architectural change, create or update the relevant design document before
+  editing production code. The design must state the intended contract, internal flow, compatibility impact, and test
+  coverage; implementation must follow that documented design.
+- Design documents describe only the current intended design. Do not retain implementation history, rejected
+  alternatives, superseded behavior, or APIs that no longer exist.
 - Update the README when behavior, configuration, public APIs, lifecycle, or user-facing functionality changes.
 - Keep `src/RequestBatcher/README.md`, the NuGet package README, synchronized with relevant user-facing behavior,
   configuration, and usage guidance in the root README.
