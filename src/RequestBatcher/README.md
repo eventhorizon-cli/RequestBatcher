@@ -12,6 +12,18 @@ application handler receives multiple queued requests as an `IReadOnlyList<TRequ
 [Full documentation](https://github.com/eventhorizon-cli/RequestBatcher#readme) |
 [简体中文](https://github.com/eventhorizon-cli/RequestBatcher/blob/main/README.zh-CN.md)
 
+## APIs
+
+### Request-Only
+
+`IRequestBatcher<TRequest>` returns `Task` after an `IRequestBatchHandler<TRequest>` has processed the request or
+explicit request group.
+
+### Request/Response
+
+`IRequestBatcher<TRequest, TResponse>` returns `Task<TResponse>` for one request or ordered responses for an explicit
+group. Its `IRequestBatchHandler<TRequest, TResponse>` assigns exactly one response to each request item.
+
 ## When to Use It
 
 Use RequestBatcher for independent database, cache, or downstream operations that benefit from a batch API. It also
@@ -37,7 +49,7 @@ to the handler and cannot cancel the shared handler call.
 dotnet add package RequestBatcher
 ```
 
-## Usage
+## Request-Only Batching
 
 Define a request and a handler for one batch:
 
@@ -92,7 +104,7 @@ public sealed class OrderService(IRequestBatcher<OrderWriteRequest> batcher)
 The returned `Task` completes after the handler has processed that request. If the handler fails, the caller receives
 the original exception.
 
-### Returning a Value
+## Request/Response Batching
 
 Use the response-enabled API when each request should return a value. The handler receives an item containing the
 original request and its response slot:
@@ -146,6 +158,8 @@ even when the requests are split across handler batches or queue partitions. If 
 explicit group, `await` follows normal `Task` semantics and throws one original exception. All distinct exception
 instances remain available through `Task.Exception.InnerExceptions`; one handler exception fanned out to several
 requests is recorded once.
+
+## Explicit Group Submission
 
 When requests already exist as a group, submit them together:
 

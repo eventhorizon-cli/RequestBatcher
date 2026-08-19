@@ -68,27 +68,35 @@ path for each accepted request.
 
 ### Internal Dispatch Scheduling
 
-![Internal dispatch scheduling](docs/assets/request-batcher-dispatch-scheduling.svg)
+![Internal dispatch scheduling](docs/assets/request-batcher-dispatch-scheduling.png)
 
 `MaxConcurrency` bounds concurrent handler batches. The queue uses
 `min(MaxConcurrency, max(1, Environment.ProcessorCount))` internal partitions, while one `BatchDispatchLoop` owns all
 of them and shares one global execution-slot pool. A slot is acquired before a queue batch is pulled, so work waits in
 BufferQueue rather than in an application-owned handoff queue.
 
-The two sides of the API have different responsibilities:
+### Request-Only API
 
-| Side | API | Meaning |
+Use `IRequestBatcher<TRequest>` when callers only need the handler outcome:
+
+| Side | Contract | Meaning |
 | --- | --- | --- |
 | Caller | `ProcessAsync(TRequest)` | Submits one request and returns a `Task` for that request's actual outcome. |
-| Caller | `IRequestBatcher<TRequest, TResponse>.ProcessAsync(TRequest)` | Submits one request and returns a `Task<TResponse>` for its response. |
 | Caller | `ProcessAsync(IEnumerable<TRequest>)` | Submits an existing group and returns one `Task` that waits for the whole submission. |
-| Caller | `IRequestBatcher<TRequest, TResponse>.ProcessAsync(IEnumerable<TRequest>)` | Submits a group and returns responses in the same order as the input requests. |
-| Handler | `HandleAsync(IReadOnlyList<RequestBatchItem<TRequest, TResponse>>)` | Processes one response batch and sets one response for every item before returning. |
+| Handler | `IRequestBatchHandler<TRequest>.HandleAsync(IReadOnlyList<TRequest>)` | Processes one request batch without assigning per-item results. |
 
-The handler's `ValueTask` is awaited once inside RequestBatcher and is never returned to the caller. It allows a
-handler that completes synchronously to avoid allocating a `Task`; regular asynchronous I/O can still be implemented
-with `async ValueTask`. Request-only handlers continue to use `IRequestBatchHandler<TRequest>` and receive
-`IReadOnlyList<TRequest>`.
+### Request/Response API
+
+Use `IRequestBatcher<TRequest, TResponse>` when every accepted request must yield a typed result:
+
+| Side | Contract | Meaning |
+| --- | --- | --- |
+| Caller | `ProcessAsync(TRequest)` | Submits one request and returns its `Task<TResponse>`. |
+| Caller | `ProcessAsync(IEnumerable<TRequest>)` | Submits an existing group and returns responses in input order. |
+| Handler | `IRequestBatchHandler<TRequest, TResponse>.HandleAsync(IReadOnlyList<RequestBatchItem<TRequest, TResponse>>)` | Processes one response batch and assigns exactly one result to every item. |
+
+RequestBatcher awaits each handler's `ValueTask` once and never returns it to a caller. Synchronously completing
+handlers can therefore avoid a `Task` allocation, while asynchronous I/O can use `async ValueTask`.
 
 ## Installation
 
@@ -96,7 +104,7 @@ with `async ValueTask`. Request-only handlers continue to use `IRequestBatchHand
 dotnet add package RequestBatcher
 ```
 
-## Quick Start
+## Request-Only Batching
 
 Define the request and the code that handles one batch:
 
@@ -149,7 +157,7 @@ public sealed class OrderService(IRequestBatcher<OrderWriteRequest> batcher)
 `SaveAsync` returns the same `Task` produced by RequestBatcher. It completes only after the handler has processed the
 request; the caller does not need to know which batch or partition contained it.
 
-### Returning a Value
+## Request/Response Batching
 
 Use the response-enabled API when each request should return a value. The handler receives an item containing the
 original request and its response slot:
@@ -198,7 +206,7 @@ item directly; `items.SetResponses(responses)` maps the nth response in the enum
 response enumeration must therefore have the same request order and one entry per item.
 The caller's `Task<TResponse>` completes only after the handler succeeds and its item's response has been set.
 
-### Submitting an Existing Group
+## Explicit Group Submission
 
 When the caller already has multiple requests, it can submit them with one call:
 
