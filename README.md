@@ -164,21 +164,21 @@ original request and its response slot:
 
 ```csharp
 public sealed record PriceQuery(long ProductId);
-public sealed record PriceUpdate(long ProductId, decimal Price);
+public sealed record PriceQuote(long ProductId, decimal Price);
 
 public interface IPriceStore
 {
     // The store returns one entry per input ID, in the same order.
-    Task<IReadOnlyList<PriceUpdate?>> FindAsync(
+    Task<IReadOnlyList<PriceQuote?>> FindAsync(
         IEnumerable<long> productIds,
         CancellationToken cancellationToken);
 }
 
 public sealed class PriceQueryHandler(IPriceStore store)
-    : IRequestBatchHandler<PriceQuery, PriceUpdate?>
+    : IRequestBatchHandler<PriceQuery, PriceQuote?>
 {
     public async ValueTask HandleAsync(
-        IReadOnlyList<RequestBatchItem<PriceQuery, PriceUpdate?>> items,
+        IReadOnlyList<RequestBatchItem<PriceQuery, PriceQuote?>> items,
         CancellationToken cancellationToken = default)
     {
         var responses = await store.FindAsync(
@@ -188,13 +188,13 @@ public sealed class PriceQueryHandler(IPriceStore store)
     }
 }
 
-services.AddRequestBatcher<PriceQuery, PriceUpdate?, PriceQueryHandler>(
+services.AddRequestBatcher<PriceQuery, PriceQuote?, PriceQueryHandler>(
     ServiceLifetime.Scoped,
     options => options.BatchSize = 256);
 
-public sealed class PriceService(IRequestBatcher<PriceQuery, PriceUpdate?> priceBatcher)
+public sealed class PriceService(IRequestBatcher<PriceQuery, PriceQuote?> priceBatcher)
 {
-    public Task<PriceUpdate?> FindAsync(
+    public Task<PriceQuote?> FindAsync(
         long productId,
         CancellationToken cancellationToken = default) =>
         priceBatcher.ProcessAsync(new PriceQuery(productId), cancellationToken);
