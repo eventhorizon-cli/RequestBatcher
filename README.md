@@ -7,9 +7,9 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
-RequestBatcher lets application code submit one request and await one `Task`, while an application handler receives
-multiple queued requests at a time. It is an in-process way to use a downstream batch operation without exposing batch
-coordination to every caller.
+RequestBatcher lets application code submit one request and await one `Task` or `Task<TResponse>`, while an
+application handler receives multiple queued requests at a time. It is an in-process way to use a downstream batch
+operation without exposing batch coordination to every caller.
 
 > **Batching does not require callers to assemble a collection.** Separate callers can each submit one `TRequest`
 > concurrently. RequestBatcher coalesces requests already queued for the same partition into handler batches of up to

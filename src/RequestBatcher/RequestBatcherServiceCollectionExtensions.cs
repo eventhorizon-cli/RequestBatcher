@@ -101,11 +101,12 @@ public static class RequestBatcherServiceCollectionExtensions
         Action<RequestBatchOptions<TRequest>>? configure,
         Action<IServiceCollection> registerHandler)
     {
+        RegisterBatcherPipeline<TRequest>(services);
+
         var configuredOptions = ConfigureOptions(services, configure);
         var itemOptions = configuredOptions
             .Project<RequestBatchItem<TRequest, TResponse>>(static item => item.Request);
 
-        RegisterBatcherPipeline<TRequest>(services);
         registerHandler(services);
         AddRequestBatcherCore<RequestBatchItem<TRequest, TResponse>>(
             services,

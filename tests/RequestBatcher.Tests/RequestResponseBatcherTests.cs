@@ -260,6 +260,50 @@ public sealed class RequestResponseBatcherTests
     }
 
     [Fact]
+    public void AddRequestBatcher_DuplicateResponseRegistration_DoesNotChangeExistingPipeline()
+    {
+        var services = new ServiceCollection();
+        AddResponseHandler<int, string>(
+            services,
+            (items, _) =>
+            {
+                items.SetResponses(static request => request.ToString());
+                return ValueTask.CompletedTask;
+            },
+            configure: options =>
+            {
+                options.BatchSize = 32;
+                options.MaxConcurrency = 4;
+                options.MaxPendingRequests = 512;
+                options.FullMode = RequestBatchFullMode.Fail;
+            });
+        var descriptorCount = services.Count;
+        var duplicateConfigureCallCount = 0;
+
+        var exception = Assert.Throws<InvalidOperationException>(() =>
+            services.AddRequestBatcher<int, string, DuplicateResponseHandler>(
+                ServiceLifetime.Singleton,
+                options =>
+                {
+                    duplicateConfigureCallCount++;
+                    options.BatchSize = 1;
+                }));
+
+        Assert.Contains("already been registered", exception.Message, StringComparison.Ordinal);
+        Assert.Equal(0, duplicateConfigureCallCount);
+        Assert.Equal(descriptorCount, services.Count);
+
+        using var provider = services.BuildServiceProvider(
+            new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
+        var options = provider.GetRequiredService<IOptions<RequestBatchOptions<int>>>().Value;
+
+        Assert.Equal(32, options.BatchSize);
+        Assert.Equal(4, options.MaxConcurrency);
+        Assert.Equal(512, options.MaxPendingRequests);
+        Assert.Equal(RequestBatchFullMode.Fail, options.FullMode);
+    }
+
+    [Fact]
     public async Task AddRequestBatcher_ScopedResponseHandler_ResolvesOneHandlerPerBatch()
     {
         var probe = new ResponseHandlerLifetimeProbe();
@@ -443,6 +487,14 @@ public sealed class RequestResponseBatcherTests
     {
         public ValueTask HandleAsync(
             IReadOnlyList<int> requests,
+            CancellationToken cancellationToken = default) =>
+            ValueTask.CompletedTask;
+    }
+
+    private sealed class DuplicateResponseHandler : IRequestBatchHandler<int, string>
+    {
+        public ValueTask HandleAsync(
+            IReadOnlyList<RequestBatchItem<int, string>> requests,
             CancellationToken cancellationToken = default) =>
             ValueTask.CompletedTask;
     }
