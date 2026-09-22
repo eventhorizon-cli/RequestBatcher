@@ -52,6 +52,10 @@ RequestBatcher is not a durable background queue or a transaction coordinator:
 
 ## How It Works
 
+The internal queue's partition count is not the handler concurrency level. Partitions organize queueing and routing;
+the global `MaxConcurrency` setting limits the number of handler batches that can execute at once. Multiple batches
+from one partition can execute concurrently, and all partitions share the same execution slots.
+
 1. A caller submits one request through `ProcessAsync`.
 2. RequestBatcher admits the request according to the configured capacity and routes it to an in-memory partition.
 3. The internal `BatchDispatchLoop` acquires a free handler slot, then pulls and auto-commits up to `BatchSize`
@@ -79,21 +83,21 @@ BufferQueue rather than in an application-owned handoff queue.
 
 Use `IRequestBatcher<TRequest>` when callers only need the handler outcome:
 
-| Side | Contract | Meaning |
+| Side | API | Meaning |
 | --- | --- | --- |
-| Caller | `ProcessAsync(TRequest)` | Submits one request and returns a `Task` for that request's actual outcome. |
-| Caller | `ProcessAsync(IEnumerable<TRequest>)` | Submits an existing group and returns one `Task` that waits for the whole submission. |
-| Handler | `IRequestBatchHandler<TRequest>.HandleAsync(IReadOnlyList<TRequest>)` | Processes one request batch without assigning per-item results. |
+| Caller | `Task ProcessAsync(TRequest)` | Submits one request and returns a `Task` for that request's actual outcome. |
+| Caller | `Task ProcessAsync(IEnumerable<TRequest>)` | Submits an existing group and returns one `Task` that waits for the whole submission. |
+| Handler | `ValueTask IRequestBatchHandler<TRequest>.HandleAsync(IReadOnlyList<TRequest>)` | Processes one request batch without assigning per-item results. |
 
 ### Request/Response API
 
 Use `IRequestBatcher<TRequest, TResponse>` when every accepted request must yield a typed result:
 
-| Side | Contract | Meaning |
+| Side | API | Meaning |
 | --- | --- | --- |
-| Caller | `ProcessAsync(TRequest)` | Submits one request and returns its `Task<TResponse>`. |
-| Caller | `ProcessAsync(IEnumerable<TRequest>)` | Submits an existing group and returns responses in input order. |
-| Handler | `IRequestBatchHandler<TRequest, TResponse>.HandleAsync(IReadOnlyList<RequestBatchItem<TRequest, TResponse>>)` | Processes one response batch and assigns exactly one result to every item. |
+| Caller | `Task<TResponse> ProcessAsync(TRequest)` | Submits one request and returns its `Task<TResponse>`. |
+| Caller | `Task<IReadOnlyList<TResponse>> ProcessAsync(IEnumerable<TRequest>)` | Submits an existing group and returns responses in input order. |
+| Handler | `ValueTask IRequestBatchHandler<TRequest, TResponse>.HandleAsync(IReadOnlyList<RequestBatchItem<TRequest, TResponse>>)` | Processes one response batch and assigns exactly one result to every item. |
 
 RequestBatcher awaits each handler's `ValueTask` once and never returns it to a caller. Synchronously completing
 handlers can therefore avoid a `Task` allocation, while asynchronous I/O can use `async ValueTask`.

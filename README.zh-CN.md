@@ -11,18 +11,18 @@ RequestBatcher 会在 .NET 进程内汇集来自不同调用方的并发请求�
 统一处理。调用方仍可逐项提交并等待各自的 `Task` 或 `Task<TResponse>`，无需关心请求最终进入哪个批次。
 
 > **调用方无需先将请求收集成一个集合，仍然可以获得批量处理。** 多个调用方可以并发地各自提交一个
-> `TRequest`；RequestBatcher 会将同一分区中已排队的零散请求合并为最多 `BatchSize` 项的处理批次。
+> `TRequest`；RequestBatcher 会将同一 Partition 中已排队的零散请求合并为最多 `BatchSize` 项的处理批次。
 > `ProcessAsync(IEnumerable<TRequest>)` 只是额外的提交方式，并不是产生批量处理的前提。
 
-![多个请求合并示意](docs/assets/request-batcher-request-coalescing.png)
+![多个请求合并示意](docs/assets/request-batcher-request-coalescing.zh-CN.png)
 
-多个独立的并发请求可以先合并为一个批次，再执行一次下游批量操作。图中只是示例：只有已在同一分区排队的请求
+多个独立的并发请求可以先合并为一个批次，再执行一次下游批量操作。图中只是示例：只有已在同一 Partition 排队的请求
 才可能合并为同一批。
 
 ## 适用场景
 
-当请求彼此独立、可以接受在内存中短暂排队（不会等待凑满 `BatchSize`，只需等待所在分区正在执行的 Handler
-调用完成），且下游一次处理多项更合适时，可以使用 RequestBatcher：
+当请求彼此独立、可以接受在内存中短暂排队（不会等待凑满 `BatchSize`，只需等待全局执行名额可用），且下游一次
+处理多项更合适时，可以使用 RequestBatcher：
 
 - 能够使用批量 `INSERT`、`UPDATE` 或 `UPSERT` 的数据库写入；
 - 原生支持多项输入的缓存读写或下游 API；
@@ -46,47 +46,50 @@ RequestBatcher 既不是持久化后台队列，也不是事务协调器：
 
 ## 工作方式
 
+内部队列的 Partition 数量不代表 Handler 并发数。Partition 只用于组织请求的排队和路由；同时执行的 Handler
+批次数由全局 `MaxConcurrency` 限制。同一 Partition 中的多个批次可以并发执行，所有 Partition 共享同一组执行名额。
+
 1. 调用方通过 `ProcessAsync` 提交单个请求。
-2. RequestBatcher 根据容量配置接收请求，并将它路由到一个内存分区。
-3. 内部 `BatchDispatchLoop` 先获取一个空闲 Handler 槽位，再拉取并自动提交最多 `BatchSize` 个已排队请求。
+2. RequestBatcher 根据容量配置接收请求，并将它路由到一个内存 Partition。
+3. 内部 `BatchDispatchLoop` 先获取一个空闲执行名额，再拉取并自动提交最多 `BatchSize` 个已排队请求。
 4. 处理结果会完成该批次中每个调用方持有的 `Task`。
 
-已接收请求在分区中的排队时长主要取决于前一批 Handler 调用何时完成，而不是等待凑满 `BatchSize`。RequestBatcher
-不会为凑满单个批次设置额外的收集窗口：前一批完成后，它会立即用当前已排队的请求发起下一次 Handler 调用，即使
-只有一个请求。`BatchSize` 只限制单次调用的最大请求数；不同分区仍可并行处理。
+已接收请求的排队时长主要取决于全局执行名额何时可用，而不是等待凑满 `BatchSize`。RequestBatcher 不会为凑满
+单个批次设置额外的收集窗口：只要有执行名额，它就会立即用当前已排队的请求发起 Handler 调用，即使只有一个请求。
+`BatchSize` 只限制单次调用的最大请求数。
 
-![RequestBatcher 架构](docs/assets/request-batcher-architecture.png)
+![RequestBatcher 架构](docs/assets/request-batcher-architecture.zh-CN.png)
 
-架构图展示协调器、分区内存队列，以及每个已接收请求独立完成 `Task` 的详细路径。
+架构图展示协调器、内存队列中的各个 Partition，以及每个已接收请求独立完成 `Task` 的详细路径。
 
 ### 内部调度设计
 
-![内部调度设计](docs/assets/request-batcher-dispatch-scheduling.png)
+![内部调度设计](docs/assets/request-batcher-dispatch-scheduling.zh-CN.png)
 
 `MaxConcurrency` 限制并发执行的 Handler 批次数。队列内部使用
-`min(MaxConcurrency, max(1, Environment.ProcessorCount))` 个分区；一个 `BatchDispatchLoop` 负责所有分区并共享
-同一个全局执行槽位池。它只有在拿到槽位后才会从队列拉取批次，因此请求只在 BufferQueue 中等待，不会进入应用自行
-维护的转交队列。
+`min(MaxConcurrency, max(1, Environment.ProcessorCount))` 个 Partition。一个 `BatchDispatchLoop` 负责所有
+Partition，并共享同一组全局执行名额。它只有在取得执行名额后才会从队列拉取批次，因此请求只在 BufferQueue 中
+等待，不会进入应用自行维护的转交队列。
 
 ### 无返回值 API
 
 调用方只需要知道 Handler 是否成功完成时，使用 `IRequestBatcher<TRequest>`：
 
-| 使用方 | 契约 | 含义 |
+| 使用方 | API | 含义 |
 | --- | --- | --- |
-| 调用方 | `ProcessAsync(TRequest)` | 提交一个请求，返回反映该请求实际处理结果的 `Task`。 |
-| 调用方 | `ProcessAsync(IEnumerable<TRequest>)` | 提交调用方已持有的一组请求，返回等待整次提交完成的 `Task`。 |
-| Handler | `IRequestBatchHandler<TRequest>.HandleAsync(IReadOnlyList<TRequest>)` | 处理一个请求批次，不为每一项设置返回值。 |
+| 调用方 | `Task ProcessAsync(TRequest)` | 提交一个请求，返回反映该请求实际处理结果的 `Task`。 |
+| 调用方 | `Task ProcessAsync(IEnumerable<TRequest>)` | 提交调用方已持有的一组请求，返回等待整次提交完成的 `Task`。 |
+| Handler | `ValueTask IRequestBatchHandler<TRequest>.HandleAsync(IReadOnlyList<TRequest>)` | 处理一批请求，无需为每个请求设置返回值。 |
 
 ### 带返回值 API
 
 每个已接收请求都需要一个强类型返回值时，使用 `IRequestBatcher<TRequest, TResponse>`：
 
-| 使用方 | 契约 | 含义 |
+| 使用方 | API | 含义 |
 | --- | --- | --- |
-| 调用方 | `ProcessAsync(TRequest)` | 提交一个请求，返回其 `Task<TResponse>`。 |
-| 调用方 | `ProcessAsync(IEnumerable<TRequest>)` | 提交调用方已持有的一组请求，按输入顺序返回结果。 |
-| Handler | `IRequestBatchHandler<TRequest, TResponse>.HandleAsync(IReadOnlyList<RequestBatchItem<TRequest, TResponse>>)` | 处理一个结果批次，并为每个 item 设置且只设置一个结果。 |
+| 调用方 | `Task<TResponse> ProcessAsync(TRequest)` | 提交一个请求，返回其 `Task<TResponse>`。 |
+| 调用方 | `Task<IReadOnlyList<TResponse>> ProcessAsync(IEnumerable<TRequest>)` | 提交调用方已持有的一组请求，按输入顺序返回结果。 |
+| Handler | `ValueTask IRequestBatchHandler<TRequest, TResponse>.HandleAsync(IReadOnlyList<RequestBatchItem<TRequest, TResponse>>)` | 处理一批请求，并为每个请求设置一次返回值。 |
 
 RequestBatcher 只会在内部等待每次 Handler 调用返回的 `ValueTask` 一次，不会将它返回给调用方。同步完成的 Handler
 可以因此避免分配 `Task`；普通异步 I/O 仍可直接使用 `async ValueTask` 实现。
@@ -147,11 +150,12 @@ public sealed class OrderService(IRequestBatcher<OrderWriteRequest> batcher)
 ```
 
 `SaveAsync` 直接返回 RequestBatcher 创建的 `Task`。只有 Handler 完成包含该请求的批次后，这个 `Task` 才会
-完成；调用方无需知道请求进入了哪个批次或分区。
+完成；调用方无需知道请求进入了哪个批次或 Partition。
 
 ## 带返回值批处理
 
-如果每个请求都需要返回一个值，请使用带结果类型的 API。Handler 会收到包含原始请求和结果槽位的 item：
+如果每个请求都需要返回一个值，请使用带返回值的 API。Handler 接收一组
+`RequestBatchItem<TRequest, TResponse>`，通过每项的 `Request` 属性读取原始请求，并为该请求设置返回值：
 
 ```csharp
 public sealed record PriceQuery(long ProductId);
@@ -192,10 +196,9 @@ public sealed class PriceService(IRequestBatcher<PriceQuery, PriceQuote?> priceB
 }
 ```
 
-Handler 返回前必须为每个 item 设置且只设置一个结果。`item.SetResponse(response)` 可以直接设置单个 item；
-`items.SetResponses(responses)` 会按位置将枚举中的第 n 个结果设置给第 n 个请求 item。因此，结果枚举必须与请求
-保持相同顺序，并且每个 item 都有一个结果。调用方的 `Task<TResponse>` 只有在 Handler 成功完成且对应 item 已设置
-结果后才会完成。
+Handler 返回前，必须为每个请求设置一次返回值，不能遗漏或重复设置。`item.SetResponse(response)` 用于设置
+单个请求的返回值；`items.SetResponses(responses)` 用于按请求顺序批量设置。批量设置时，结果必须与请求数量一致、
+顺序对应。只有 Handler 成功完成且对应请求的返回值已设置，调用方的 `Task<TResponse>` 才会成功完成。
 
 ## 显式批量提交
 
@@ -205,13 +208,15 @@ Handler 返回前必须为每个 item 设置且只设置一个结果。`item.Set
 await batcher.ProcessAsync(orderWriteRequests, cancellationToken);
 ```
 
-RequestBatcher 会先为请求序列创建快照，再作为一次生产操作提交。`Wait` 模式下，数量不超过
-`MaxPendingRequests` 的请求组会原子地申请容量；超过容量的请求组会随着容量释放，按连续的容量片段逐步进入队列。
-`Fail` 模式下，整组请求必须能够立即获得容量。返回的 `Task` 会等待本次提交中的所有请求。一次提交不等于一次
-Handler 调用：请求仍可能按 `BatchSize` 或分区路由拆成多个处理批次。
+RequestBatcher 会先为请求序列创建快照，再统一提交给内部队列。`Wait` 模式下，请求数量不超过
+`MaxPendingRequests` 时，会等到队列有足够空间后将整组请求一起入队；超过该上限时，会按输入顺序分段，每段最多
+`MaxPendingRequests` 个请求，等待队列腾出足够空间后依次入队。`Fail` 模式下，如果队列剩余空间不足以容纳整组
+请求，就立即拒绝整组请求。返回的 `Task` 会等待本次提交中的所有请求。一次提交不等于一次 Handler 调用：请求仍
+可能按 `BatchSize` 或 Partition 路由拆成多个处理批次。
 
-> **显式批量提交不是分区边界。** 配置多个分区后，RequestBatcher 会逐项路由，并不会将整次提交强制放入同一
-> 分区。只有 `MaxConcurrency = 1`，或者每项请求计算出相同的分区键时，才保证整组请求落在同一个分区。
+> **显式批量提交不是 Partition 边界。** 配置多个 Partition 后，RequestBatcher 会逐项路由，并不会将整次提交
+> 强制放入同一 Partition。只有 `MaxConcurrency = 1`，或者每项请求计算出相同的 Partition Key 时，才保证整组
+> 请求落在同一个 Partition。
 
 ## 单次提交与批量提交
 
@@ -221,25 +226,26 @@ Handler 调用：请求仍可能按 `BatchSize` 或分区路由拆成多个处�
 | 行为 | 单次提交 | 显式批量提交 |
 | --- | --- | --- |
 | 输入 | 直接提交传入的 `TRequest`。 | 枚举一次序列并创建快照；空序列立即完成。 |
-| 容量 | 为一个请求申请容量。 | `Wait` 将超容量请求组按连续的容量片段逐步接收；`Fail` 要求整组请求立即获得容量。 |
-| 路由 | 按当前路由模式处理这个请求。 | 每个请求独立路由，因此一次提交可以跨多个分区。 |
-| Handler 调用 | 可能与同一分区中已排队的其他请求一起交给 Handler。 | 不形成处理批次边界；请求可按分区和 `BatchSize` 拆分，并可能并行执行。 |
+| 容量 | 占用一个请求的排队空间。 | `Wait` 等待队列有足够空间后入队，超过容量上限的请求组会按输入顺序分段入队；`Fail` 在无法立即容纳整组请求时拒绝整组。 |
+| 路由 | 按当前路由模式处理这个请求。 | 每个请求独立路由，因此一次提交可以跨多个 Partition。 |
+| Handler 调用 | 可能与同一 Partition 中已排队的其他请求一起交给 Handler。 | 不形成处理批次边界；请求可按 Partition 和 `BatchSize` 拆分，并可能并行执行。 |
 | 完成 | 返回的 `Task` 表示这个请求的实际处理结果。 | 返回的 `Task` 等待本次提交中的每个请求。 |
 | 失败 | 这次 Handler 调用失败时，该处理批次中的所有请求都会失败。 | 部分请求可能已经成功，其他处理批次仍可能失败；整组 `Task` 会失败，但不会回滚已经成功的操作。 |
 | 取消 | 只能取消尚未交给 Handler 的请求。 | 同一个 `CancellationToken` 用于整组中的每个请求；尚未分发的请求可以取消，已分发的请求继续返回实际结果。 |
 
 ## 路由与调度
 
-`MaxConcurrency` 是全局并发 Handler 批次数上限。内部队列分区数为
-`min(MaxConcurrency, max(1, Environment.ProcessorCount))`，由一个 `BatchDispatchLoop` 从所有分区拉取。
+`MaxConcurrency` 是全局并发 Handler 批次数上限。内部队列的 Partition 数量为
+`min(MaxConcurrency, max(1, Environment.ProcessorCount))`，由一个 `BatchDispatchLoop` 从所有 Partition 拉取。
 
 | 配置 | 请求如何路由 | 调度行为 |
 | --- | --- | --- |
-| `MaxConcurrency = 1` | 所有请求进入一个队列分区。 | 同时最多执行一个 Handler 批次。 |
-| `MaxConcurrency > 1`，未配置分区键 | 每个请求按轮询方式在受上限约束的分区间分配。 | 任一分区的批次都会竞争同一组全局执行槽位。 |
-| `MaxConcurrency > 1`，配置 `UsePartitionKey` | 每个请求都会调用分区键函数；相同键值进入同一队列分区。 | 相同键值的不同 Handler 批次仍可同时分发执行。 |
+| `MaxConcurrency = 1` | 所有请求进入同一个 Partition。 | 同时最多执行一个 Handler 批次。 |
+| `MaxConcurrency > 1`，未配置 Partition Key | 每个请求按轮询方式在受上限约束的 Partition 之间分配。 | 任一 Partition 的批次都会竞争同一组全局执行名额。 |
+| `MaxConcurrency > 1`，配置 `UsePartitionKey` | 每个请求都会调用 Partition Key 函数；相同键值进入同一 Partition。 | 相同键值的不同 Handler 批次仍可同时分发执行。 |
 
-RequestBatcher 不提供全局、分区内或分区键级别的 Handler 执行顺序保证。分区键只决定队列路由，不能用于串行化处理。
+RequestBatcher 不提供全局、Partition 内或 Partition Key 级别的 Handler 执行顺序保证。Partition Key 只决定队列
+路由，不能用于串行化处理。
 
 ## 处理语义
 
@@ -271,11 +277,13 @@ RequestBatcher 不提供全局、分区内或分区键级别的 Handler 执行�
 随后才启动 Handler。因此，除了排队容量外，最多还有 `MaxConcurrency * BatchSize` 个已拉取请求正在执行。它不限制
 一次显式提交的请求数量，也不限制正在等待容量的调用方数量：
 
-- `FullMode = Wait` 会在容量可用前异步等待，并支持调用方在等待期间取消。
-- `Wait` 模式下，不超过容量的请求组会原子地进入队列；超过容量的请求组会拆成连续的容量片段逐步进入队列。
+- `FullMode = Wait` 在队列空间不足时异步等待，并支持调用方在等待期间取消。
+- `Wait` 模式下，一组请求的数量不超过 `MaxPendingRequests` 时，会等到队列能容纳整组请求后一起入队；超过时，
+  按输入顺序分段，每段最多 `MaxPendingRequests` 个请求，等待队列腾出足够空间后依次入队。
   中途取消时，已分发的请求仍会继续处理，尚未分发的请求会被取消。
-- `FullMode = Fail` 要求整次提交立即获得容量。否则，包括请求组数量超过容量时，会返回一个因
-  `RequestBatchQueueFullException` 而失败的 `Task`，且不会接收其中任何一项。
+- `FullMode = Fail` 在队列剩余空间不足以容纳本次提交的全部请求时，立即拒绝整次提交，包括请求总数超过
+  `MaxPendingRequests` 的情况。此时返回的 `Task` 会失败，异常为 `RequestBatchQueueFullException`，本次提交的请求
+  均不会入队。
 
 ### 停止
 
@@ -287,34 +295,34 @@ RequestBatcher 不提供全局、分区内或分区键级别的 Handler 执行�
 | 选项 | 默认值 | 行为 |
 | --- | ---: | --- |
 | `BatchSize` | `128` | 单次 Handler 调用包含的请求数量上限。 |
-| `MaxConcurrency` | `1` | Handler 批次最大并发数；队列分区数最多为逻辑处理器数。 |
+| `MaxConcurrency` | `1` | Handler 批次最大并发数；队列的 Partition 数量最多为逻辑处理器数。 |
 | `MaxPendingRequests` | `8192` | 内部 BufferQueue 中尚未被拉取执行的请求容量上限。 |
-| `FullMode` | `Wait` | 默认等待容量；`Fail` 在容量不足时立即拒绝。 |
-| `UsePartitionKey(...)` | 未配置 | 未配置时按轮询方式分配；分区键函数返回相同键值的请求进入同一队列分区。 |
+| `FullMode` | `Wait` | 队列空间不足时，`Wait` 等待空位，`Fail` 立即拒绝本次提交。 |
+| `UsePartitionKey(...)` | 未配置 | 未配置时按轮询方式分配；Partition Key 函数返回相同键值的请求进入同一 Partition。 |
 
 Handler 执行不保证顺序，包括 `MaxConcurrency = 1` 的情况。
 
-## 分区键
+## Partition Key
 
-分区键（Partition Key）是一项可选的路由规则，用于将相关请求路由到同一分区：
+Partition Key 是一项可选的路由规则，用于将相关请求路由到同一 Partition：
 
 ```csharp
 options.MaxConcurrency = 4;
 options.UsePartitionKey(request => request.OrderId);
 ```
 
-值相同的有限整数数值键，或值相同的非 `null` 字符串键，会进入同一队列分区。不同键值仍可能落入同一分区，
-因此键值与分区不是一一对应关系。
+值相同的有限整数数值键，或值相同的非 `null` 字符串键，会进入同一 Partition。不同键值仍可能落入同一
+Partition，因此键值与 Partition 不是一一对应关系。
 
-分区路由只决定请求进入哪个分区：它不会强制同一键值的全部请求进入同一个处理批次，也不会自动去重。它提供了
-一个路由边界，不提供执行顺序或互斥保证。
+Partition 路由只决定请求进入哪个 Partition：它不会强制同一键值的全部请求进入同一个处理批次，也不会自动去重。
+它提供了一个路由边界，不提供执行顺序或互斥保证。
 
 ### 示例：合并重复更新
 
 假设多个 `PriceUpdate` 的 `ProductId` 相同。Handler 可以在当前批次中按商品分组，只写入版本最高的更新。按
 `ProductId` 路由能改善局部性，但不同 Handler 调用仍可能同时处理同一个商品。
 
-分区键无法让同一商品的所有更新都进入同一批，因此存储层仍需防止旧版本跨批次覆盖新状态。可运行的
+Partition Key 无法让同一商品的所有更新都进入同一批，因此存储层仍需防止旧版本跨批次覆盖新状态。可运行的
 [PostgreSQL Web API 示例](samples/RequestBatcher.Deduplication)展示了完整做法：
 
 - 写 Handler 会在单批内合并同一商品的更新，然后执行一次批量 upsert；

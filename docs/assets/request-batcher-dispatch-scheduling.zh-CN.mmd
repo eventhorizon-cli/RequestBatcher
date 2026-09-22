@@ -1,0 +1,32 @@
+flowchart LR
+    subgraph admission["接收与路由"]
+        direction LR
+        callers["并发调用方"] -->|提交| coordinator["请求批处理<br/>协调器"]
+        partitions["队列 Partition<br/>数量 = P<br/>P = min(MaxConcurrency,<br/>max(1, 逻辑处理器数量))<br/>只负责排队与路由"]
+        coordinator -->|入队| partitions
+    end
+
+    subgraph processing["分发与执行"]
+        direction LR
+        slots["全局 Handler 执行名额<br/>数量 = H<br/>H = MaxConcurrency<br/>由所有 P 个 Partition 共享"]
+        dispatch["唯一的 BatchDispatchLoop<br/>每次拉取前取得一个<br/>H 执行名额"]
+        handlers["并发 Handler 批次<br/>同时最多执行 H 批<br/>每批最多 BatchSize 个<br/>请求"]
+        completion["每个已接收请求对应一个 Task<br/>返回实际处理结果"]
+        slots -.->|必须有空闲名额| dispatch
+        dispatch -->|启动一个 Handler 批次| handlers
+        handlers -.->|完成每个请求| completion
+    end
+
+    partitions -->|取得名额后<br/>拉取并自动确认<br/>一个批次| dispatch
+
+    class callers client
+    class coordinator gateway
+    class partitions,dispatch,slots,completion core
+    class handlers handler
+
+    classDef client fill:#e9f6f1,stroke:#2f6f5e,color:#173f35,stroke-width:1.5px
+    classDef gateway fill:#eaf2ff,stroke:#3567a7,color:#1d3b66,stroke-width:1.5px
+    classDef core fill:#edf1f5,stroke:#596773,color:#303b44,stroke-width:1.5px
+    classDef handler fill:#f4edfb,stroke:#75529b,color:#422d59,stroke-width:1.5px
+    style admission fill:#ffffff,stroke:#aeb8c2,color:#303b44,stroke-width:1px
+    style processing fill:#ffffff,stroke:#aeb8c2,color:#303b44,stroke-width:1px

@@ -1,23 +1,23 @@
-flowchart TB
+flowchart LR
     subgraph admission["Admission and routing"]
         direction LR
         callers["Concurrent callers"] -->|submit| coordinator["Request batch<br/>coordinator"]
-        partitions["P queue partitions<br/>P = min(MaxConcurrency,<br/>logical processor count)"]
+        partitions["Queue partitions<br/>count = P<br/>P = min(MaxConcurrency,<br/>max(1, logical processor count))<br/>queueing and routing only"]
         coordinator -->|enqueue| partitions
     end
 
     subgraph processing["Dispatch and execution"]
         direction LR
-        dispatch["BatchDispatchLoop<br/>acquire a free slot<br/>before pulling"]
-        slots["H execution slots<br/>H = MaxConcurrency"]
-        handlers["H independent handler batches<br/>each up to BatchSize items"]
+        slots["Global Handler execution slots<br/>count = H<br/>H = MaxConcurrency<br/>shared by all P Partitions"]
+        dispatch["One BatchDispatchLoop<br/>acquires one H slot<br/>before every pull"]
+        handlers["Concurrent Handler batches<br/>at most H at once<br/>up to BatchSize requests<br/>per batch"]
         completion["One Task per accepted request<br/>actual outcome"]
-        dispatch -->|dispatch one auto-committed batch| slots
-        slots --> handlers
+        slots -.->|a slot must be available| dispatch
+        dispatch -->|start one handler batch| handlers
         handlers -.->|complete each request| completion
     end
 
-    partitions -->|pull after a slot is acquired| dispatch
+    partitions -->|pull one auto-committed batch<br/>after acquiring a slot| dispatch
 
     class callers client
     class coordinator gateway

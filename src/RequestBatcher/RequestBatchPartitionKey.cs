@@ -23,28 +23,24 @@ internal abstract class RequestBatchPartitionKey<TRequest>
         : RequestBatchPartitionKey<TRequest>
         where TNumber : INumber<TNumber>
     {
-        private readonly Func<TRequest, TNumber> _selector = selector;
-
         public override void Configure(MemoryBufferQueueOptions<PendingBatchRequest<TRequest>> options) =>
-            options.UsePartitionKey(pendingRequest => _selector(pendingRequest.Request));
+            options.UsePartitionKey(pendingRequest => selector(pendingRequest.Request));
 
         public override RequestBatchPartitionKey<TWrapped> Project<TWrapped>(
             Func<TWrapped, TRequest> requestSelector) =>
             RequestBatchPartitionKey<TWrapped>.Create<TNumber>(
-                request => _selector(requestSelector(request)));
+                request => selector(requestSelector(request)));
     }
 
     private sealed class StringPartitionKey(Func<TRequest, string> selector)
         : RequestBatchPartitionKey<TRequest>
     {
-        private readonly Func<TRequest, string> _selector = selector;
-
         public override void Configure(MemoryBufferQueueOptions<PendingBatchRequest<TRequest>> options) =>
-            options.UsePartitionKey(pendingRequest => _selector(pendingRequest.Request));
+            options.UsePartitionKey(pendingRequest => selector(pendingRequest.Request));
 
         public override RequestBatchPartitionKey<TWrapped> Project<TWrapped>(
             Func<TWrapped, TRequest> requestSelector) =>
             RequestBatchPartitionKey<TWrapped>.Create(
-                request => _selector(requestSelector(request)));
+                request => selector(requestSelector(request)));
     }
 }

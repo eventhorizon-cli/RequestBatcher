@@ -21,8 +21,9 @@ request, or every request in an explicit group.
 
 ### Request/Response
 
-`IRequestBatcher<TRequest, TResponse>` returns `Task<TResponse>` for one request or ordered responses for an explicit
-group. Its `IRequestBatchHandler<TRequest, TResponse>` assigns exactly one response to each request item.
+`IRequestBatcher<TRequest, TResponse>` returns `Task<TResponse>` for one request or `Task<IReadOnlyList<TResponse>>`
+for an explicit group, with responses in input order. Its `IRequestBatchHandler<TRequest, TResponse>` assigns exactly
+one response to each request item and returns `ValueTask`.
 
 ## When to Use It
 
@@ -204,7 +205,9 @@ partition key.
 
 ## Routing and Dispatch
 
-`MaxConcurrency` is the global maximum number of concurrent handler batches. The queue uses
+The queue partition count is not the handler concurrency level. Partitions organize queueing and routing, while
+`MaxConcurrency` sets the global maximum number of concurrent handler batches. Multiple batches from one partition
+can execute concurrently, and all partitions share the same execution slots. The queue uses
 `min(MaxConcurrency, max(1, Environment.ProcessorCount))` internal partitions, and one `BatchDispatchLoop` owns all
 of them. It acquires an execution slot before pulling an auto-committed batch, so there is no application-owned
 handoff queue behind BufferQueue.
