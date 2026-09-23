@@ -1,32 +1,11 @@
-flowchart LR
-    subgraph admission["Admission and routing"]
-        direction LR
-        callers["Concurrent callers"] -->|submit| coordinator["Request batch<br/>coordinator"]
-        partitions["Queue partitions<br/>count = P<br/>P = min(MaxConcurrency,<br/>max(1, logical processor count))<br/>queueing and routing only"]
-        coordinator -->|enqueue| partitions
-    end
+flowchart TB
+    partitions["Queue partitions<br/>queued requests wait<br/>for a free slot"] -->|next queued batch| dispatch["One BatchDispatchLoop<br/>wait for a free slot<br/>pull and start the next batch"]
+    slots["Shared execution slots<br/>one per running batch"] -.->|one free slot permits next pull| dispatch
+    dispatch -->|start one handler batch| handlers["Handler batches<br/>run independently<br/>other batches keep running<br/>when one completes"]
+    handlers -.->|any one batch completes<br/>and releases one slot| slots
 
-    subgraph processing["Dispatch and execution"]
-        direction LR
-        slots["Global Handler execution slots<br/>count = H<br/>H = MaxConcurrency<br/>shared by all P Partitions"]
-        dispatch["One BatchDispatchLoop<br/>acquires one H slot<br/>before every pull"]
-        handlers["Concurrent Handler batches<br/>at most H at once<br/>up to BatchSize requests<br/>per batch"]
-        completion["One Task per accepted request<br/>actual outcome"]
-        slots -.->|a slot must be available| dispatch
-        dispatch -->|start one handler batch| handlers
-        handlers -.->|complete each request| completion
-    end
-
-    partitions -->|pull one auto-committed batch<br/>after acquiring a slot| dispatch
-
-    class callers client
-    class coordinator gateway
-    class partitions,dispatch,slots,completion core
+    class partitions,dispatch,slots core
     class handlers handler
 
-    classDef client fill:#e9f6f1,stroke:#2f6f5e,color:#173f35,stroke-width:1.5px
-    classDef gateway fill:#eaf2ff,stroke:#3567a7,color:#1d3b66,stroke-width:1.5px
     classDef core fill:#edf1f5,stroke:#596773,color:#303b44,stroke-width:1.5px
     classDef handler fill:#f4edfb,stroke:#75529b,color:#422d59,stroke-width:1.5px
-    style admission fill:#ffffff,stroke:#aeb8c2,color:#303b44,stroke-width:1px
-    style processing fill:#ffffff,stroke:#aeb8c2,color:#303b44,stroke-width:1px

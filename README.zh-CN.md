@@ -64,12 +64,15 @@ RequestBatcher 既不是持久化后台队列，也不是事务协调器：
 
 ### 内部调度设计
 
+`H = MaxConcurrency` 是全局同时执行的 Handler 批次数上限；`P = min(H, max(1, Environment.ProcessorCount))`
+是队列 Partition 数量。
+
 ![内部调度设计](docs/assets/request-batcher-dispatch-scheduling.zh-CN.png)
 
-`MaxConcurrency` 限制并发执行的 Handler 批次数。队列内部使用
-`min(MaxConcurrency, max(1, Environment.ProcessorCount))` 个 Partition。一个 `BatchDispatchLoop` 负责所有
-Partition，并共享同一组全局执行名额。它只有在取得执行名额后才会从队列拉取批次，因此请求只在 BufferQueue 中
-等待，不会进入应用自行维护的转交队列。
+一个 `BatchDispatchLoop` 负责所有 Partition，并共享同一组全局执行名额。它只有在取得执行名额后才会从队列拉取
+批次，因此请求只在 BufferQueue 中等待，不会进入应用自行维护的转交队列。名额按一次 Handler 批次调用完成释放，
+而不是批次内某个请求单独完成时释放。任一正在执行的 Handler 批次完成后，其名额会立即归还，调度循环随即可以
+拉取并启动下一批；无需等待其他正在执行的批次全部完成。
 
 ### 无返回值 API
 
