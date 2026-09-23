@@ -210,7 +210,9 @@ The queue partition count is not the handler concurrency level. Partitions organ
 can execute concurrently, and all partitions share the same execution slots. The queue uses
 `min(MaxConcurrency, max(1, Environment.ProcessorCount))` internal partitions, and one `BatchDispatchLoop` owns all
 of them. It acquires an execution slot before pulling an auto-committed batch, so there is no application-owned
-handoff queue behind BufferQueue.
+handoff queue behind BufferQueue. Each handler batch releases its slot independently when it finishes. The dispatch
+loop can then pull another batch while other handler batches are still running, keeping at most `MaxConcurrency`
+handler batches in flight.
 
 | Configuration | Routing and dispatch |
 | --- | --- |

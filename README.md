@@ -72,12 +72,15 @@ path for each accepted request.
 
 ### Internal Dispatch Scheduling
 
+Here, `H = MaxConcurrency` is the maximum number of handler batches running at once, and
+`P = min(H, max(1, Environment.ProcessorCount))` is the number of internal queue partitions.
+
 ![Internal dispatch scheduling](docs/assets/request-batcher-dispatch-scheduling.png)
 
-`MaxConcurrency` bounds concurrent handler batches. The queue uses
-`min(MaxConcurrency, max(1, Environment.ProcessorCount))` internal partitions, while one `BatchDispatchLoop` owns all
-of them and shares one global execution-slot pool. A slot is acquired before a queue batch is pulled, so work waits in
-BufferQueue rather than in an application-owned handoff queue.
+One `BatchDispatchLoop` owns all `P` partitions and shares `H` global execution slots. It waits for a free slot before
+pulling a queue batch, then starts its handler and returns to waiting for another slot. When all slots are occupied,
+requests remain in BufferQueue. As soon as any one handler batch completes, its slot becomes free and the loop can pull
+the next batch while the other handlers keep running. It does not wait for all currently running batches to finish.
 
 ### Request-Only API
 
