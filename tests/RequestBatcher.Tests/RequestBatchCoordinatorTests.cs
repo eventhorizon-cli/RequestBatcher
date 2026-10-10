@@ -84,37 +84,45 @@ public sealed class RequestBatchCoordinatorTests
     public async Task ProcessAsync_MaxConcurrency_LimitsParallelHandlerInvocations()
     {
         const int concurrency = 3;
-        var allPartitionsStarted = NewSource();
+        var enteredHandlers = Enumerable.Range(0, concurrency)
+            .Select(_ => NewSource())
+            .ToArray();
         var releasePartitions = NewSource();
         var active = 0;
         var maximumActive = 0;
+        var entered = 0;
 
         await using var provider = CreateProvider<int>(async (_, _) =>
         {
             var current = Interlocked.Increment(ref active);
             UpdateMaximum(ref maximumActive, current);
-            if (current == concurrency)
-            {
-                allPartitionsStarted.TrySetResult();
-            }
+            enteredHandlers[Interlocked.Increment(ref entered) - 1].TrySetResult();
 
             await releasePartitions.Task;
             Interlocked.Decrement(ref active);
         }, options =>
         {
-            options.BatchSize = 10;
+            options.BatchSize = 1;
             options.MaxConcurrency = concurrency;
         });
         var coordinator = provider.GetRequiredService<RequestBatchCoordinator<int>>();
 
-        var requests = Enumerable.Range(0, concurrency)
-            .Select(request => coordinator.ProcessAsync(request))
-            .ToArray();
+        var requests = new List<Task>(concurrency);
+        try
+        {
+            for (var request = 0; request < concurrency; request++)
+            {
+                requests.Add(coordinator.ProcessAsync(request));
+                await enteredHandlers[request].Task.WaitAsync(TimeSpan.FromSeconds(5));
+            }
 
-        await allPartitionsStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.Equal(concurrency, Volatile.Read(ref maximumActive));
+            Assert.Equal(concurrency, Volatile.Read(ref maximumActive));
+        }
+        finally
+        {
+            releasePartitions.TrySetResult();
+        }
 
-        releasePartitions.SetResult();
         await Task.WhenAll(requests).WaitAsync(TimeSpan.FromSeconds(5));
     }
 
@@ -532,18 +540,26 @@ public sealed class RequestBatchCoordinatorTests
     }
 
     [Theory]
-    [InlineData(1, 12, 1)]
-    [InlineData(4, 12, 4)]
-    [InlineData(64, 12, 12)]
-    [InlineData(4, 0, 1)]
-    public void GetPartitionCount_MaxConcurrencyAndProcessorCount_AppliesBounds(
+    [InlineData(1, 0, false, 1)]
+    [InlineData(4, 0, false, 1)]
+    [InlineData(64, 1, false, 1)]
+    [InlineData(64, 12, false, 1)]
+    [InlineData(1, 0, true, 1)]
+    [InlineData(4, 0, true, 1)]
+    [InlineData(64, 1, true, 1)]
+    [InlineData(1, 12, true, 1)]
+    [InlineData(4, 12, true, 4)]
+    [InlineData(64, 12, true, 12)]
+    public void GetPartitionCount_PartitionKeyPresenceAndProcessorCount_SelectsExpectedCount(
         int maxConcurrency,
         int processorCount,
+        bool hasPartitionKey,
         int expected)
     {
         var actual = RequestBatcherServiceCollectionExtensions.GetPartitionCount(
             maxConcurrency,
-            processorCount);
+            processorCount,
+            hasPartitionKey);
 
         Assert.Equal(expected, actual);
     }
@@ -651,6 +667,7 @@ public sealed class RequestBatchCoordinatorTests
 
     private static TaskCompletionSource NewSource() =>
         new(TaskCreationOptions.RunContinuationsAsynchronously);
+
 
     private static void UpdateMaximum(ref int maximum, int candidate)
     {

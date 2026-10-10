@@ -6,8 +6,10 @@ handler keeps the highest version for each product and writes its batch with one
 Concurrent `GET /prices/{productId}` calls are also batched. The query handler deduplicates product IDs, performs one
 PostgreSQL query for the distinct IDs, and distributes each returned price to all matching callers.
 
-`UsePartitionKey(update => update.ProductId)` keeps updates for one product in one processing partition. The database
-only updates a row when its incoming version is newer, so stale updates are also rejected across handler batches.
+`UsePartitionKey(update => update.ProductId)` keeps equal product IDs in one keyed processing partition while allowing
+different keys to progress independently. Without a partition key, RequestBatcher uses one shared partition. The database
+only updates a row when its incoming version is newer, so stale updates are also rejected across handler batches; equal-key
+requests can still be handled by separate concurrent batches.
 
 ## Run
 

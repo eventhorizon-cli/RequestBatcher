@@ -1,0 +1,1370 @@
+[
+  {
+    "Kind": "async",
+    "DelayMs": 1,
+    "Concurrency": 8,
+    "Connections": 8,
+    "CpuIterations": 0,
+    "Direct": {
+      "RequestsPerSecond": {
+        "Median": 158758.15156829875,
+        "Min": 153054.8377996125,
+        "Max": 159968.13134883286
+      },
+      "EndToEndP99Ms": {
+        "Median": 5.98425,
+        "Min": 5.983584,
+        "Max": 6.805375
+      },
+      "PreHandlerP99Ms": {
+        "Median": 5.385042,
+        "Min": 4.546458,
+        "Max": 5.495375
+      },
+      "AverageBatchSize": {
+        "Median": 31.03030303030303,
+        "Min": 30.681647940074907,
+        "Max": 31.14828897338403
+      },
+      "Peak": {
+        "Median": 8,
+        "Min": 8,
+        "Max": 8
+      },
+      "ClientCpuCores": {
+        "Median": 5.619103610820406,
+        "Min": 5.362571895207121,
+        "Max": 6.232176812422598
+      },
+      "BytesPerRequest": {
+        "Median": 516.287109375,
+        "Min": 516.28515625,
+        "Max": 517.65234375
+      },
+      "ThreadPoolPeakThreads": {
+        "Median": 13,
+        "Min": 13,
+        "Max": 13
+      },
+      "ThreadPoolPeakPending": {
+        "Median": 0,
+        "Min": 0,
+        "Max": 0
+      },
+      "CpuWorkMsPerBatch": {
+        "Median": 0,
+        "Min": 0,
+        "Max": 0
+      },
+      "DownstreamPeak": 8
+    },
+    "Offload": {
+      "RequestsPerSecond": {
+        "Median": 141110.73023769373,
+        "Min": 140937.63440860214,
+        "Max": 144211.38798179754
+      },
+      "EndToEndP99Ms": {
+        "Median": 7.110166,
+        "Min": 7.076167,
+        "Max": 7.19175
+      },
+      "PreHandlerP99Ms": {
+        "Median": 5.747791,
+        "Min": 5.681916,
+        "Max": 5.755792
+      },
+      "AverageBatchSize": {
+        "Median": 25.924050632911392,
+        "Min": 25.761006289308177,
+        "Max": 26.425806451612903
+      },
+      "Peak": {
+        "Median": 8,
+        "Min": 8,
+        "Max": 8
+      },
+      "ClientCpuCores": {
+        "Median": 6.069525284348802,
+        "Min": 5.996072978317529,
+        "Max": 6.423666587407773
+      },
+      "BytesPerRequest": {
+        "Median": 556.205078125,
+        "Min": 552.8857421875,
+        "Max": 557.2099609375
+      },
+      "ThreadPoolPeakThreads": {
+        "Median": 13,
+        "Min": 13,
+        "Max": 13
+      },
+      "ThreadPoolPeakPending": {
+        "Median": 0,
+        "Min": 0,
+        "Max": 0
+      },
+      "CpuWorkMsPerBatch": {
+        "Median": 0,
+        "Min": 0,
+        "Max": 0
+      },
+      "DownstreamPeak": 8
+    },
+    "ThroughputRatio": 0.8888408490759419
+  },
+  {
+    "Kind": "async",
+    "DelayMs": 10,
+    "Concurrency": 8,
+    "Connections": 8,
+    "CpuIterations": 0,
+    "Direct": {
+      "RequestsPerSecond": {
+        "Median": 17711.49037262018,
+        "Min": 17648.47055924022,
+        "Max": 18115.966066177236
+      },
+      "EndToEndP99Ms": {
+        "Median": 56.815584,
+        "Min": 52.915542,
+        "Max": 57.903042
+      },
+      "PreHandlerP99Ms": {
+        "Median": 45.882875,
+        "Min": 40.695458,
+        "Max": 46.040541
+      },
+      "AverageBatchSize": {
+        "Median": 31.267175572519083,
+        "Min": 31.14828897338403,
+        "Max": 31.267175572519083
+      },
+      "Peak": {
+        "Median": 8,
+        "Min": 8,
+        "Max": 8
+      },
+      "ClientCpuCores": {
+        "Median": 0.973532157830047,
+        "Min": 0.9474542543250672,
+        "Max": 1.0114823507369683
+      },
+      "BytesPerRequest": {
+        "Median": 516.92578125,
+        "Min": 516.884765625,
+        "Max": 518.677734375
+      },
+      "ThreadPoolPeakThreads": {
+        "Median": 13,
+        "Min": 13,
+        "Max": 15
+      },
+      "ThreadPoolPeakPending": {
+        "Median": 2,
+        "Min": 2,
+        "Max": 35
+      },
+      "CpuWorkMsPerBatch": {
+        "Median": 0,
+        "Min": 0,
+        "Max": 0
+      },
+      "DownstreamPeak": 8
+    },
+    "Offload": {
+      "RequestsPerSecond": {
+        "Median": 17177.731436485694,
+        "Min": 16898.599532689364,
+        "Max": 17369.176200242517
+      },
+      "EndToEndP99Ms": {
+        "Median": 62.299167,
+        "Min": 60.965333,
+        "Max": 62.342167
+      },
+      "PreHandlerP99Ms": {
+        "Median": 50.248625,
+        "Min": 49.131792,
+        "Max": 50.828459
+      },
+      "AverageBatchSize": {
+        "Median": 26.859016393442623,
+        "Min": 26.684039087947884,
+        "Max": 27.036303630363037
+      },
+      "Peak": {
+        "Median": 8,
+        "Min": 8,
+        "Max": 8
+      },
+      "ClientCpuCores": {
+        "Median": 1.2208022797479172,
+        "Min": 1.1936646575645924,
+        "Max": 1.2402953809997639
+      },
+      "BytesPerRequest": {
+        "Median": 547.78125,
+        "Min": 547.28125,
+        "Max": 549.634765625
+      },
+      "ThreadPoolPeakThreads": {
+        "Median": 14,
+        "Min": 13,
+        "Max": 17
+      },
+      "ThreadPoolPeakPending": {
+        "Median": 2,
+        "Min": 2,
+        "Max": 2
+      },
+      "CpuWorkMsPerBatch": {
+        "Median": 0,
+        "Min": 0,
+        "Max": 0
+      },
+      "DownstreamPeak": 8
+    },
+    "ThroughputRatio": 0.9698636915976527
+  },
+  {
+    "Kind": "async",
+    "DelayMs": 10,
+    "Concurrency": 32,
+    "Connections": 8,
+    "CpuIterations": 0,
+    "Direct": {
+      "RequestsPerSecond": {
+        "Median": 17648.78994191325,
+        "Min": 17384.47663005995,
+        "Max": 17699.92193625738
+      },
+      "EndToEndP99Ms": {
+        "Median": 57.428041,
+        "Min": 57.035625,
+        "Max": 57.829417
+      },
+      "PreHandlerP99Ms": {
+        "Median": 10.932666,
+        "Min": 9.582333,
+        "Max": 10.975708
+      },
+      "AverageBatchSize": {
+        "Median": 31.03030303030303,
+        "Min": 30.91320754716981,
+        "Max": 31.14828897338403
+      },
+      "Peak": {
+        "Median": 32,
+        "Min": 32,
+        "Max": 32
+      },
+      "ClientCpuCores": {
+        "Median": 0.9233372069324929,
+        "Min": 0.8207196610345412,
+        "Max": 0.9757436374178461
+      },
+      "BytesPerRequest": {
+        "Median": 523.796875,
+        "Min": 523.3857421875,
+        "Max": 525.0380859375
+      },
+      "ThreadPoolPeakThreads": {
+        "Median": 13,
+        "Min": 13,
+        "Max": 13
+      },
+      "ThreadPoolPeakPending": {
+        "Median": 2,
+        "Min": 1,
+        "Max": 2
+      },
+      "CpuWorkMsPerBatch": {
+        "Median": 0,
+        "Min": 0,
+        "Max": 0
+      },
+      "DownstreamPeak": 8
+    },
+    "Offload": {
+      "RequestsPerSecond": {
+        "Median": 11445.21553106806,
+        "Min": 11200.465081811795,
+        "Max": 11674.592953317162
+      },
+      "EndToEndP99Ms": {
+        "Median": 100.125917,
+        "Min": 99.7625,
+        "Max": 101.064125
+      },
+      "PreHandlerP99Ms": {
+        "Median": 49.664,
+        "Min": 48.845042,
+        "Max": 50.369875
+      },
+      "AverageBatchSize": {
+        "Median": 18.204444444444444,
+        "Min": 17.847494553376908,
+        "Max": 18.87557603686636
+      },
+      "Peak": {
+        "Median": 32,
+        "Min": 32,
+        "Max": 32
+      },
+      "ClientCpuCores": {
+        "Median": 1.0731207271471355,
+        "Min": 1.0271288277776898,
+        "Max": 1.0788583696014804
+      },
+      "BytesPerRequest": {
+        "Median": 636.6201171875,
+        "Min": 629.744140625,
+        "Max": 641.400390625
+      },
+      "ThreadPoolPeakThreads": {
+        "Median": 13,
+        "Min": 13,
+        "Max": 15
+      },
+      "ThreadPoolPeakPending": {
+        "Median": 2,
+        "Min": 2,
+        "Max": 9
+      },
+      "CpuWorkMsPerBatch": {
+        "Median": 0,
+        "Min": 0,
+        "Max": 0
+      },
+      "DownstreamPeak": 8
+    },
+    "ThroughputRatio": 0.6484985978493277
+  },
+  {
+    "Kind": "async",
+    "DelayMs": 10,
+    "Concurrency": 32,
+    "Connections": 32,
+    "CpuIterations": 0,
+    "Direct": {
+      "RequestsPerSecond": {
+        "Median": 44709.0066927069,
+        "Min": 43424.97529780458,
+        "Max": 47904.21962961945
+      },
+      "EndToEndP99Ms": {
+        "Median": 22.4395,
+        "Min": 22.22225,
+        "Max": 23.015917
+      },
+      "PreHandlerP99Ms": {
+        "Median": 10.901417,
+        "Min": 10.712167,
+        "Max": 11.4655
+      },
+      "AverageBatchSize": {
+        "Median": 31.03030303030303,
+        "Min": 31.03030303030303,
+        "Max": 31.03030303030303
+      },
+      "Peak": {
+        "Median": 32,
+        "Min": 32,
+        "Max": 32
+      },
+      "ClientCpuCores": {
+        "Median": 1.233922262974403,
+        "Min": 1.2180093467584059,
+        "Max": 1.325953293005783
+      },
+      "BytesPerRequest": {
+        "Median": 515.021484375,
+        "Min": 513.6953125,
+        "Max": 515.369140625
+      },
+      "ThreadPoolPeakThreads": {
+        "Median": 13,
+        "Min": 13,
+        "Max": 13
+      },
+      "ThreadPoolPeakPending": {
+        "Median": 2,
+        "Min": 1,
+        "Max": 28
+      },
+      "CpuWorkMsPerBatch": {
+        "Median": 0,
+        "Min": 0,
+        "Max": 0
+      },
+      "DownstreamPeak": 32
+    },
+    "Offload": {
+      "RequestsPerSecond": {
+        "Median": 42760.02605689088,
+        "Min": 42566.6350742422,
+        "Max": 43172.55001575756
+      },
+      "EndToEndP99Ms": {
+        "Median": 24.702042,
+        "Min": 23.959125,
+        "Max": 25.329125
+      },
+      "PreHandlerP99Ms": {
+        "Median": 11.815916,
+        "Min": 11.761959,
+        "Max": 12.596834
+      },
+      "AverageBatchSize": {
+        "Median": 16.99585062240664,
+        "Min": 16.925619834710744,
+        "Max": 17.282700421940927
+      },
+      "Peak": {
+        "Median": 32,
+        "Min": 32,
+        "Max": 32
+      },
+      "ClientCpuCores": {
+        "Median": 2.1099589658227953,
+        "Min": 1.9806100212285953,
+        "Max": 2.2334523629212994
+      },
+      "BytesPerRequest": {
+        "Median": 636.6435546875,
+        "Min": 632.3720703125,
+        "Max": 636.833984375
+      },
+      "ThreadPoolPeakThreads": {
+        "Median": 13,
+        "Min": 13,
+        "Max": 13
+      },
+      "ThreadPoolPeakPending": {
+        "Median": 0,
+        "Min": 0,
+        "Max": 5
+      },
+      "CpuWorkMsPerBatch": {
+        "Median": 0,
+        "Min": 0,
+        "Max": 0
+      },
+      "DownstreamPeak": 32
+    },
+    "ThroughputRatio": 0.9564074270490571
+  },
+  {
+    "Kind": "async",
+    "DelayMs": 50,
+    "Concurrency": 8,
+    "Connections": 8,
+    "CpuIterations": 0,
+    "Direct": {
+      "RequestsPerSecond": {
+        "Median": 4179.133837781452,
+        "Min": 3916.092928617494,
+        "Max": 4197.788392725651
+      },
+      "EndToEndP99Ms": {
+        "Median": 258.686166,
+        "Min": 215.548375,
+        "Max": 260.28925
+      },
+      "PreHandlerP99Ms": {
+        "Median": 206.737833,
+        "Min": 162.262417,
+        "Max": 208.520875
+      },
+      "AverageBatchSize": {
+        "Median": 31.386973180076627,
+        "Min": 31.03030303030303,
+        "Max": 31.386973180076627
+      },
+      "Peak": {
+        "Median": 8,
+        "Min": 8,
+        "Max": 8
+      },
+      "ClientCpuCores": {
+        "Median": 0.2871631610453436,
+        "Min": 0.25391504916851154,
+        "Max": 0.29148591266630575
+      },
+      "BytesPerRequest": {
+        "Median": 520.69921875,
+        "Min": 520.4287109375,
+        "Max": 522.0263671875
+      },
+      "ThreadPoolPeakThreads": {
+        "Median": 13,
+        "Min": 12,
+        "Max": 17
+      },
+      "ThreadPoolPeakPending": {
+        "Median": 2,
+        "Min": 2,
+        "Max": 2
+      },
+      "CpuWorkMsPerBatch": {
+        "Median": 0,
+        "Min": 0,
+        "Max": 0
+      },
+      "DownstreamPeak": 8
+    },
+    "Offload": {
+      "RequestsPerSecond": {
+        "Median": 3880.4613277354647,
+        "Min": 3834.4728470455366,
+        "Max": 3953.034743131638
+      },
+      "EndToEndP99Ms": {
+        "Median": 268.235834,
+        "Min": 266.246291,
+        "Max": 274.755
+      },
+      "PreHandlerP99Ms": {
+        "Median": 214.494417,
+        "Min": 213.657875,
+        "Max": 217.421
+      },
+      "AverageBatchSize": {
+        "Median": 27.675675675675677,
+        "Min": 27.30666666666667,
+        "Max": 27.769491525423728
+      },
+      "Peak": {
+        "Median": 8,
+        "Min": 8,
+        "Max": 8
+      },
+      "ClientCpuCores": {
+        "Median": 0.32571993257468934,
+        "Min": 0.31250455925784665,
+        "Max": 0.3300267683955451
+      },
+      "BytesPerRequest": {
+        "Median": 546.5634765625,
+        "Min": 545.767578125,
+        "Max": 549.76171875
+      },
+      "ThreadPoolPeakThreads": {
+        "Median": 13,
+        "Min": 13,
+        "Max": 17
+      },
+      "ThreadPoolPeakPending": {
+        "Median": 2,
+        "Min": 2,
+        "Max": 5
+      },
+      "CpuWorkMsPerBatch": {
+        "Median": 0,
+        "Min": 0,
+        "Max": 0
+      },
+      "DownstreamPeak": 8
+    },
+    "ThroughputRatio": 0.9285324371892953
+  },
+  {
+    "Kind": "blocking",
+    "DelayMs": 10,
+    "Concurrency": 8,
+    "Connections": 8,
+    "CpuIterations": 0,
+    "Direct": {
+      "RequestsPerSecond": {
+        "Median": 2547.305186191467,
+        "Min": 2519.999729296904,
+        "Max": 2551.709972744174
+      },
+      "EndToEndP99Ms": {
+        "Median": 406.809958,
+        "Min": 401.419584,
+        "Max": 407.983084
+      },
+      "PreHandlerP99Ms": {
+        "Median": 394.590084,
+        "Min": 389.687458,
+        "Max": 395.381916
+      },
+      "AverageBatchSize": {
+        "Median": 31.267175572519083,
+        "Min": 31.14828897338403,
+        "Max": 31.267175572519083
+      },
+      "Peak": {
+        "Median": 1,
+        "Min": 1,
+        "Max": 1
+      },
+      "ClientCpuCores": {
+        "Median": 0.5109986682229432,
+        "Min": 0.4983434721509995,
+        "Max": 0.5255202666727682
+      },
+      "BytesPerRequest": {
+        "Median": 498.724609375,
+        "Min": 497.5380859375,
+        "Max": 499.2900390625
+      },
+      "ThreadPoolPeakThreads": {
+        "Median": 12,
+        "Min": 12,
+        "Max": 12
+      },
+      "ThreadPoolPeakPending": {
+        "Median": 32,
+        "Min": 32,
+        "Max": 32
+      },
+      "CpuWorkMsPerBatch": {
+        "Median": 0,
+        "Min": 0,
+        "Max": 0
+      },
+      "DownstreamPeak": 1
+    },
+    "Offload": {
+      "RequestsPerSecond": {
+        "Median": 16953.49502342902,
+        "Min": 16295.2171389402,
+        "Max": 17754.84443704659
+      },
+      "EndToEndP99Ms": {
+        "Median": 63.385875,
+        "Min": 60.441,
+        "Max": 64.458083
+      },
+      "PreHandlerP99Ms": {
+        "Median": 51.248917,
+        "Min": 48.366791,
+        "Max": 51.909667
+      },
+      "AverageBatchSize": {
+        "Median": 27.30666666666667,
+        "Min": 27.21594684385382,
+        "Max": 27.58249158249158
+      },
+      "Peak": {
+        "Median": 8,
+        "Min": 8,
+        "Max": 8
+      },
+      "ClientCpuCores": {
+        "Median": 0.7542903245954741,
+        "Min": 0.6791899872387056,
+        "Max": 0.7682137282747129
+      },
+      "BytesPerRequest": {
+        "Median": 526.693359375,
+        "Min": 526.009765625,
+        "Max": 527.3115234375
+      },
+      "ThreadPoolPeakThreads": {
+        "Median": 17,
+        "Min": 16,
+        "Max": 18
+      },
+      "ThreadPoolPeakPending": {
+        "Median": 66,
+        "Min": 58,
+        "Max": 91
+      },
+      "CpuWorkMsPerBatch": {
+        "Median": 0,
+        "Min": 0,
+        "Max": 0
+      },
+      "DownstreamPeak": 8
+    },
+    "ThroughputRatio": 6.655462845728575
+  },
+  {
+    "Kind": "blocking",
+    "DelayMs": 10,
+    "Concurrency": 32,
+    "Connections": 32,
+    "CpuIterations": 0,
+    "Direct": {
+      "RequestsPerSecond": {
+        "Median": 2537.418089127182,
+        "Min": 2535.219653943755,
+        "Max": 2574.7314871242997
+      },
+      "EndToEndP99Ms": {
+        "Median": 401.42575,
+        "Min": 401.133666,
+        "Max": 405.698333
+      },
+      "PreHandlerP99Ms": {
+        "Median": 388.9815,
+        "Min": 388.964917,
+        "Max": 393.588167
+      },
+      "AverageBatchSize": {
+        "Median": 31.267175572519083,
+        "Min": 31.14828897338403,
+        "Max": 31.386973180076627
+      },
+      "Peak": {
+        "Median": 1,
+        "Min": 1,
+        "Max": 1
+      },
+      "ClientCpuCores": {
+        "Median": 0.505462346909238,
+        "Min": 0.4944315224854362,
+        "Max": 0.5093064049256676
+      },
+      "BytesPerRequest": {
+        "Median": 497.654296875,
+        "Min": 497.6435546875,
+        "Max": 498.5634765625
+      },
+      "ThreadPoolPeakThreads": {
+        "Median": 12,
+        "Min": 12,
+        "Max": 12
+      },
+      "ThreadPoolPeakPending": {
+        "Median": 32,
+        "Min": 29,
+        "Max": 32
+      },
+      "CpuWorkMsPerBatch": {
+        "Median": 0,
+        "Min": 0,
+        "Max": 0
+      },
+      "DownstreamPeak": 1
+    },
+    "Offload": {
+      "RequestsPerSecond": {
+        "Median": 15811.030393965253,
+        "Min": 15511.112163025726,
+        "Max": 22808.147341968244
+      },
+      "EndToEndP99Ms": {
+        "Median": 66.688958,
+        "Min": 61.382833,
+        "Max": 67.399959
+      },
+      "PreHandlerP99Ms": {
+        "Median": 53.676167,
+        "Min": 49.17725,
+        "Max": 55.161209
+      },
+      "AverageBatchSize": {
+        "Median": 18.164079822616408,
+        "Min": 17.13807531380753,
+        "Max": 18.408988764044945
+      },
+      "Peak": {
+        "Median": 15,
+        "Min": 13,
+        "Max": 26
+      },
+      "ClientCpuCores": {
+        "Median": 0.3865584625008179,
+        "Min": 0.3416598460675552,
+        "Max": 0.678798808029292
+      },
+      "BytesPerRequest": {
+        "Median": 592.2724609375,
+        "Min": 581.0634765625,
+        "Max": 593.263671875
+      },
+      "ThreadPoolPeakThreads": {
+        "Median": 15,
+        "Min": 13,
+        "Max": 26
+      },
+      "ThreadPoolPeakPending": {
+        "Median": 348,
+        "Min": 317,
+        "Max": 386
+      },
+      "CpuWorkMsPerBatch": {
+        "Median": 0,
+        "Min": 0,
+        "Max": 0
+      },
+      "DownstreamPeak": 26
+    },
+    "ThroughputRatio": 6.231149080916307
+  },
+  {
+    "Kind": "prefix",
+    "DelayMs": 10,
+    "Concurrency": 8,
+    "Connections": 8,
+    "CpuIterations": 250000,
+    "Direct": {
+      "RequestsPerSecond": {
+        "Median": 17683.25983296745,
+        "Min": 17518.49792566614,
+        "Max": 17956.032707509774
+      },
+      "EndToEndP99Ms": {
+        "Median": 57.313875,
+        "Min": 57.215208,
+        "Max": 57.9495
+      },
+      "PreHandlerP99Ms": {
+        "Median": 45.238208,
+        "Min": 45.221,
+        "Max": 45.7085
+      },
+      "AverageBatchSize": {
+        "Median": 31.267175572519083,
+        "Min": 31.14828897338403,
+        "Max": 31.267175572519083
+      },
+      "Peak": {
+        "Median": 8,
+        "Min": 8,
+        "Max": 8
+      },
+      "ClientCpuCores": {
+        "Median": 1.7106699574571813,
+        "Min": 1.5527060841770095,
+        "Max": 1.7584034859888533
+      },
+      "BytesPerRequest": {
+        "Median": 519.263671875,
+        "Min": 519.041015625,
+        "Max": 519.4921875
+      },
+      "ThreadPoolPeakThreads": {
+        "Median": 13,
+        "Min": 13,
+        "Max": 15
+      },
+      "ThreadPoolPeakPending": {
+        "Median": 2,
+        "Min": 1,
+        "Max": 67
+      },
+      "CpuWorkMsPerBatch": {
+        "Median": 0.43328865648854964,
+        "Min": 0.43025589655172414,
+        "Max": 0.438342196969697
+      },
+      "DownstreamPeak": 8
+    },
+    "Offload": {
+      "RequestsPerSecond": {
+        "Median": 16442.89516189086,
+        "Min": 16338.591785709157,
+        "Max": 16505.779642200152
+      },
+      "EndToEndP99Ms": {
+        "Median": 64.973125,
+        "Min": 63.413333,
+        "Max": 65.990833
+      },
+      "PreHandlerP99Ms": {
+        "Median": 52.521875,
+        "Min": 52.148834,
+        "Max": 53.327542
+      },
+      "AverageBatchSize": {
+        "Median": 26.77124183006536,
+        "Min": 26.5974025974026,
+        "Max": 27.125827814569536
+      },
+      "Peak": {
+        "Median": 8,
+        "Min": 8,
+        "Max": 8
+      },
+      "ClientCpuCores": {
+        "Median": 1.4964960484194079,
+        "Min": 1.3956591066345208,
+        "Max": 1.5092722306166702
+      },
+      "BytesPerRequest": {
+        "Median": 549.013671875,
+        "Min": 548.478515625,
+        "Max": 550.8203125
+      },
+      "ThreadPoolPeakThreads": {
+        "Median": 14,
+        "Min": 13,
+        "Max": 14
+      },
+      "ThreadPoolPeakPending": {
+        "Median": 5,
+        "Min": 1,
+        "Max": 8
+      },
+      "CpuWorkMsPerBatch": {
+        "Median": 0.45409862337662343,
+        "Min": 0.4530360172413793,
+        "Max": 0.45506306493506493
+      },
+      "DownstreamPeak": 8
+    },
+    "ThroughputRatio": 0.9298565602274226
+  },
+  {
+    "Kind": "prefix",
+    "DelayMs": 10,
+    "Concurrency": 8,
+    "Connections": 8,
+    "CpuIterations": 2000000,
+    "Direct": {
+      "RequestsPerSecond": {
+        "Median": 14176.387696515241,
+        "Min": 14158.589685557288,
+        "Max": 14186.922400720985
+      },
+      "EndToEndP99Ms": {
+        "Median": 71.904125,
+        "Min": 71.675916,
+        "Max": 72.298416
+      },
+      "PreHandlerP99Ms": {
+        "Median": 60.04225,
+        "Min": 59.569042,
+        "Max": 60.140708
+      },
+      "AverageBatchSize": {
+        "Median": 31.267175572519083,
+        "Min": 31.267175572519083,
+        "Max": 31.386973180076627
+      },
+      "Peak": {
+        "Median": 8,
+        "Min": 8,
+        "Max": 8
+      },
+      "ClientCpuCores": {
+        "Median": 1.2789834091162868,
+        "Min": 1.2687614775180922,
+        "Max": 1.2793056408075072
+      },
+      "BytesPerRequest": {
+        "Median": 516.23046875,
+        "Min": 515.8173828125,
+        "Max": 516.3564453125
+      },
+      "ThreadPoolPeakThreads": {
+        "Median": 12,
+        "Min": 12,
+        "Max": 12
+      },
+      "ThreadPoolPeakPending": {
+        "Median": 1,
+        "Min": 1,
+        "Max": 1
+      },
+      "CpuWorkMsPerBatch": {
+        "Median": 1.868634233716475,
+        "Min": 1.8659869389312977,
+        "Max": 1.8702453625954198
+      },
+      "DownstreamPeak": 7
+    },
+    "Offload": {
+      "RequestsPerSecond": {
+        "Median": 13576.301399194306,
+        "Min": 13526.546756163356,
+        "Max": 13664.921186499485
+      },
+      "EndToEndP99Ms": {
+        "Median": 77.199083,
+        "Min": 76.194125,
+        "Max": 78.724667
+      },
+      "PreHandlerP99Ms": {
+        "Median": 62.59,
+        "Min": 62.43475,
+        "Max": 63.036708
+      },
+      "AverageBatchSize": {
+        "Median": 26.006349206349206,
+        "Min": 25.842271293375394,
+        "Max": 26.511326860841425
+      },
+      "Peak": {
+        "Median": 8,
+        "Min": 8,
+        "Max": 8
+      },
+      "ClientCpuCores": {
+        "Median": 3.171169716697647,
+        "Min": 3.168285735252156,
+        "Max": 3.236365270407528
+      },
+      "BytesPerRequest": {
+        "Median": 555.7861328125,
+        "Min": 553.7626953125,
+        "Max": 557.46875
+      },
+      "ThreadPoolPeakThreads": {
+        "Median": 16,
+        "Min": 14,
+        "Max": 17
+      },
+      "ThreadPoolPeakPending": {
+        "Median": 1,
+        "Min": 0,
+        "Max": 3
+      },
+      "CpuWorkMsPerBatch": {
+        "Median": 3.8967015555555555,
+        "Min": 3.778330428571429,
+        "Max": 3.9448315765472315
+      },
+      "DownstreamPeak": 8
+    },
+    "ThroughputRatio": 0.9576700136757373
+  },
+  {
+    "Kind": "prefix",
+    "DelayMs": 10,
+    "Concurrency": 32,
+    "Connections": 32,
+    "CpuIterations": 2000000,
+    "Direct": {
+      "RequestsPerSecond": {
+        "Median": 14185.414028113857,
+        "Min": 14139.654983443037,
+        "Max": 14196.269666737717
+      },
+      "EndToEndP99Ms": {
+        "Median": 71.759417,
+        "Min": 71.234375,
+        "Max": 71.83175
+      },
+      "PreHandlerP99Ms": {
+        "Median": 59.657542,
+        "Min": 58.790333,
+        "Max": 59.80125
+      },
+      "AverageBatchSize": {
+        "Median": 31.267175572519083,
+        "Min": 31.14828897338403,
+        "Max": 31.267175572519083
+      },
+      "Peak": {
+        "Median": 8,
+        "Min": 7,
+        "Max": 8
+      },
+      "ClientCpuCores": {
+        "Median": 1.2769464374838073,
+        "Min": 1.2743224245227736,
+        "Max": 1.2868938152815153
+      },
+      "BytesPerRequest": {
+        "Median": 516.419921875,
+        "Min": 516.015625,
+        "Max": 517.0986328125
+      },
+      "ThreadPoolPeakThreads": {
+        "Median": 12,
+        "Min": 12,
+        "Max": 12
+      },
+      "ThreadPoolPeakPending": {
+        "Median": 1,
+        "Min": 0,
+        "Max": 1
+      },
+      "CpuWorkMsPerBatch": {
+        "Median": 1.866492785440613,
+        "Min": 1.862370235741445,
+        "Max": 1.8694717022900762
+      },
+      "DownstreamPeak": 7
+    },
+    "Offload": {
+      "RequestsPerSecond": {
+        "Median": 30894.356160787927,
+        "Min": 30621.837870974854,
+        "Max": 31691.503025238693
+      },
+      "EndToEndP99Ms": {
+        "Median": 34.781916,
+        "Min": 34.773208,
+        "Max": 39.67975
+      },
+      "PreHandlerP99Ms": {
+        "Median": 21.881041,
+        "Min": 21.485583,
+        "Max": 24.027917
+      },
+      "AverageBatchSize": {
+        "Median": 18.408988764044945,
+        "Min": 17.88646288209607,
+        "Max": 19.14018691588785
+      },
+      "Peak": {
+        "Median": 32,
+        "Min": 32,
+        "Max": 32
+      },
+      "ClientCpuCores": {
+        "Median": 4.98336899128806,
+        "Min": 4.908810806647126,
+        "Max": 5.020541090744465
+      },
+      "BytesPerRequest": {
+        "Median": 616.3818359375,
+        "Min": 610.435546875,
+        "Max": 623.82421875
+      },
+      "ThreadPoolPeakThreads": {
+        "Median": 13,
+        "Min": 13,
+        "Max": 21
+      },
+      "ThreadPoolPeakPending": {
+        "Median": 20,
+        "Min": 19,
+        "Max": 36
+      },
+      "CpuWorkMsPerBatch": {
+        "Median": 2.2414781935483874,
+        "Min": 2.1977361712473575,
+        "Max": 2.341535757777778
+      },
+      "DownstreamPeak": 32
+    },
+    "ThroughputRatio": 2.177895978189912
+  },
+  {
+    "Kind": "suffix",
+    "DelayMs": 10,
+    "Concurrency": 8,
+    "Connections": 8,
+    "CpuIterations": 2000000,
+    "Direct": {
+      "RequestsPerSecond": {
+        "Median": 14008.203143569377,
+        "Min": 13714.720421941945,
+        "Max": 14145.465879157455
+      },
+      "EndToEndP99Ms": {
+        "Median": 73.943042,
+        "Min": 72.703417,
+        "Max": 73.954125
+      },
+      "PreHandlerP99Ms": {
+        "Median": 58.840542,
+        "Min": 57.713417,
+        "Max": 58.847
+      },
+      "AverageBatchSize": {
+        "Median": 31.14828897338403,
+        "Min": 31.03030303030303,
+        "Max": 31.14828897338403
+      },
+      "Peak": {
+        "Median": 8,
+        "Min": 8,
+        "Max": 8
+      },
+      "ClientCpuCores": {
+        "Median": 3.1820031634594375,
+        "Min": 3.167645927266419,
+        "Max": 3.275575614581237
+      },
+      "BytesPerRequest": {
+        "Median": 521.2939453125,
+        "Min": 520.99609375,
+        "Max": 521.470703125
+      },
+      "ThreadPoolPeakThreads": {
+        "Median": 21,
+        "Min": 15,
+        "Max": 21
+      },
+      "ThreadPoolPeakPending": {
+        "Median": 1,
+        "Min": 0,
+        "Max": 98
+      },
+      "CpuWorkMsPerBatch": {
+        "Median": 3.776440693181818,
+        "Min": 3.7489706958174907,
+        "Max": 3.97164471969697
+      },
+      "DownstreamPeak": 8
+    },
+    "Offload": {
+      "RequestsPerSecond": {
+        "Median": 13937.06645507006,
+        "Min": 13792.662209418813,
+        "Max": 14026.29244956733
+      },
+      "EndToEndP99Ms": {
+        "Median": 75.261625,
+        "Min": 75.20275,
+        "Max": 77.012084
+      },
+      "PreHandlerP99Ms": {
+        "Median": 60.544875,
+        "Min": 59.947083,
+        "Max": 61.593542
+      },
+      "AverageBatchSize": {
+        "Median": 26.006349206349206,
+        "Min": 26.006349206349206,
+        "Max": 26.089171974522294
+      },
+      "Peak": {
+        "Median": 8,
+        "Min": 8,
+        "Max": 8
+      },
+      "ClientCpuCores": {
+        "Median": 3.4829622254800268,
+        "Min": 3.3021229492197532,
+        "Max": 3.5329527106319
+      },
+      "BytesPerRequest": {
+        "Median": 559.4951171875,
+        "Min": 559.4033203125,
+        "Max": 560.0048828125
+      },
+      "ThreadPoolPeakThreads": {
+        "Median": 19,
+        "Min": 19,
+        "Max": 23
+      },
+      "ThreadPoolPeakPending": {
+        "Median": 12,
+        "Min": 0,
+        "Max": 17
+      },
+      "CpuWorkMsPerBatch": {
+        "Median": 3.345137158227848,
+        "Min": 3.2845651401273885,
+        "Max": 3.5241217261146494
+      },
+      "DownstreamPeak": 8
+    },
+    "ThroughputRatio": 0.9949217834885573
+  },
+  {
+    "Kind": "suffix",
+    "DelayMs": 10,
+    "Concurrency": 32,
+    "Connections": 32,
+    "CpuIterations": 2000000,
+    "Direct": {
+      "RequestsPerSecond": {
+        "Median": 33945.993879610236,
+        "Min": 32829.64093381734,
+        "Max": 34508.51275976691
+      },
+      "EndToEndP99Ms": {
+        "Median": 31.027959,
+        "Min": 28.489541,
+        "Max": 31.079083
+      },
+      "PreHandlerP99Ms": {
+        "Median": 16.040167,
+        "Min": 15.181208,
+        "Max": 16.147166
+      },
+      "AverageBatchSize": {
+        "Median": 31.03030303030303,
+        "Min": 31.03030303030303,
+        "Max": 31.14828897338403
+      },
+      "Peak": {
+        "Median": 32,
+        "Min": 32,
+        "Max": 32
+      },
+      "ClientCpuCores": {
+        "Median": 3.310601248300088,
+        "Min": 3.1655509490333555,
+        "Max": 3.3615647116757312
+      },
+      "BytesPerRequest": {
+        "Median": 512.9296875,
+        "Min": 512.72265625,
+        "Max": 513.7958984375
+      },
+      "ThreadPoolPeakThreads": {
+        "Median": 13,
+        "Min": 13,
+        "Max": 13
+      },
+      "ThreadPoolPeakPending": {
+        "Median": 483,
+        "Min": 374,
+        "Max": 563
+      },
+      "CpuWorkMsPerBatch": {
+        "Median": 2.5481962851711026,
+        "Min": 2.4165501417624524,
+        "Max": 2.6046426931818183
+      },
+      "DownstreamPeak": 32
+    },
+    "Offload": {
+      "RequestsPerSecond": {
+        "Median": 29294.8914172262,
+        "Min": 29220.617085785627,
+        "Max": 29409.46286804011
+      },
+      "EndToEndP99Ms": {
+        "Median": 35.62975,
+        "Min": 35.393958,
+        "Max": 35.805041
+      },
+      "PreHandlerP99Ms": {
+        "Median": 17.885917,
+        "Min": 17.546584,
+        "Max": 17.92475
+      },
+      "AverageBatchSize": {
+        "Median": 17.13807531380753,
+        "Min": 16.99585062240664,
+        "Max": 17.246315789473684
+      },
+      "Peak": {
+        "Median": 32,
+        "Min": 32,
+        "Max": 32
+      },
+      "ClientCpuCores": {
+        "Median": 4.77643605176154,
+        "Min": 4.660231496343856,
+        "Max": 4.791490834190377
+      },
+      "BytesPerRequest": {
+        "Median": 633.5205078125,
+        "Min": 631.201171875,
+        "Max": 635.2978515625
+      },
+      "ThreadPoolPeakThreads": {
+        "Median": 13,
+        "Min": 13,
+        "Max": 18
+      },
+      "ThreadPoolPeakPending": {
+        "Median": 453,
+        "Min": 421,
+        "Max": 475
+      },
+      "CpuWorkMsPerBatch": {
+        "Median": 2.2342598315789473,
+        "Min": 2.2082927053941908,
+        "Max": 2.2508858978723403
+      },
+      "DownstreamPeak": 32
+    },
+    "ThroughputRatio": 0.8629852323994633
+  }
+]

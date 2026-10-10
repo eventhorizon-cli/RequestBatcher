@@ -15,7 +15,7 @@ builder.Services.AddRequestBatcher<PriceUpdate, PriceUpdateHandler>(
     options =>
     {
         ConfigureBatching(options);
-        // Optional: equal product IDs share a partition; omit this line for round-robin routing.
+        // Optional: equal product IDs share a keyed partition; omit this line to use one shared partition.
         options.UsePartitionKey(static update => update.ProductId);
     });
 builder.Services.AddRequestBatcher<PriceQuery, PriceUpdate?, PriceQueryHandler>(
@@ -23,7 +23,7 @@ builder.Services.AddRequestBatcher<PriceQuery, PriceUpdate?, PriceQueryHandler>(
     options =>
     {
         ConfigureBatching(options);
-        // Optional: equal product IDs share a partition; omit this line for round-robin routing.
+        // Optional: equal product IDs share a keyed partition; omit this line to use one shared partition.
         options.UsePartitionKey(static query => query.ProductId);
     });
 

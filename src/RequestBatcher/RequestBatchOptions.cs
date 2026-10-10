@@ -15,6 +15,8 @@ public sealed class RequestBatchOptions<TRequest>
 
     /// <summary>
     /// Gets or sets the maximum number of handler invocations that may run concurrently.
+    /// Without a partition key, one queue partition supplies these invocations. With a partition key,
+    /// the internal partition count is capped by this value and the process-visible processor count.
     /// </summary>
     public int MaxConcurrency { get; set; } = 1;
 

@@ -9,7 +9,7 @@ flowchart LR
     subgraph requestBatcher["RequestBatcher"]
         direction TB
         coordinator["Request batch<br/>coordinator"]
-        queue["Internal BufferQueue<br/>per-partition routing"]
+        queue["Internal BufferQueue<br/>one partition without a key<br/>keyed routing when configured"]
         completion["One Task per accepted request<br/>success / failure"]
         coordinator -->|enqueue| queue
     end

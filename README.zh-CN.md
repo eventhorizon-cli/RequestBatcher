@@ -49,6 +49,12 @@ RequestBatcher 既不是持久化后台队列，也不是事务协调器：
 内部队列的 Partition 数量不代表 Handler 并发数。Partition 只用于组织请求的排队和路由；同时执行的 Handler
 批次数由全局 `MaxConcurrency` 限制。同一 Partition 中的多个批次可以并发执行，所有 Partition 共享同一组执行名额。
 
+未配置 `UsePartitionKey` 时，RequestBatcher 固定使用一个内部 Partition，避免将彼此无关的请求分散到多个队列，
+也让它们自然地保留在一起进行批量处理。配置有限整数数值键或非 `null` 字符串键后，队列使用
+`P = min(MaxConcurrency, max(1, Environment.ProcessorCount))` 个 Partition，使相同键保持局部性，同时让不同键可以
+独立推进。`P` 只是路由细节；`H = MaxConcurrency` 始终是全局 Handler 批次并发上限。单个 Partition 可以连续产生
+多个异步 Handler 批次，因此 Partition 数量不会限制为一次只能执行一个批次。
+
 1. 调用方通过 `ProcessAsync` 提交单个请求。
 2. RequestBatcher 根据容量配置接收请求，并将它路由到一个内存 Partition。
 3. 内部 `BatchDispatchLoop` 先获取一个空闲执行名额，再拉取并自动提交最多 `BatchSize` 个已排队请求。
@@ -64,8 +70,8 @@ RequestBatcher 既不是持久化后台队列，也不是事务协调器：
 
 ### 内部调度设计
 
-`H = MaxConcurrency` 是全局同时执行的 Handler 批次数上限；`P = min(H, max(1, Environment.ProcessorCount))`
-是队列 Partition 数量。
+`H = MaxConcurrency` 是全局同时执行的 Handler 批次数上限。未配置 Partition Key 时，内部只有一个 Partition；配置
+数值或字符串 Partition Key 时，`P = min(H, max(1, Environment.ProcessorCount))` 是队列 Partition 数量。
 
 ![内部调度设计](docs/assets/request-batcher-dispatch-scheduling.zh-CN.png)
 
@@ -218,8 +224,8 @@ RequestBatcher 会先为请求序列创建快照，再统一提交给内部队�
 可能按 `BatchSize` 或 Partition 路由拆成多个处理批次。
 
 > **显式批量提交不是 Partition 边界。** 配置多个 Partition 后，RequestBatcher 会逐项路由，并不会将整次提交
-> 强制放入同一 Partition。只有 `MaxConcurrency = 1`，或者每项请求计算出相同的 Partition Key 时，才保证整组
-> 请求落在同一个 Partition。
+> 强制放入同一 Partition。未配置 Partition Key 时，整组请求都在同一个 Partition；配置 Partition Key 时，
+> `MaxConcurrency = 1` 或每项请求计算出相同的 Partition Key，也能保证整组请求落在同一个 Partition。
 
 ## 单次提交与批量提交
 
@@ -238,17 +244,26 @@ RequestBatcher 会先为请求序列创建快照，再统一提交给内部队�
 
 ## 路由与调度
 
-`MaxConcurrency` 是全局并发 Handler 批次数上限。内部队列的 Partition 数量为
-`min(MaxConcurrency, max(1, Environment.ProcessorCount))`，由一个 `BatchDispatchLoop` 从所有 Partition 拉取。
+`MaxConcurrency` 是全局并发 Handler 批次数上限。未配置 Partition Key 时，内部队列固定使用一个 Partition；配置
+数值或字符串 Partition Key 时，Partition 数量为 `min(MaxConcurrency, max(1, Environment.ProcessorCount))`，由一个
+`BatchDispatchLoop` 从所有 Partition 拉取。
+Partition 数量在注册时确定，属于内部实现，不提供单独的数量配置项。
 
 | 配置 | 请求如何路由 | 调度行为 |
 | --- | --- | --- |
-| `MaxConcurrency = 1` | 所有请求进入同一个 Partition。 | 同时最多执行一个 Handler 批次。 |
-| `MaxConcurrency > 1`，未配置 Partition Key | 每个请求按轮询方式在受上限约束的 Partition 之间分配。 | 任一 Partition 的批次都会竞争同一组全局执行名额。 |
-| `MaxConcurrency > 1`，配置 `UsePartitionKey` | 每个请求都会调用 Partition Key 函数；相同键值进入同一 Partition。 | 相同键值的不同 Handler 批次仍可同时分发执行。 |
+| 未配置 `UsePartitionKey` | 所有请求进入同一个 Partition，避免将无关请求分散到多个队列。 | 批次共享全局执行名额；单个 Partition 可以连续提供多个异步批次。 |
+| 配置 `UsePartitionKey(...)` | 有限整数数值键或非 `null` 字符串键将相同值路由到受上限约束的 Partition；不同键仍可能共享 Partition。 | 相同键值的不同 Handler 批次仍可同时分发执行。 |
 
 RequestBatcher 不提供全局、Partition 内或 Partition Key 级别的 Handler 执行顺序保证。Partition Key 只决定队列
 路由，不能用于串行化处理。
+
+启用按键路由时，队列会在有数据的 Partition 之间轮转拉取机会，但不保证 Handler 执行时间相等，也不保证不同
+键值之间公平。字符串路由使用完整键值，共同前缀本身不会强制不同键值进入同一 Partition。具体分区归属属于
+内部实现，可能随版本变化；同一个 Batcher 实例中的相同键值仍会路由到同一 Partition。这类变化可能影响处理批次
+的组成，以及 Handler 在单个批次内能够合并的重复工作量。
+
+Handler 会在分发调用链上执行，直到完成或遇到尚未完成的异步等待。在此之前的 CPU 密集计算或同步阻塞会
+推迟其他批次的分发，即使仍有空闲执行名额。`MaxConcurrency` 是并发上限，不会自动将同步 Handler 代码并行化。
 
 ## 处理语义
 
@@ -298,10 +313,10 @@ RequestBatcher 不提供全局、Partition 内或 Partition Key 级别的 Handle
 | 选项 | 默认值 | 行为 |
 | --- | ---: | --- |
 | `BatchSize` | `128` | 单次 Handler 调用包含的请求数量上限。 |
-| `MaxConcurrency` | `1` | Handler 批次最大并发数；队列的 Partition 数量最多为逻辑处理器数。 |
+| `MaxConcurrency` | `1` | Handler 批次最大并发数；它始终是 Handler 并发上限，启用按键路由时 Partition 数量最多为逻辑处理器数。 |
 | `MaxPendingRequests` | `8192` | 内部 BufferQueue 中尚未被拉取执行的请求容量上限。 |
 | `FullMode` | `Wait` | 队列空间不足时，`Wait` 等待空位，`Fail` 立即拒绝本次提交。 |
-| `UsePartitionKey(...)` | 未配置 | 未配置时按轮询方式分配；Partition Key 函数返回相同键值的请求进入同一 Partition。 |
+| `UsePartitionKey(...)` | 未配置 | 未配置时使用一个 Partition；配置有限整数数值键或非 `null` 字符串键后，相同键值的请求进入同一 Partition。 |
 
 Handler 执行不保证顺序，包括 `MaxConcurrency = 1` 的情况。
 
