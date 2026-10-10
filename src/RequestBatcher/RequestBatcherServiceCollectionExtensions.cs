@@ -163,7 +163,8 @@ public static class RequestBatcherServiceCollectionExtensions
                     topic.TopicName = RequestBatchCoordinator<TRequest>.TopicName;
                     topic.PartitionNumber = GetPartitionCount(
                         options.MaxConcurrency,
-                        Environment.ProcessorCount);
+                        Environment.ProcessorCount,
+                        options.PartitionKey is not null);
                     topic.SegmentSize = Math.Max(16, options.BatchSize);
                     topic.BoundedCapacity = (ulong)options.MaxPendingRequests;
                     topic.FullMode = options.FullMode switch
@@ -209,8 +210,8 @@ public static class RequestBatcherServiceCollectionExtensions
         }
     }
 
-    internal static int GetPartitionCount(int maxConcurrency, int processorCount) =>
-        Math.Min(maxConcurrency, Math.Max(1, processorCount));
+    internal static int GetPartitionCount(int maxConcurrency, int processorCount, bool hasPartitionKey) =>
+        hasPartitionKey ? Math.Min(maxConcurrency, Math.Max(1, processorCount)) : 1;
 
     private static void ValidateHandlerLifetime(ServiceLifetime handlerLifetime)
     {

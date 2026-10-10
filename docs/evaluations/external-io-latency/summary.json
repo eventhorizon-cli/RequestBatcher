@@ -1,0 +1,1517 @@
+{
+  "Source": {
+    "Measurements": "/private/tmp/requestbatcher-http-latency-evaluation/measurements.jsonl",
+    "Rows": 48
+  },
+  "Validation": {
+    "Complete": true,
+    "CaseCount": 12,
+    "RowsPerCaseMode": 2,
+    "IterationsPerRow": 3,
+    "CallsPerIteration": 64,
+    "ItemsPerCall": 32,
+    "CallSamplesPerMode": 384
+  },
+  "Cases": [
+    {
+      "Settings": {
+        "Kind": "async",
+        "DelayMs": 10,
+        "Concurrency": 8,
+        "Connections": 8,
+        "CpuIterations": 0,
+        "BatchSubmission": true,
+        "MeasuredRequests": 2048,
+        "WarmupRequests": 1024,
+        "Iterations": 3
+      },
+      "Modes": {
+        "Direct": {
+          "CallTimingMs": {
+            "HttpMs": {
+              "MeanMs": 11.943297114583332,
+              "P50Ms": 12.322583,
+              "P95Ms": 13.218375,
+              "P99Ms": 13.846792,
+              "SampleCount": 384
+            },
+            "ServerMs": {
+              "MeanMs": 11.45997265625,
+              "P50Ms": 11.9496,
+              "P95Ms": 12.3245,
+              "P99Ms": 12.719,
+              "SampleCount": 384
+            },
+            "HandlerMs": {
+              "MeanMs": 11.950776708333334,
+              "P50Ms": 12.3255,
+              "P95Ms": 13.251708,
+              "P99Ms": 13.852417,
+              "SampleCount": 384
+            }
+          },
+          "Throughput": {
+            "CallsPerSecond": {
+              "LaunchMedians": {
+                "0": 664.85286494449,
+                "1": 648.8503183421874
+              },
+              "Median": 656.8515916433387,
+              "Range": {
+                "Min": 648.8503183421874,
+                "Max": 664.85286494449
+              }
+            },
+            "RequestsPerSecond": {
+              "LaunchMedians": {
+                "0": 21275.29167822368,
+                "1": 20763.210186949997
+              },
+              "Median": 21019.250932586838,
+              "Range": {
+                "Min": 20763.210186949997,
+                "Max": 21275.29167822368
+              }
+            }
+          },
+          "MeanActiveHandlersMedian": 7.903351836094259,
+          "AverageBatchSizeMedian": 32.0,
+          "HandlerPeak": 8,
+          "ServerPeak": 8
+        },
+        "Offload": {
+          "CallTimingMs": {
+            "HttpMs": {
+              "MeanMs": 12.353573755208332,
+              "P50Ms": 12.454625,
+              "P95Ms": 12.935834,
+              "P99Ms": 13.451416,
+              "SampleCount": 384
+            },
+            "ServerMs": {
+              "MeanMs": 11.868612760416667,
+              "P50Ms": 12.0522,
+              "P95Ms": 12.2504,
+              "P99Ms": 12.4201,
+              "SampleCount": 384
+            },
+            "HandlerMs": {
+              "MeanMs": 12.360840953124999,
+              "P50Ms": 12.457792,
+              "P95Ms": 12.946959,
+              "P99Ms": 13.462333,
+              "SampleCount": 384
+            }
+          },
+          "Throughput": {
+            "CallsPerSecond": {
+              "LaunchMedians": {
+                "0": 638.1035562308818,
+                "1": 641.1688508150359
+              },
+              "Median": 639.6362035229588,
+              "Range": {
+                "Min": 638.1035562308818,
+                "Max": 641.1688508150359
+              }
+            },
+            "RequestsPerSecond": {
+              "LaunchMedians": {
+                "0": 20419.31379938822,
+                "1": 20517.403226081147
+              },
+              "Median": 20468.35851273468,
+              "Range": {
+                "Min": 20419.31379938822,
+                "Max": 20517.403226081147
+              }
+            }
+          },
+          "MeanActiveHandlersMedian": 7.910375043380485,
+          "AverageBatchSizeMedian": 32.0,
+          "HandlerPeak": 8,
+          "ServerPeak": 8
+        }
+      },
+      "OffloadToDirectThroughputRatio": {
+        "CallsPerSecond": 0.9737910536574789,
+        "RequestsPerSecond": 0.9737910536574789
+      }
+    },
+    {
+      "Settings": {
+        "Kind": "async",
+        "DelayMs": 10,
+        "Concurrency": 32,
+        "Connections": 8,
+        "CpuIterations": 0,
+        "BatchSubmission": true,
+        "MeasuredRequests": 2048,
+        "WarmupRequests": 1024,
+        "Iterations": 3
+      },
+      "Modes": {
+        "Direct": {
+          "CallTimingMs": {
+            "HttpMs": {
+              "MeanMs": 30.677466596354165,
+              "P50Ms": 26.083542,
+              "P95Ms": 51.127209,
+              "P99Ms": 51.770292,
+              "SampleCount": 384
+            },
+            "ServerMs": {
+              "MeanMs": 11.867822135416667,
+              "P50Ms": 12.0811,
+              "P95Ms": 12.4125,
+              "P99Ms": 14.0848,
+              "SampleCount": 384
+            },
+            "HandlerMs": {
+              "MeanMs": 30.683152638020832,
+              "P50Ms": 26.089458,
+              "P95Ms": 51.134542,
+              "P99Ms": 51.775,
+              "SampleCount": 384
+            }
+          },
+          "Throughput": {
+            "CallsPerSecond": {
+              "LaunchMedians": {
+                "0": 641.6483947260513,
+                "1": 647.1680331350033
+              },
+              "Median": 644.4082139305273,
+              "Range": {
+                "Min": 641.6483947260513,
+                "Max": 647.1680331350033
+              }
+            },
+            "RequestsPerSecond": {
+              "LaunchMedians": {
+                "0": 20532.74863123364,
+                "1": 20709.377060320105
+              },
+              "Median": 20621.062845776873,
+              "Range": {
+                "Min": 20532.74863123364,
+                "Max": 20709.377060320105
+              }
+            }
+          },
+          "MeanActiveHandlersMedian": 19.641237030472986,
+          "AverageBatchSizeMedian": 32.0,
+          "HandlerPeak": 32,
+          "ServerPeak": 8
+        },
+        "Offload": {
+          "CallTimingMs": {
+            "HttpMs": {
+              "MeanMs": 30.300050992187497,
+              "P50Ms": 25.593833,
+              "P95Ms": 49.299666,
+              "P99Ms": 52.094125,
+              "SampleCount": 384
+            },
+            "ServerMs": {
+              "MeanMs": 11.662729947916667,
+              "P50Ms": 12.0477,
+              "P95Ms": 12.3895,
+              "P99Ms": 12.8792,
+              "SampleCount": 384
+            },
+            "HandlerMs": {
+              "MeanMs": 30.306010377604167,
+              "P50Ms": 25.600375,
+              "P95Ms": 49.305125,
+              "P99Ms": 52.100375,
+              "SampleCount": 384
+            }
+          },
+          "Throughput": {
+            "CallsPerSecond": {
+              "LaunchMedians": {
+                "0": 665.5546357960242,
+                "1": 650.0425066857887
+              },
+              "Median": 657.7985712409064,
+              "Range": {
+                "Min": 650.0425066857887,
+                "Max": 665.5546357960242
+              }
+            },
+            "RequestsPerSecond": {
+              "LaunchMedians": {
+                "0": 21297.748345472774,
+                "1": 20801.360213945238
+              },
+              "Median": 21049.554279709006,
+              "Range": {
+                "Min": 20801.360213945238,
+                "Max": 21297.748345472774
+              }
+            }
+          },
+          "MeanActiveHandlersMedian": 19.67665264912366,
+          "AverageBatchSizeMedian": 32.0,
+          "HandlerPeak": 32,
+          "ServerPeak": 8
+        }
+      },
+      "OffloadToDirectThroughputRatio": {
+        "CallsPerSecond": 1.0207793088618555,
+        "RequestsPerSecond": 1.0207793088618555
+      }
+    },
+    {
+      "Settings": {
+        "Kind": "async",
+        "DelayMs": 10,
+        "Concurrency": 32,
+        "Connections": 32,
+        "CpuIterations": 0,
+        "BatchSubmission": true,
+        "MeasuredRequests": 2048,
+        "WarmupRequests": 1024,
+        "Iterations": 3
+      },
+      "Modes": {
+        "Direct": {
+          "CallTimingMs": {
+            "HttpMs": {
+              "MeanMs": 12.300298286458334,
+              "P50Ms": 12.426666,
+              "P95Ms": 13.031167,
+              "P99Ms": 13.168042,
+              "SampleCount": 384
+            },
+            "ServerMs": {
+              "MeanMs": 11.725415624999998,
+              "P50Ms": 11.8769,
+              "P95Ms": 12.4213,
+              "P99Ms": 12.5787,
+              "SampleCount": 384
+            },
+            "HandlerMs": {
+              "MeanMs": 12.30231434375,
+              "P50Ms": 12.427834,
+              "P95Ms": 13.032667,
+              "P99Ms": 13.175875,
+              "SampleCount": 384
+            }
+          },
+          "Throughput": {
+            "CallsPerSecond": {
+              "LaunchMedians": {
+                "0": 2498.3799567467972,
+                "1": 2452.981330512405
+              },
+              "Median": 2475.680643629601,
+              "Range": {
+                "Min": 2452.981330512405,
+                "Max": 2498.3799567467972
+              }
+            },
+            "RequestsPerSecond": {
+              "LaunchMedians": {
+                "0": 79948.15861589751,
+                "1": 78495.40257639695
+              },
+              "Median": 79221.78059614723,
+              "Range": {
+                "Min": 78495.40257639695,
+                "Max": 79948.15861589751
+              }
+            }
+          },
+          "MeanActiveHandlersMedian": 30.801849064734178,
+          "AverageBatchSizeMedian": 32.0,
+          "HandlerPeak": 32,
+          "ServerPeak": 32
+        },
+        "Offload": {
+          "CallTimingMs": {
+            "HttpMs": {
+              "MeanMs": 12.316921138020833,
+              "P50Ms": 12.575833,
+              "P95Ms": 12.848166,
+              "P99Ms": 12.938625,
+              "SampleCount": 384
+            },
+            "ServerMs": {
+              "MeanMs": 11.7410203125,
+              "P50Ms": 12.0047,
+              "P95Ms": 12.2912,
+              "P99Ms": 12.3624,
+              "SampleCount": 384
+            },
+            "HandlerMs": {
+              "MeanMs": 12.31993465625,
+              "P50Ms": 12.578125,
+              "P95Ms": 12.850792,
+              "P99Ms": 12.941792,
+              "SampleCount": 384
+            }
+          },
+          "Throughput": {
+            "CallsPerSecond": {
+              "LaunchMedians": {
+                "0": 2565.3975965431264,
+                "1": 2473.5733472471834
+              },
+              "Median": 2519.4854718951547,
+              "Range": {
+                "Min": 2473.5733472471834,
+                "Max": 2565.3975965431264
+              }
+            },
+            "RequestsPerSecond": {
+              "LaunchMedians": {
+                "0": 82092.72308938004,
+                "1": 79154.34711190987
+              },
+              "Median": 80623.53510064495,
+              "Range": {
+                "Min": 79154.34711190987,
+                "Max": 82092.72308938004
+              }
+            }
+          },
+          "MeanActiveHandlersMedian": 31.26177574583257,
+          "AverageBatchSizeMedian": 32.0,
+          "HandlerPeak": 32,
+          "ServerPeak": 32
+        }
+      },
+      "OffloadToDirectThroughputRatio": {
+        "CallsPerSecond": 1.0176940545131585,
+        "RequestsPerSecond": 1.0176940545131585
+      }
+    },
+    {
+      "Settings": {
+        "Kind": "async",
+        "DelayMs": 100,
+        "Concurrency": 8,
+        "Connections": 8,
+        "CpuIterations": 0,
+        "BatchSubmission": true,
+        "MeasuredRequests": 2048,
+        "WarmupRequests": 1024,
+        "Iterations": 3
+      },
+      "Modes": {
+        "Direct": {
+          "CallTimingMs": {
+            "HttpMs": {
+              "MeanMs": 103.21007878645833,
+              "P50Ms": 103.340375,
+              "P95Ms": 104.562166,
+              "P99Ms": 105.294042,
+              "SampleCount": 384
+            },
+            "ServerMs": {
+              "MeanMs": 101.79949557291667,
+              "P50Ms": 101.8951,
+              "P95Ms": 102.8981,
+              "P99Ms": 103.1994,
+              "SampleCount": 384
+            },
+            "HandlerMs": {
+              "MeanMs": 103.23875563802083,
+              "P50Ms": 103.355667,
+              "P95Ms": 104.575417,
+              "P99Ms": 105.330167,
+              "SampleCount": 384
+            }
+          },
+          "Throughput": {
+            "CallsPerSecond": {
+              "LaunchMedians": {
+                "0": 76.75945565552276,
+                "1": 77.18852380325225
+              },
+              "Median": 76.97398972938751,
+              "Range": {
+                "Min": 76.75945565552276,
+                "Max": 77.18852380325225
+              }
+            },
+            "RequestsPerSecond": {
+              "LaunchMedians": {
+                "0": 2456.302580976728,
+                "1": 2470.032761704072
+              },
+              "Median": 2463.1676713404004,
+              "Range": {
+                "Min": 2456.302580976728,
+                "Max": 2470.032761704072
+              }
+            }
+          },
+          "MeanActiveHandlersMedian": 7.939685663094654,
+          "AverageBatchSizeMedian": 32.0,
+          "HandlerPeak": 8,
+          "ServerPeak": 8
+        },
+        "Offload": {
+          "CallTimingMs": {
+            "HttpMs": {
+              "MeanMs": 103.665132390625,
+              "P50Ms": 103.875917,
+              "P95Ms": 104.652042,
+              "P99Ms": 105.210791,
+              "SampleCount": 384
+            },
+            "ServerMs": {
+              "MeanMs": 102.00303541666666,
+              "P50Ms": 102.2333,
+              "P95Ms": 102.7947,
+              "P99Ms": 103.0531,
+              "SampleCount": 384
+            },
+            "HandlerMs": {
+              "MeanMs": 103.69798895052084,
+              "P50Ms": 103.929708,
+              "P95Ms": 104.668958,
+              "P99Ms": 105.222083,
+              "SampleCount": 384
+            }
+          },
+          "Throughput": {
+            "CallsPerSecond": {
+              "LaunchMedians": {
+                "0": 76.84483742574118,
+                "1": 76.55393422031433
+              },
+              "Median": 76.69938582302775,
+              "Range": {
+                "Min": 76.55393422031433,
+                "Max": 76.84483742574118
+              }
+            },
+            "RequestsPerSecond": {
+              "LaunchMedians": {
+                "0": 2459.0347976237176,
+                "1": 2449.7258950500586
+              },
+              "Median": 2454.380346336888,
+              "Range": {
+                "Min": 2449.7258950500586,
+                "Max": 2459.0347976237176
+              }
+            }
+          },
+          "MeanActiveHandlersMedian": 7.958499544515108,
+          "AverageBatchSizeMedian": 32.0,
+          "HandlerPeak": 8,
+          "ServerPeak": 8
+        }
+      },
+      "OffloadToDirectThroughputRatio": {
+        "CallsPerSecond": 0.9964325104191017,
+        "RequestsPerSecond": 0.9964325104191017
+      }
+    },
+    {
+      "Settings": {
+        "Kind": "async",
+        "DelayMs": 100,
+        "Concurrency": 32,
+        "Connections": 8,
+        "CpuIterations": 0,
+        "BatchSubmission": true,
+        "MeasuredRequests": 2048,
+        "WarmupRequests": 1024,
+        "Iterations": 3
+      },
+      "Modes": {
+        "Direct": {
+          "CallTimingMs": {
+            "HttpMs": {
+              "MeanMs": 259.3979356432292,
+              "P50Ms": 210.851542,
+              "P95Ms": 417.970333,
+              "P99Ms": 418.62975,
+              "SampleCount": 384
+            },
+            "ServerMs": {
+              "MeanMs": 102.15573593750001,
+              "P50Ms": 102.2545,
+              "P95Ms": 103.0062,
+              "P99Ms": 103.7284,
+              "SampleCount": 384
+            },
+            "HandlerMs": {
+              "MeanMs": 259.4224104921875,
+              "P50Ms": 210.856792,
+              "P95Ms": 417.97925,
+              "P99Ms": 418.640375,
+              "SampleCount": 384
+            }
+          },
+          "Throughput": {
+            "CallsPerSecond": {
+              "LaunchMedians": {
+                "0": 76.38798459970488,
+                "1": 76.86625871501234
+              },
+              "Median": 76.6271216573586,
+              "Range": {
+                "Min": 76.38798459970488,
+                "Max": 76.86625871501234
+              }
+            },
+            "RequestsPerSecond": {
+              "LaunchMedians": {
+                "0": 2444.415507190556,
+                "1": 2459.7202788803947
+              },
+              "Median": 2452.067893035475,
+              "Range": {
+                "Min": 2444.415507190556,
+                "Max": 2459.7202788803947
+              }
+            }
+          },
+          "MeanActiveHandlersMedian": 19.90162096897045,
+          "AverageBatchSizeMedian": 32.0,
+          "HandlerPeak": 32,
+          "ServerPeak": 8
+        },
+        "Offload": {
+          "CallTimingMs": {
+            "HttpMs": {
+              "MeanMs": 259.60895584375004,
+              "P50Ms": 210.239417,
+              "P95Ms": 417.103292,
+              "P99Ms": 417.85225,
+              "SampleCount": 384
+            },
+            "ServerMs": {
+              "MeanMs": 102.05531041666666,
+              "P50Ms": 102.2325,
+              "P95Ms": 102.8996,
+              "P99Ms": 103.7803,
+              "SampleCount": 384
+            },
+            "HandlerMs": {
+              "MeanMs": 259.6334713567708,
+              "P50Ms": 210.279833,
+              "P95Ms": 417.112917,
+              "P99Ms": 417.861167,
+              "SampleCount": 384
+            }
+          },
+          "Throughput": {
+            "CallsPerSecond": {
+              "LaunchMedians": {
+                "0": 76.76804606850445,
+                "1": 76.5374459454288
+              },
+              "Median": 76.65274600696662,
+              "Range": {
+                "Min": 76.5374459454288,
+                "Max": 76.76804606850445
+              }
+            },
+            "RequestsPerSecond": {
+              "LaunchMedians": {
+                "0": 2456.5774741921423,
+                "1": 2449.1982702537216
+              },
+              "Median": 2452.887872222932,
+              "Range": {
+                "Min": 2449.1982702537216,
+                "Max": 2456.5774741921423
+              }
+            }
+          },
+          "MeanActiveHandlersMedian": 19.921794926930794,
+          "AverageBatchSizeMedian": 32.0,
+          "HandlerPeak": 32,
+          "ServerPeak": 8
+        }
+      },
+      "OffloadToDirectThroughputRatio": {
+        "CallsPerSecond": 1.000334403133692,
+        "RequestsPerSecond": 1.000334403133692
+      }
+    },
+    {
+      "Settings": {
+        "Kind": "async",
+        "DelayMs": 100,
+        "Concurrency": 32,
+        "Connections": 32,
+        "CpuIterations": 0,
+        "BatchSubmission": true,
+        "MeasuredRequests": 2048,
+        "WarmupRequests": 1024,
+        "Iterations": 3
+      },
+      "Modes": {
+        "Direct": {
+          "CallTimingMs": {
+            "HttpMs": {
+              "MeanMs": 105.05194747916666,
+              "P50Ms": 104.179625,
+              "P95Ms": 111.125959,
+              "P99Ms": 112.738041,
+              "SampleCount": 384
+            },
+            "ServerMs": {
+              "MeanMs": 101.99208333333333,
+              "P50Ms": 102.0418,
+              "P95Ms": 103.4692,
+              "P99Ms": 104.1065,
+              "SampleCount": 384
+            },
+            "HandlerMs": {
+              "MeanMs": 105.06305100520832,
+              "P50Ms": 104.189667,
+              "P95Ms": 111.134458,
+              "P99Ms": 112.764375,
+              "SampleCount": 384
+            }
+          },
+          "Throughput": {
+            "CallsPerSecond": {
+              "LaunchMedians": {
+                "0": 302.95829305723737,
+                "1": 298.33811684319113
+              },
+              "Median": 300.6482049502142,
+              "Range": {
+                "Min": 298.33811684319113,
+                "Max": 302.95829305723737
+              }
+            },
+            "RequestsPerSecond": {
+              "LaunchMedians": {
+                "0": 9694.665377831596,
+                "1": 9546.819738982116
+              },
+              "Median": 9620.742558406855,
+              "Range": {
+                "Min": 9546.819738982116,
+                "Max": 9694.665377831596
+              }
+            }
+          },
+          "MeanActiveHandlersMedian": 31.508689670467923,
+          "AverageBatchSizeMedian": 32.0,
+          "HandlerPeak": 32,
+          "ServerPeak": 32
+        },
+        "Offload": {
+          "CallTimingMs": {
+            "HttpMs": {
+              "MeanMs": 104.30194044270833,
+              "P50Ms": 104.786875,
+              "P95Ms": 105.928541,
+              "P99Ms": 106.662458,
+              "SampleCount": 384
+            },
+            "ServerMs": {
+              "MeanMs": 102.15039192708333,
+              "P50Ms": 102.366,
+              "P95Ms": 103.1104,
+              "P99Ms": 103.5281,
+              "SampleCount": 384
+            },
+            "HandlerMs": {
+              "MeanMs": 104.312741640625,
+              "P50Ms": 104.791291,
+              "P95Ms": 105.938125,
+              "P99Ms": 106.691625,
+              "SampleCount": 384
+            }
+          },
+          "Throughput": {
+            "CallsPerSecond": {
+              "LaunchMedians": {
+                "0": 300.6166869504645,
+                "1": 304.7478283145969
+              },
+              "Median": 302.6822576325307,
+              "Range": {
+                "Min": 300.6166869504645,
+                "Max": 304.7478283145969
+              }
+            },
+            "RequestsPerSecond": {
+              "LaunchMedians": {
+                "0": 9619.733982414864,
+                "1": 9751.930506067101
+              },
+              "Median": 9685.832244240983,
+              "Range": {
+                "Min": 9619.733982414864,
+                "Max": 9751.930506067101
+              }
+            }
+          },
+          "MeanActiveHandlersMedian": 31.651435592262292,
+          "AverageBatchSizeMedian": 32.0,
+          "HandlerPeak": 32,
+          "ServerPeak": 32
+        }
+      },
+      "OffloadToDirectThroughputRatio": {
+        "CallsPerSecond": 1.0067655573817689,
+        "RequestsPerSecond": 1.0067655573817689
+      }
+    },
+    {
+      "Settings": {
+        "Kind": "async",
+        "DelayMs": 500,
+        "Concurrency": 8,
+        "Connections": 8,
+        "CpuIterations": 0,
+        "BatchSubmission": true,
+        "MeasuredRequests": 2048,
+        "WarmupRequests": 1024,
+        "Iterations": 3
+      },
+      "Modes": {
+        "Direct": {
+          "CallTimingMs": {
+            "HttpMs": {
+              "MeanMs": 503.2633077213541,
+              "P50Ms": 503.395416,
+              "P95Ms": 504.318375,
+              "P99Ms": 504.650416,
+              "SampleCount": 384
+            },
+            "ServerMs": {
+              "MeanMs": 501.8565114583334,
+              "P50Ms": 501.9906,
+              "P95Ms": 502.8496,
+              "P99Ms": 502.9533,
+              "SampleCount": 384
+            },
+            "HandlerMs": {
+              "MeanMs": 503.29448568749996,
+              "P50Ms": 503.42,
+              "P95Ms": 504.332375,
+              "P99Ms": 504.684958,
+              "SampleCount": 384
+            }
+          },
+          "Throughput": {
+            "CallsPerSecond": {
+              "LaunchMedians": {
+                "0": 15.866433192102246,
+                "1": 15.872521825027519
+              },
+              "Median": 15.869477508564882,
+              "Range": {
+                "Min": 15.866433192102246,
+                "Max": 15.872521825027519
+              }
+            },
+            "RequestsPerSecond": {
+              "LaunchMedians": {
+                "0": 507.72586214727187,
+                "1": 507.9206984008806
+              },
+              "Median": 507.82328027407624,
+              "Range": {
+                "Min": 507.72586214727187,
+                "Max": 507.9206984008806
+              }
+            }
+          },
+          "MeanActiveHandlersMedian": 7.986987738480958,
+          "AverageBatchSizeMedian": 32.0,
+          "HandlerPeak": 8,
+          "ServerPeak": 8
+        },
+        "Offload": {
+          "CallTimingMs": {
+            "HttpMs": {
+              "MeanMs": 504.06185639843756,
+              "P50Ms": 503.923792,
+              "P95Ms": 506.893458,
+              "P99Ms": 509.422166,
+              "SampleCount": 384
+            },
+            "ServerMs": {
+              "MeanMs": 502.0437677083333,
+              "P50Ms": 502.2051,
+              "P95Ms": 502.9222,
+              "P99Ms": 504.122,
+              "SampleCount": 384
+            },
+            "HandlerMs": {
+              "MeanMs": 504.1008225052083,
+              "P50Ms": 503.964875,
+              "P95Ms": 506.924875,
+              "P99Ms": 509.432083,
+              "SampleCount": 384
+            }
+          },
+          "Throughput": {
+            "CallsPerSecond": {
+              "LaunchMedians": {
+                "0": 15.854364188717074,
+                "1": 15.8549230935898
+              },
+              "Median": 15.854643641153437,
+              "Range": {
+                "Min": 15.854364188717074,
+                "Max": 15.8549230935898
+              }
+            },
+            "RequestsPerSecond": {
+              "LaunchMedians": {
+                "0": 507.3396540389464,
+                "1": 507.3575389948736
+              },
+              "Median": 507.34859651691,
+              "Range": {
+                "Min": 507.3396540389464,
+                "Max": 507.3575389948736
+              }
+            }
+          },
+          "MeanActiveHandlersMedian": 7.989126000227273,
+          "AverageBatchSizeMedian": 32.0,
+          "HandlerPeak": 8,
+          "ServerPeak": 8
+        }
+      },
+      "OffloadToDirectThroughputRatio": {
+        "CallsPerSecond": 0.9990652579832298,
+        "RequestsPerSecond": 0.9990652579832298
+      }
+    },
+    {
+      "Settings": {
+        "Kind": "async",
+        "DelayMs": 500,
+        "Concurrency": 32,
+        "Connections": 8,
+        "CpuIterations": 0,
+        "BatchSubmission": true,
+        "MeasuredRequests": 2048,
+        "WarmupRequests": 1024,
+        "Iterations": 3
+      },
+      "Modes": {
+        "Direct": {
+          "CallTimingMs": {
+            "HttpMs": {
+              "MeanMs": 1258.930840309896,
+              "P50Ms": 1008.684458,
+              "P95Ms": 2016.077,
+              "P99Ms": 2017.356416,
+              "SampleCount": 384
+            },
+            "ServerMs": {
+              "MeanMs": 502.07512864583333,
+              "P50Ms": 502.2226,
+              "P95Ms": 502.9276,
+              "P99Ms": 503.4509,
+              "SampleCount": 384
+            },
+            "HandlerMs": {
+              "MeanMs": 1258.95663446875,
+              "P50Ms": 1008.69525,
+              "P95Ms": 2016.095125,
+              "P99Ms": 2017.366125,
+              "SampleCount": 384
+            }
+          },
+          "Throughput": {
+            "CallsPerSecond": {
+              "LaunchMedians": {
+                "0": 15.871098902488713,
+                "1": 15.869508207908014
+              },
+              "Median": 15.870303555198364,
+              "Range": {
+                "Min": 15.869508207908014,
+                "Max": 15.871098902488713
+              }
+            },
+            "RequestsPerSecond": {
+              "LaunchMedians": {
+                "0": 507.8751648796388,
+                "1": 507.82426265305645
+              },
+              "Median": 507.84971376634763,
+              "Range": {
+                "Min": 507.82426265305645,
+                "Max": 507.8751648796388
+              }
+            }
+          },
+          "MeanActiveHandlersMedian": 19.973709592981034,
+          "AverageBatchSizeMedian": 32.0,
+          "HandlerPeak": 32,
+          "ServerPeak": 8
+        },
+        "Offload": {
+          "CallTimingMs": {
+            "HttpMs": {
+              "MeanMs": 1259.8981703541667,
+              "P50Ms": 1009.510833,
+              "P95Ms": 2017.23225,
+              "P99Ms": 2017.552584,
+              "SampleCount": 384
+            },
+            "ServerMs": {
+              "MeanMs": 502.16953697916665,
+              "P50Ms": 502.2519,
+              "P95Ms": 502.7805,
+              "P99Ms": 503.4527,
+              "SampleCount": 384
+            },
+            "HandlerMs": {
+              "MeanMs": 1259.9250677213543,
+              "P50Ms": 1009.522292,
+              "P95Ms": 2017.261334,
+              "P99Ms": 2017.561167,
+              "SampleCount": 384
+            }
+          },
+          "Throughput": {
+            "CallsPerSecond": {
+              "LaunchMedians": {
+                "0": 15.859485356230927,
+                "1": 15.861888946751737
+              },
+              "Median": 15.860687151491332,
+              "Range": {
+                "Min": 15.859485356230927,
+                "Max": 15.861888946751737
+              }
+            },
+            "RequestsPerSecond": {
+              "LaunchMedians": {
+                "0": 507.50353139938966,
+                "1": 507.5804462960556
+              },
+              "Median": 507.5419888477226,
+              "Range": {
+                "Min": 507.50353139938966,
+                "Max": 507.5804462960556
+              }
+            }
+          },
+          "MeanActiveHandlersMedian": 19.98461637006828,
+          "AverageBatchSizeMedian": 32.0,
+          "HandlerPeak": 32,
+          "ServerPeak": 8
+        }
+      },
+      "OffloadToDirectThroughputRatio": {
+        "CallsPerSecond": 0.999394063026357,
+        "RequestsPerSecond": 0.999394063026357
+      }
+    },
+    {
+      "Settings": {
+        "Kind": "async",
+        "DelayMs": 500,
+        "Concurrency": 32,
+        "Connections": 32,
+        "CpuIterations": 0,
+        "BatchSubmission": true,
+        "MeasuredRequests": 2048,
+        "WarmupRequests": 1024,
+        "Iterations": 3
+      },
+      "Modes": {
+        "Direct": {
+          "CallTimingMs": {
+            "HttpMs": {
+              "MeanMs": 503.74718569270834,
+              "P50Ms": 503.933166,
+              "P95Ms": 505.17225,
+              "P99Ms": 505.893625,
+              "SampleCount": 384
+            },
+            "ServerMs": {
+              "MeanMs": 501.7487828125,
+              "P50Ms": 501.8706,
+              "P95Ms": 503.343,
+              "P99Ms": 503.7863,
+              "SampleCount": 384
+            },
+            "HandlerMs": {
+              "MeanMs": 503.75989767447913,
+              "P50Ms": 503.942291,
+              "P95Ms": 505.178292,
+              "P99Ms": 505.904875,
+              "SampleCount": 384
+            }
+          },
+          "Throughput": {
+            "CallsPerSecond": {
+              "LaunchMedians": {
+                "0": 63.21851172362605,
+                "1": 63.23677637489843
+              },
+              "Median": 63.22764404926224,
+              "Range": {
+                "Min": 63.21851172362605,
+                "Max": 63.23677637489843
+              }
+            },
+            "RequestsPerSecond": {
+              "LaunchMedians": {
+                "0": 2022.9923751560336,
+                "1": 2023.5768439967499
+              },
+              "Median": 2023.2846095763916,
+              "Range": {
+                "Min": 2022.9923751560336,
+                "Max": 2023.5768439967499
+              }
+            }
+          },
+          "MeanActiveHandlersMedian": 31.874737321654557,
+          "AverageBatchSizeMedian": 32.0,
+          "HandlerPeak": 32,
+          "ServerPeak": 32
+        },
+        "Offload": {
+          "CallTimingMs": {
+            "HttpMs": {
+              "MeanMs": 505.20504796093746,
+              "P50Ms": 505.081834,
+              "P95Ms": 507.450375,
+              "P99Ms": 508.174791,
+              "SampleCount": 384
+            },
+            "ServerMs": {
+              "MeanMs": 502.39253203125,
+              "P50Ms": 502.587,
+              "P95Ms": 503.1485,
+              "P99Ms": 503.3826,
+              "SampleCount": 384
+            },
+            "HandlerMs": {
+              "MeanMs": 505.2190202942708,
+              "P50Ms": 505.099042,
+              "P95Ms": 507.464375,
+              "P99Ms": 508.185333,
+              "SampleCount": 384
+            }
+          },
+          "Throughput": {
+            "CallsPerSecond": {
+              "LaunchMedians": {
+                "0": 63.16590683344572,
+                "1": 63.14001406641126
+              },
+              "Median": 63.152960449928486,
+              "Range": {
+                "Min": 63.14001406641126,
+                "Max": 63.16590683344572
+              }
+            },
+            "RequestsPerSecond": {
+              "LaunchMedians": {
+                "0": 2021.309018670263,
+                "1": 2020.4804501251604
+              },
+              "Median": 2020.8947343977115,
+              "Range": {
+                "Min": 2020.4804501251604,
+                "Max": 2021.309018670263
+              }
+            }
+          },
+          "MeanActiveHandlersMedian": 31.903229435891717,
+          "AverageBatchSizeMedian": 32.0,
+          "HandlerPeak": 32,
+          "ServerPeak": 32
+        }
+      },
+      "OffloadToDirectThroughputRatio": {
+        "CallsPerSecond": 0.9988188141364944,
+        "RequestsPerSecond": 0.9988188141364944
+      }
+    },
+    {
+      "Settings": {
+        "Kind": "prefix",
+        "DelayMs": 10,
+        "Concurrency": 32,
+        "Connections": 32,
+        "CpuIterations": 2000000,
+        "BatchSubmission": true,
+        "MeasuredRequests": 2048,
+        "WarmupRequests": 1024,
+        "Iterations": 3
+      },
+      "Modes": {
+        "Direct": {
+          "CallTimingMs": {
+            "HttpMs": {
+              "MeanMs": 10.501225046875,
+              "P50Ms": 10.55625,
+              "P95Ms": 11.390208,
+              "P99Ms": 11.923791,
+              "SampleCount": 384
+            },
+            "ServerMs": {
+              "MeanMs": 10.349715364583334,
+              "P50Ms": 10.4101,
+              "P95Ms": 11.2437,
+              "P99Ms": 11.7212,
+              "SampleCount": 384
+            },
+            "HandlerMs": {
+              "MeanMs": 12.319795364583333,
+              "P50Ms": 12.36575,
+              "P95Ms": 13.213667,
+              "P99Ms": 13.712375,
+              "SampleCount": 384
+            }
+          },
+          "Throughput": {
+            "CallsPerSecond": {
+              "LaunchMedians": {
+                "0": 461.9070989347267,
+                "1": 461.2223689966324
+              },
+              "Median": 461.5647339656796,
+              "Range": {
+                "Min": 461.2223689966324,
+                "Max": 461.9070989347267
+              }
+            },
+            "RequestsPerSecond": {
+              "LaunchMedians": {
+                "0": 14781.027165911255,
+                "1": 14759.115807892236
+              },
+              "Median": 14770.071486901747,
+              "Range": {
+                "Min": 14759.115807892236,
+                "Max": 14781.027165911255
+              }
+            }
+          },
+          "MeanActiveHandlersMedian": 5.687438528021552,
+          "AverageBatchSizeMedian": 32.0,
+          "HandlerPeak": 8,
+          "ServerPeak": 7
+        },
+        "Offload": {
+          "CallTimingMs": {
+            "HttpMs": {
+              "MeanMs": 12.519188395833334,
+              "P50Ms": 12.381875,
+              "P95Ms": 15.813,
+              "P99Ms": 16.315834,
+              "SampleCount": 384
+            },
+            "ServerMs": {
+              "MeanMs": 11.183022395833333,
+              "P50Ms": 11.2112,
+              "P95Ms": 12.2092,
+              "P99Ms": 13.0002,
+              "SampleCount": 384
+            },
+            "HandlerMs": {
+              "MeanMs": 14.720451625,
+              "P50Ms": 14.422209,
+              "P95Ms": 17.950625,
+              "P99Ms": 18.313125,
+              "SampleCount": 384
+            }
+          },
+          "Throughput": {
+            "CallsPerSecond": {
+              "LaunchMedians": {
+                "0": 1773.713018776415,
+                "1": 1853.7775061478792
+              },
+              "Median": 1813.7452624621471,
+              "Range": {
+                "Min": 1773.713018776415,
+                "Max": 1853.7775061478792
+              }
+            },
+            "RequestsPerSecond": {
+              "LaunchMedians": {
+                "0": 56758.81660084528,
+                "1": 59320.880196732134
+              },
+              "Median": 58039.84839878871,
+              "Range": {
+                "Min": 56758.81660084528,
+                "Max": 59320.880196732134
+              }
+            }
+          },
+          "MeanActiveHandlersMedian": 26.78740198261852,
+          "AverageBatchSizeMedian": 32.0,
+          "HandlerPeak": 32,
+          "ServerPeak": 32
+        }
+      },
+      "OffloadToDirectThroughputRatio": {
+        "CallsPerSecond": 3.9295577174598684,
+        "RequestsPerSecond": 3.9295577174598684
+      }
+    },
+    {
+      "Settings": {
+        "Kind": "prefix",
+        "DelayMs": 100,
+        "Concurrency": 32,
+        "Connections": 32,
+        "CpuIterations": 2000000,
+        "BatchSubmission": true,
+        "MeasuredRequests": 2048,
+        "WarmupRequests": 1024,
+        "Iterations": 3
+      },
+      "Modes": {
+        "Direct": {
+          "CallTimingMs": {
+            "HttpMs": {
+              "MeanMs": 100.68019421354167,
+              "P50Ms": 100.649459,
+              "P95Ms": 101.589,
+              "P99Ms": 102.776625,
+              "SampleCount": 384
+            },
+            "ServerMs": {
+              "MeanMs": 100.43239947916668,
+              "P50Ms": 100.3987,
+              "P95Ms": 101.3084,
+              "P99Ms": 102.4801,
+              "SampleCount": 384
+            },
+            "HandlerMs": {
+              "MeanMs": 102.65924761718749,
+              "P50Ms": 102.601,
+              "P95Ms": 104.005083,
+              "P99Ms": 105.364541,
+              "SampleCount": 384
+            }
+          },
+          "Throughput": {
+            "CallsPerSecond": {
+              "LaunchMedians": {
+                "0": 193.23992397216742,
+                "1": 195.3579889360224
+              },
+              "Median": 194.2989564540949,
+              "Range": {
+                "Min": 193.23992397216742,
+                "Max": 195.3579889360224
+              }
+            },
+            "RequestsPerSecond": {
+              "LaunchMedians": {
+                "0": 6183.677567109357,
+                "1": 6251.455645952717
+              },
+              "Median": 6217.566606531037,
+              "Range": {
+                "Min": 6183.677567109357,
+                "Max": 6251.455645952717
+              }
+            }
+          },
+          "MeanActiveHandlersMedian": 19.974076013305954,
+          "AverageBatchSizeMedian": 32.0,
+          "HandlerPeak": 32,
+          "ServerPeak": 32
+        },
+        "Offload": {
+          "CallTimingMs": {
+            "HttpMs": {
+              "MeanMs": 104.51596693489584,
+              "P50Ms": 103.558583,
+              "P95Ms": 110.720125,
+              "P99Ms": 115.125,
+              "SampleCount": 384
+            },
+            "ServerMs": {
+              "MeanMs": 101.21244140625,
+              "P50Ms": 100.9892,
+              "P95Ms": 102.7506,
+              "P99Ms": 103.0255,
+              "SampleCount": 384
+            },
+            "HandlerMs": {
+              "MeanMs": 108.42500238281251,
+              "P50Ms": 107.740625,
+              "P95Ms": 114.972542,
+              "P99Ms": 120.806834,
+              "SampleCount": 384
+            }
+          },
+          "Throughput": {
+            "CallsPerSecond": {
+              "LaunchMedians": {
+                "0": 262.95743294380026,
+                "1": 262.6858810443406
+              },
+              "Median": 262.8216569940704,
+              "Range": {
+                "Min": 262.6858810443406,
+                "Max": 262.95743294380026
+              }
+            },
+            "RequestsPerSecond": {
+              "LaunchMedians": {
+                "0": 8414.637854201608,
+                "1": 8405.948193418899
+              },
+              "Median": 8410.293023810253,
+              "Range": {
+                "Min": 8405.948193418899,
+                "Max": 8414.637854201608
+              }
+            }
+          },
+          "MeanActiveHandlersMedian": 28.66815346485519,
+          "AverageBatchSizeMedian": 32.0,
+          "HandlerPeak": 32,
+          "ServerPeak": 32
+        }
+      },
+      "OffloadToDirectThroughputRatio": {
+        "CallsPerSecond": 1.3526663333169506,
+        "RequestsPerSecond": 1.3526663333169506
+      }
+    },
+    {
+      "Settings": {
+        "Kind": "prefix",
+        "DelayMs": 500,
+        "Concurrency": 32,
+        "Connections": 32,
+        "CpuIterations": 2000000,
+        "BatchSubmission": true,
+        "MeasuredRequests": 2048,
+        "WarmupRequests": 1024,
+        "Iterations": 3
+      },
+      "Modes": {
+        "Direct": {
+          "CallTimingMs": {
+            "HttpMs": {
+              "MeanMs": 501.0286700338542,
+              "P50Ms": 500.902292,
+              "P95Ms": 502.333667,
+              "P99Ms": 504.133333,
+              "SampleCount": 384
+            },
+            "ServerMs": {
+              "MeanMs": 500.5434067708333,
+              "P50Ms": 500.4785,
+              "P95Ms": 501.618,
+              "P99Ms": 502.5499,
+              "SampleCount": 384
+            },
+            "HandlerMs": {
+              "MeanMs": 503.50075685937503,
+              "P50Ms": 503.101333,
+              "P95Ms": 506.289458,
+              "P99Ms": 508.524167,
+              "SampleCount": 384
+            }
+          },
+          "Throughput": {
+            "CallsPerSecond": {
+              "LaunchMedians": {
+                "0": 54.87507132687493,
+                "1": 54.90208727441676
+              },
+              "Median": 54.888579300645844,
+              "Range": {
+                "Min": 54.87507132687493,
+                "Max": 54.90208727441676
+              }
+            },
+            "RequestsPerSecond": {
+              "LaunchMedians": {
+                "0": 1756.0022824599978,
+                "1": 1756.8667927813362
+              },
+              "Median": 1756.434537620667,
+              "Range": {
+                "Min": 1756.0022824599978,
+                "Max": 1756.8667927813362
+              }
+            }
+          },
+          "MeanActiveHandlersMedian": 27.644241538363136,
+          "AverageBatchSizeMedian": 32.0,
+          "HandlerPeak": 32,
+          "ServerPeak": 32
+        },
+        "Offload": {
+          "CallTimingMs": {
+            "HttpMs": {
+              "MeanMs": 504.34051932291663,
+              "P50Ms": 503.639125,
+              "P95Ms": 510.844708,
+              "P99Ms": 512.120417,
+              "SampleCount": 384
+            },
+            "ServerMs": {
+              "MeanMs": 501.1513776041666,
+              "P50Ms": 501.052,
+              "P95Ms": 502.637,
+              "P99Ms": 502.7599,
+              "SampleCount": 384
+            },
+            "HandlerMs": {
+              "MeanMs": 508.4081973567708,
+              "P50Ms": 507.801042,
+              "P95Ms": 515.516375,
+              "P99Ms": 517.369833,
+              "SampleCount": 384
+            }
+          },
+          "Throughput": {
+            "CallsPerSecond": {
+              "LaunchMedians": {
+                "0": 61.50916188577095,
+                "1": 61.418818860452504
+              },
+              "Median": 61.46399037311173,
+              "Range": {
+                "Min": 61.418818860452504,
+                "Max": 61.50916188577095
+              }
+            },
+            "RequestsPerSecond": {
+              "LaunchMedians": {
+                "0": 1968.2931803446704,
+                "1": 1965.4022035344801
+              },
+              "Median": 1966.8476919395753,
+              "Range": {
+                "Min": 1965.4022035344801,
+                "Max": 1968.2931803446704
+              }
+            }
+          },
+          "MeanActiveHandlersMedian": 31.23515961839901,
+          "AverageBatchSizeMedian": 32.0,
+          "HandlerPeak": 32,
+          "ServerPeak": 32
+        }
+      },
+      "OffloadToDirectThroughputRatio": {
+        "CallsPerSecond": 1.1197956142469971,
+        "RequestsPerSecond": 1.1197956142469971
+      }
+    }
+  ]
+}

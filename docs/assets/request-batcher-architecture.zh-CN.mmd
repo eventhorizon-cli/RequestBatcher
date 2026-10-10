@@ -9,7 +9,7 @@ flowchart LR
     subgraph requestBatcher["RequestBatcher"]
         direction TB
         coordinator["请求批次<br/>协调器"]
-        queue["内部 BufferQueue<br/>按 Partition 路由"]
+        queue["内部 BufferQueue<br/>未配置 Key 时使用一个 Partition<br/>配置 Key 后按键路由"]
         completion["每个已接收请求一个 Task<br/>成功 / 失败"]
         coordinator -->|入队| queue
     end
