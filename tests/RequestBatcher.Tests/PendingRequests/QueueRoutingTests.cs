@@ -22,7 +22,7 @@ public sealed class QueueRoutingTests
 
         await using var provider = CreateProvider<RoutingRequest>(
             topic => RequestBatchPartitionKey<RoutingRequest>
-                .Create(static request => request.Key)
+                .Create(static request => request.Key, partitionCount)
                 .Configure(topic),
             partitionCount,
             batchSize: 128);
@@ -57,7 +57,7 @@ public sealed class QueueRoutingTests
 
         await using var provider = CreateProvider<RoutingRequest>(
             topic => RequestBatchPartitionKey<RoutingRequest>
-                .Create(static request => request.Key)
+                .Create(static request => request.Key, partitionCount)
                 .Configure(topic),
             partitionCount,
             batchSize: 16);
@@ -97,7 +97,7 @@ public sealed class QueueRoutingTests
 
         await using var provider = CreateProvider<int>(
             topic => RequestBatchPartitionKey<int>
-                .Create(static request => request)
+                .Create(static request => request, partitionCount)
                 .Configure(topic),
             partitionCount,
             batchSize: 1);

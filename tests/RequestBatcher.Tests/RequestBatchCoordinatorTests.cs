@@ -149,7 +149,7 @@ public sealed class RequestBatchCoordinatorTests
         {
             options.BatchSize = 1;
             options.MaxConcurrency = 2;
-            options.UsePartitionKey(request => request.Key);
+            options.UsePartitionKey(request => request.Key, partitionCount: 2);
         });
         var coordinator = provider.GetRequiredService<RequestBatchCoordinator<KeyedRequest>>();
 
@@ -181,7 +181,9 @@ public sealed class RequestBatchCoordinatorTests
             options =>
             {
                 options.MaxPendingRequests = 1;
-                options.UsePartitionKey(request => request >= 0 ? request : throw expected);
+                options.UsePartitionKey(
+                    request => request >= 0 ? request : throw expected,
+                    partitionCount: 2);
             });
         var coordinator = provider.GetRequiredService<RequestBatchCoordinator<int>>();
 
@@ -210,7 +212,7 @@ public sealed class RequestBatchCoordinatorTests
             options =>
             {
                 options.MaxConcurrency = 2;
-                options.UsePartitionKey(static request => request);
+                options.UsePartitionKey(static request => request, partitionCount: 2);
             });
         var coordinator = provider.GetRequiredService<RequestBatchCoordinator<string>>();
 
@@ -540,25 +542,18 @@ public sealed class RequestBatchCoordinatorTests
     }
 
     [Theory]
-    [InlineData(1, 0, false, 1)]
-    [InlineData(4, 0, false, 1)]
-    [InlineData(64, 1, false, 1)]
-    [InlineData(64, 12, false, 1)]
-    [InlineData(1, 0, true, 1)]
-    [InlineData(4, 0, true, 1)]
-    [InlineData(64, 1, true, 1)]
-    [InlineData(1, 12, true, 1)]
-    [InlineData(4, 12, true, 4)]
-    [InlineData(64, 12, true, 12)]
-    public void GetPartitionCount_PartitionKeyPresenceAndProcessorCount_SelectsExpectedCount(
-        int maxConcurrency,
-        int processorCount,
+    [InlineData(1, false, 1)]
+    [InlineData(8, false, 1)]
+    [InlineData(1, true, 1)]
+    [InlineData(2, true, 2)]
+    [InlineData(64, true, 64)]
+    public void GetPartitionCount_PartitionKeyPresenceAndConfiguredCount_SelectsExpectedCount(
+        int configuredPartitionCount,
         bool hasPartitionKey,
         int expected)
     {
         var actual = RequestBatcherServiceCollectionExtensions.GetPartitionCount(
-            maxConcurrency,
-            processorCount,
+            configuredPartitionCount,
             hasPartitionKey);
 
         Assert.Equal(expected, actual);
@@ -587,6 +582,19 @@ public sealed class RequestBatchCoordinatorTests
                 }));
 
         Assert.Equal(parameterName, exception.ParamName);
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    public void UsePartitionKey_InvalidPartitionCount_Throws(int partitionCount)
+    {
+        var options = new RequestBatchOptions<int>();
+
+        var exception = Assert.Throws<ArgumentOutOfRangeException>(() =>
+            options.UsePartitionKey(static request => request, partitionCount));
+
+        Assert.Equal("partitionCount", exception.ParamName);
     }
 
     [Fact]

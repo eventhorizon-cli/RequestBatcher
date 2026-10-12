@@ -34,19 +34,20 @@ cancellation before dispatch, or an infrastructure failure.
 
 ## Topology
 
-At service registration, RequestBatcher resolves a fixed internal partition
-count:
+At service registration, RequestBatcher resolves a fixed partition count:
 
 ```text
 effectivePartitionCount = PartitionKey is configured
-    ? min(MaxConcurrency, max(1, Environment.ProcessorCount))
+    ? PartitionKey.PartitionCount
     : 1
 ```
 
-`Environment.ProcessorCount` is the process-visible logical-core count, so
-container CPU limits are respected where the runtime exposes them. The count is
-fixed for the coordinator lifetime; changing processor availability at runtime
-does not reshape a live BufferQueue topic.
+`UsePartitionKey(selector, partitionCount)` requires `partitionCount` to be
+greater than one. The count is fixed for the coordinator lifetime; changing
+configuration at runtime does not reshape a live BufferQueue topic. A keyed
+partition count is independent of `MaxConcurrency` and process-visible CPU
+count so I/O-bound services can choose enough key-local queues for their
+workload.
 
 BufferQueue has `effectivePartitionCount` memory partitions. RequestBatcher
 creates one pull consumer for the group, allowing that consumer to own all
@@ -67,13 +68,15 @@ partition so adjacent queued items are not split solely for round-robin routing.
 That partition can supply multiple concurrently executing handler batches, up to
 `MaxConcurrency`. There is no collection window or requirement to fill a batch.
 With a numeric or string partition key, equal keys route consistently through
-the capped partition topology; separate batches for a key may execute concurrently.
+the configured partition topology; separate batches for a key may execute
+concurrently. A partition count greater than one is only available together
+with a key selector. Without a key selector, all requests use one partition.
 Both request-only and request/response registration use the same policy.
 
-This policy changes batch composition for unkeyed batchers with concurrency above
-one. It can reduce partially filled handler calls, but does not promise higher
-throughput, ordering, or one invocation per explicit submission. Public APIs,
-capacity limits, cancellation boundaries, and lifecycle behavior are unchanged.
+The selected keyed partition count changes batch composition and locality. It
+does not promise higher throughput, ordering, or one invocation per explicit
+submission. Public capacity limits, cancellation boundaries, and lifecycle
+behavior remain unchanged.
 
 `BatchSize` remains the BufferQueue pull batch size and the maximum number of
 items passed to one handler invocation. It is not multiplied by `H`.
@@ -158,8 +161,8 @@ the configured wait/fail admission behavior directly.
 The implementation must add or adjust deterministic tests for:
 
 - one global consumer and auto-commit configuration;
-- one partition without a key for all concurrency and processor-count inputs;
-- keyed partition-count capping at the process-visible core count;
+- one partition without a key for all concurrency inputs;
+- explicit keyed partition-count configuration independent of process CPU count;
 - unkeyed requests forming one preloaded batch across multiple execution slots;
 - multiple batches from the single unkeyed partition executing concurrently;
 - request/response registration preserving the same partition policy;

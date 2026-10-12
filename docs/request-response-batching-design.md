@@ -158,10 +158,12 @@ application inspection and projected to
 `RequestBatchOptions<RequestBatchItem<TRequest, TResponse>>` for the internal
 queue.
 
-`UsePartitionKey` always receives the original `TRequest`. The projected queue
-selector reads `RequestBatchItem.Request` before calculating the key. Equal
+`UsePartitionKey(selector, partitionCount)` always receives the original
+`TRequest`. The projected queue selector reads `RequestBatchItem.Request`
+before calculating the key and preserves the configured partition count. Equal
 keys route to the same queue partition but do not guarantee serialized handler
-execution or ordering.
+execution or ordering. The partition count must be greater than one and is
+independent of `MaxConcurrency` and process CPU count.
 
 ## Handler Lifetime
 

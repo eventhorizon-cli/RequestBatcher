@@ -49,7 +49,7 @@ public sealed class RequestResponseBatcherTests
             {
                 options.BatchSize = 1;
                 options.MaxConcurrency = 2;
-                options.UsePartitionKey(static request => request % 2);
+                options.UsePartitionKey(static request => request % 2, partitionCount: 2);
             });
         var batcher = provider.GetRequiredService<IRequestBatcher<int, string>>();
 
@@ -203,7 +203,9 @@ public sealed class RequestResponseBatcherTests
                 items.SetResponses(static request => request.ToString());
                 return ValueTask.CompletedTask;
             },
-            options => options.UsePartitionKey(request => request >= 0 ? request : throw expected));
+            options => options.UsePartitionKey(
+                request => request >= 0 ? request : throw expected,
+                partitionCount: 2));
         var batcher = provider.GetRequiredService<IRequestBatcher<int, string>>();
 
         var actual = await Assert.ThrowsAsync<TestBatchException>(() => batcher.ProcessAsync(-1));
@@ -230,7 +232,7 @@ public sealed class RequestResponseBatcherTests
                 {
                     selectedKeys.Enqueue(request.Key);
                     return request.Key;
-                });
+                }, partitionCount: 2);
             });
         var batcher = provider.GetRequiredService<IRequestBatcher<KeyedResponseRequest, string>>();
 

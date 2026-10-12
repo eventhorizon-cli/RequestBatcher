@@ -15,16 +15,16 @@ builder.Services.AddRequestBatcher<PriceUpdate, PriceUpdateHandler>(
     options =>
     {
         ConfigureBatching(options);
-        // Optional: equal product IDs share a keyed partition; omit this line to use one shared partition.
-        options.UsePartitionKey(static update => update.ProductId);
+        // Optional: equal product IDs share one of four keyed partitions; omit this line to use one shared partition.
+        options.UsePartitionKey(static update => update.ProductId, partitionCount: 4);
     });
 builder.Services.AddRequestBatcher<PriceQuery, PriceUpdate?, PriceQueryHandler>(
     ServiceLifetime.Scoped,
     options =>
     {
         ConfigureBatching(options);
-        // Optional: equal product IDs share a keyed partition; omit this line to use one shared partition.
-        options.UsePartitionKey(static query => query.ProductId);
+        // Optional: equal product IDs share one of four keyed partitions; omit this line to use one shared partition.
+        options.UsePartitionKey(static query => query.ProductId, partitionCount: 4);
     });
 
 var app = builder.Build();

@@ -50,9 +50,9 @@ RequestBatcher 既不是持久化后台队列，也不是事务协调器：
 批次数由全局 `MaxConcurrency` 限制。同一 Partition 中的多个批次可以并发执行，所有 Partition 共享同一组执行名额。
 
 未配置 `UsePartitionKey` 时，RequestBatcher 固定使用一个内部 Partition，避免将彼此无关的请求分散到多个队列，
-也让它们自然地保留在一起进行批量处理。配置有限整数数值键或非 `null` 字符串键后，队列使用
-`P = min(MaxConcurrency, max(1, Environment.ProcessorCount))` 个 Partition，使相同键保持局部性，同时让不同键可以
-独立推进。`P` 只是路由细节；`H = MaxConcurrency` 始终是全局 Handler 批次并发上限。单个 Partition 可以连续产生
+也让它们自然地保留在一起进行批量处理。配置有限整数数值键或非 `null` 字符串键以及显式 Partition 数量后，队列
+使用指定数量的 Partition，使相同键保持局部性，同时让不同键可以独立推进。`P` 只是路由细节；`H = MaxConcurrency`
+始终是全局 Handler 批次并发上限。单个 Partition 可以连续产生
 多个异步 Handler 批次，因此 Partition 数量不会限制为一次只能执行一个批次。
 
 1. 调用方通过 `ProcessAsync` 提交单个请求。
@@ -71,7 +71,7 @@ RequestBatcher 既不是持久化后台队列，也不是事务协调器：
 ### 内部调度设计
 
 `H = MaxConcurrency` 是全局同时执行的 Handler 批次数上限。未配置 Partition Key 时，内部只有一个 Partition；配置
-数值或字符串 Partition Key 时，`P = min(H, max(1, Environment.ProcessorCount))` 是队列 Partition 数量。
+数值或字符串 Partition Key 时，`P` 是传给 `UsePartitionKey` 的显式 Partition 数量。
 
 ![内部调度设计](docs/assets/request-batcher-dispatch-scheduling.zh-CN.png)
 
@@ -245,14 +245,13 @@ RequestBatcher 会先为请求序列创建快照，再统一提交给内部队�
 ## 路由与调度
 
 `MaxConcurrency` 是全局并发 Handler 批次数上限。未配置 Partition Key 时，内部队列固定使用一个 Partition；配置
-数值或字符串 Partition Key 时，Partition 数量为 `min(MaxConcurrency, max(1, Environment.ProcessorCount))`，由一个
-`BatchDispatchLoop` 从所有 Partition 拉取。
-Partition 数量在注册时确定，属于内部实现，不提供单独的数量配置项。
+数值或字符串 Partition Key 时，Partition 数量由 `UsePartitionKey` 的 `partitionCount` 指定，由一个
+`BatchDispatchLoop` 从所有 Partition 拉取。Partition 数量在注册时确定，且不受 CPU 数量限制。
 
 | 配置 | 请求如何路由 | 调度行为 |
 | --- | --- | --- |
 | 未配置 `UsePartitionKey` | 所有请求进入同一个 Partition，避免将无关请求分散到多个队列。 | 批次共享全局执行名额；单个 Partition 可以连续提供多个异步批次。 |
-| 配置 `UsePartitionKey(...)` | 有限整数数值键或非 `null` 字符串键将相同值路由到受上限约束的 Partition；不同键仍可能共享 Partition。 | 相同键值的不同 Handler 批次仍可同时分发执行。 |
+| 配置 `UsePartitionKey(selector, partitionCount)` | 有限整数数值键或非 `null` 字符串键将相同值路由到指定 Partition；不同键仍可能共享 Partition。 | 相同键值的不同 Handler 批次仍可同时分发执行。 |
 
 RequestBatcher 不提供全局、Partition 内或 Partition Key 级别的 Handler 执行顺序保证。Partition Key 只决定队列
 路由，不能用于串行化处理。
@@ -313,10 +312,10 @@ Handler 会在分发调用链上执行，直到完成或遇到尚未完成的异
 | 选项 | 默认值 | 行为 |
 | --- | ---: | --- |
 | `BatchSize` | `128` | 单次 Handler 调用包含的请求数量上限。 |
-| `MaxConcurrency` | `1` | Handler 批次最大并发数；它始终是 Handler 并发上限，启用按键路由时 Partition 数量最多为逻辑处理器数。 |
+| `MaxConcurrency` | `1` | Handler 批次最大并发数；它始终是 Handler 并发上限，与按键路由的 Partition 数量相互独立。 |
 | `MaxPendingRequests` | `8192` | 内部 BufferQueue 中尚未被拉取执行的请求容量上限。 |
 | `FullMode` | `Wait` | 队列空间不足时，`Wait` 等待空位，`Fail` 立即拒绝本次提交。 |
-| `UsePartitionKey(...)` | 未配置 | 未配置时使用一个 Partition；配置有限整数数值键或非 `null` 字符串键后，相同键值的请求进入同一 Partition。 |
+| `UsePartitionKey(selector, partitionCount)` | 未配置 | 配置按键路由和显式 Partition 数量；`partitionCount` 必须大于 1，相同键值的请求进入同一 Partition。 |
 
 Handler 执行不保证顺序，包括 `MaxConcurrency = 1` 的情况。
 
@@ -326,11 +325,11 @@ Partition Key 是一项可选的路由规则，用于将相关请求路由到同
 
 ```csharp
 options.MaxConcurrency = 4;
-options.UsePartitionKey(request => request.OrderId);
+options.UsePartitionKey(request => request.OrderId, partitionCount: 4);
 ```
 
-值相同的有限整数数值键，或值相同的非 `null` 字符串键，会进入同一 Partition。不同键值仍可能落入同一
-Partition，因此键值与 Partition 不是一一对应关系。
+值相同的有限整数数值键，或值相同的非 `null` 字符串键，会进入指定数量中的同一 Partition。不同键值仍可能落入
+同一 Partition，因此键值与 Partition 不是一一对应关系。`partitionCount` 必须大于 1。
 
 Partition 路由只决定请求进入哪个 Partition：它不会强制同一键值的全部请求进入同一个处理批次，也不会自动去重。
 它提供了一个路由边界，不提供执行顺序或互斥保证。

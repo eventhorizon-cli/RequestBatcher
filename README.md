@@ -58,9 +58,9 @@ from one partition can execute concurrently, and all partitions share the same e
 
 Without `UsePartitionKey`, RequestBatcher uses one internal queue partition. This avoids fragmenting unrelated requests
 across queues and leaves them together for natural batching. When `UsePartitionKey` is configured with a finite integer
-numeric key or a non-null string key, the queue uses `P = min(MaxConcurrency, max(1, Environment.ProcessorCount))`
-partitions so equal keys retain locality while different keys can progress independently. `P` is a routing detail;
-`H = MaxConcurrency` remains the global handler-batch concurrency limit. A single partition can continuously produce
+numeric key or a non-null string key and an explicit partition count, the queue uses that many partitions so equal keys
+retain locality while different keys can progress independently. `P` is a routing detail; `H = MaxConcurrency` remains
+the global handler-batch concurrency limit. A single partition can continuously produce
 multiple asynchronous handler batches, so partitions do not impose a one-batch-at-a-time limit.
 
 1. A caller submits one request through `ProcessAsync`.
@@ -80,8 +80,8 @@ path for each accepted request.
 ### Internal Dispatch Scheduling
 
 Here, `H = MaxConcurrency` is the maximum number of handler batches running at once. Without a partition key there is
-one internal queue partition; with a numeric or string partition key, `P = min(H, max(1, Environment.ProcessorCount))`
-is the number of internal queue partitions.
+one internal queue partition; with a numeric or string partition key, `P` is the explicit count supplied to
+`UsePartitionKey`.
 
 ![Internal dispatch scheduling](docs/assets/request-batcher-dispatch-scheduling.png)
 
@@ -259,14 +259,14 @@ invocation. They are not the same boundary.
 ## Routing and Dispatch
 
 `MaxConcurrency` is the global maximum number of concurrent handler batches. Without a partition key, the queue has one
-internal partition. With a numeric or string partition key, it has
-`min(MaxConcurrency, max(1, Environment.ProcessorCount))` partitions, and one `BatchDispatchLoop` pulls from all of them.
-The partition count is fixed at registration and remains an internal detail; there is no separate partition-count option.
+internal partition. With a numeric or string partition key, it has the explicit number of partitions supplied to
+`UsePartitionKey`, and one `BatchDispatchLoop` pulls from all of them. The count is fixed at registration and is
+independent of CPU count.
 
 | Configuration | Request routing | Dispatch behavior |
 | --- | --- | --- |
 | No `UsePartitionKey` | Every request uses one queue partition, avoiding queue fragmentation for unrelated requests. | Batches use the shared global execution slots; one partition can supply multiple asynchronous batches. |
-| `UsePartitionKey(...)` | A finite integer numeric key or non-null string key routes equal values to one of the capped partitions; different keys can share a partition. | Equal keys can still be dispatched in separate handler batches at the same time. |
+| `UsePartitionKey(selector, partitionCount)` | A finite integer numeric key or non-null string key routes equal values to one of the configured partitions; different keys can share a partition. | Equal keys can still be dispatched in separate handler batches at the same time. |
 
 RequestBatcher provides no global, partition-local, or partition-key ordering guarantee. A partition key controls only
 queue routing; it is not a serialization mechanism.
@@ -332,10 +332,10 @@ continues in the background.
 | Option | Default | Behavior |
 | --- | ---: | --- |
 | `BatchSize` | `128` | Maximum requests passed to one handler call. |
-| `MaxConcurrency` | `1` | Maximum concurrent handler batches. It is always the handler concurrency limit; keyed queue partitions are capped at the logical processor count. |
+| `MaxConcurrency` | `1` | Maximum concurrent handler batches. It is independent of the keyed partition count. |
 | `MaxPendingRequests` | `8192` | Internal BufferQueue capacity for requests that have not yet been pulled for execution. |
 | `FullMode` | `Wait` | Waits for capacity; `Fail` rejects immediately when capacity is unavailable. |
-| `UsePartitionKey(...)` | Not set | Uses one queue partition by default; a finite integer numeric or non-null string key enables capped keyed routing, with equal keys sent to one partition. |
+| `UsePartitionKey(selector, partitionCount)` | Not set | Enables keyed routing with the explicitly configured partition count; `partitionCount` must be greater than one and equal keys use one partition. |
 
 No ordering is guaranteed for handler execution, including when `MaxConcurrency = 1`.
 
@@ -345,10 +345,11 @@ A partition key is an optional routing rule for related requests:
 
 ```csharp
 options.MaxConcurrency = 4;
-options.UsePartitionKey(request => request.OrderId);
+options.UsePartitionKey(request => request.OrderId, partitionCount: 4);
 ```
 
-Equal finite, integer-valued numeric keys or equal non-null string keys are routed to the same queue partition.
+Equal finite, integer-valued numeric keys or equal non-null string keys are routed to the same queue partition among the
+configured partition count. The count must be greater than one.
 Different keys can still share a partition, so keys and partitions are not one-to-one.
 
 Partition routing does not force all requests for one key into the same handler batch, and it does not deduplicate
