@@ -42,3 +42,54 @@ dotnet run --project tests/RequestBatcher.Benchmarks/RequestBatcher.Benchmarks.c
   --configuration Release -- \
   --filter '*PartitionKeySubmissionBenchmarks*'
 ```
+
+## Measured results
+
+Measured commit: `0db70cc3c2173061f1342f41584c4a1079344e37`.
+Benchmark source SHA-256:
+`3e44a283a6be12a21f70e7cd26946ea1b0b657fdff5f122dc656e91a5b7a45b0`.
+
+Environment: ARM64 macOS 27.0.1, .NET SDK 10.0.100, .NET runtime 8.0.25,
+BenchmarkDotNet 0.15.8. CPU model discovery and elevated process priority were
+unavailable. No other local builds or benchmarks ran during measurement.
+
+All 12 cases (24 process launches) completed successfully. Every measured
+operation validated each input exactly once. All times and allocations below
+are per complete input wave; KB means 1,024 bytes. Percentage changes are
+calculated from the displayed means, not BenchmarkDotNet's ratio distribution.
+
+| Requests | Handler delay (ms) | Singles (ms) | Explicit (ms) | Time decrease | Singles (KB) | Explicit (KB) | Allocation decrease |
+|---:|---:|---:|---:|---:|---:|---:|---:|
+| 10 | 1 | 1.228 | 1.181 | 3.8% | 10.76 | 9.08 | 15.6% |
+| 10 | 10 | 11.023 | 11.069 | -0.4% | 10.17 | 9.08 | 10.7% |
+| 100 | 1 | 2.291 | 1.257 | 45.1% | 44.59 | 23.22 | 47.9% |
+| 100 | 10 | 17.050 | 11.137 | 34.7% | 40.16 | 23.22 | 42.2% |
+| 1,000 | 1 | 3.707 | 2.707 | 27.0% | 285.69 | 175.57 | 38.5% |
+| 1,000 | 10 | 31.610 | 22.457 | 29.0% | 282.59 | 175.09 | 38.0% |
+
+For 10 requests, elapsed time is close and the 10 ms delay pair has overlapping
+confidence intervals. At 100 and 1,000 requests, explicit submission reduces
+elapsed time and allocation in this workload. Both paths still partition each
+item by key; one explicit submission is not one handler invocation.
+
+The explicit API shares completion across its items and avoids the single
+path's per-item completion tasks, caller task array, and `Task.WhenAll` join.
+Timing additionally includes enqueueing and natural handler batch formation.
+The benchmark does not count handler invocations, so it does not isolate how
+much of the time change comes from fewer downstream waits versus submission
+and completion overhead. The configured delay is per actual handler invocation,
+not per request.
+
+The single-submission 100-request/10 ms case has a broad confidence interval;
+BenchmarkDotNet also warns of a multimodal distribution for the single-submission
+1,000-request/10 ms case. Scheduling and batch formation vary between waves.
+The table is an observation of these specific settings, not a fixed gain for
+production traffic or evidence of behavior under sustained capacity pressure.
+
+Full confidence intervals, GC statistics, ratios, and environment metadata:
+[BenchmarkDotNet summary](RequestBatcher.Benchmarks.InMemory.PartitionKeySubmissionBenchmarks-report-github.md)
+and [CSV](RequestBatcher.Benchmarks.InMemory.PartitionKeySubmissionBenchmarks-report.csv).
+
+Formatting verification, the Release solution build, and all 116 unit tests on
+each of .NET 8 and .NET 10 pass. The measured runtime is .NET 8 only; the additional
+.NET 10 correctness run is not a runtime performance comparison.
