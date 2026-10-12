@@ -34,7 +34,6 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
     private readonly Task _dispatchLoopTask;
     private readonly ConsumerTaskMonitor _dispatchLoopMonitor;
 
-    private Task? _stopTask;
     private Task? _disposeTask;
     private Exception? _consumerFailure;
     private TaskCompletionSource _drained = CreateCompletedSource();
@@ -151,33 +150,21 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
     }
 
     /// <summary>
-    /// Stops accepting requests, drains all submitted requests, and then stops the consumers.
-    /// Cancellation only cancels this wait; shutdown continues in the background.
+    /// Stops accepting requests, drains accepted work, and releases coordinator-owned resources.
+    /// Concurrent and repeated calls share the same disposal operation.
     /// </summary>
-    public ValueTask StopAsync(CancellationToken cancellationToken = default)
-    {
-        Task stopTask;
-        lock (_lifecycleLock)
-        {
-            stopTask = GetOrStartStopTaskLocked();
-        }
-
-        return cancellationToken.CanBeCanceled
-            ? new ValueTask(stopTask.WaitAsync(cancellationToken))
-            : new ValueTask(stopTask);
-    }
-
-    /// <inheritdoc />
     public ValueTask DisposeAsync()
     {
-        Task disposeTask;
         lock (_lifecycleLock)
         {
-            var stopTask = GetOrStartStopTaskLocked();
-            disposeTask = _disposeTask ??= DisposeCoreAsync(stopTask);
-        }
+            if (_disposeTask is null)
+            {
+                _state = Stopping;
+                _disposeTask = DisposeCoreAsync(_drained.Task);
+            }
 
-        return new ValueTask(disposeTask);
+            return new ValueTask(_disposeTask);
+        }
     }
 
     private Task AcceptRequest(
@@ -267,19 +254,7 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
         Interlocked.Add(ref _pendingRequestCount, requestCount);
     }
 
-    private Task GetOrStartStopTaskLocked()
-    {
-        if (_stopTask is not null)
-        {
-            return _stopTask;
-        }
-
-        _state = Stopping;
-        _stopTask = StopCoreAsync(_drained.Task);
-        return _stopTask;
-    }
-
-    private async Task StopCoreAsync(Task pendingRequestsDrained)
+    private async Task DisposeCoreAsync(Task pendingRequestsDrained)
     {
         await Task.Yield();
         _logger.CoordinatorStopping(
@@ -299,27 +274,22 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
         }
         finally
         {
-            lock (_lifecycleLock)
+            try
             {
-                _state = Stopped;
+                await _dispatchLoopMonitor.Completion.ConfigureAwait(false);
+                _batchDispatchLoop.Dispose();
+                _producerCancellation.Dispose();
+                _consumerCancellation.Dispose();
             }
+            finally
+            {
+                lock (_lifecycleLock)
+                {
+                    _state = Stopped;
+                }
 
-            _logger.CoordinatorStopped(_requestTypeName);
-        }
-    }
-
-    private async Task DisposeCoreAsync(Task stopTask)
-    {
-        try
-        {
-            await stopTask.ConfigureAwait(false);
-        }
-        finally
-        {
-            await _dispatchLoopMonitor.Completion.ConfigureAwait(false);
-            _batchDispatchLoop.Dispose();
-            _producerCancellation.Dispose();
-            _consumerCancellation.Dispose();
+                _logger.CoordinatorStopped(_requestTypeName);
+            }
         }
     }
 
@@ -334,11 +304,7 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
             }
 
             _consumerFailure ??= exception;
-            if (_stopTask is null)
-            {
-                _state = Stopping;
-                _stopTask = StopCoreAsync(_drained.Task);
-            }
+            _state = Stopping;
 
             pendingRequests = _pendingRequests.Keys.ToArray();
         }

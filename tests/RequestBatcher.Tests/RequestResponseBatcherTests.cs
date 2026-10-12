@@ -421,7 +421,7 @@ public sealed class RequestResponseBatcherTests
     }
 
     [Fact]
-    public async Task StopAsync_ResponseBatcherDrainsAcceptedRequestsAndRejectsNewRequests()
+    public async Task DisposeAsync_ResponseContainerDisposal_DrainsAcceptedRequestsAndRejectsNewRequests()
     {
         var firstHandlerStarted = NewSource();
         var releaseFirstHandler = NewSource();
@@ -440,12 +440,11 @@ public sealed class RequestResponseBatcherTests
             },
             options => options.BatchSize = 1);
         var batcher = provider.GetRequiredService<IRequestBatcher<int, string>>();
-        var coordinator = provider.GetRequiredService<RequestBatchCoordinator<RequestBatchItem<int, string>>>();
 
         var first = batcher.ProcessAsync(1);
         await firstHandlerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
         var second = batcher.ProcessAsync(2);
-        var stopping = coordinator.StopAsync().AsTask();
+        var stopping = provider.DisposeAsync().AsTask();
 
         await Assert.ThrowsAsync<ObjectDisposedException>(() => batcher.ProcessAsync(3));
         releaseFirstHandler.SetResult();

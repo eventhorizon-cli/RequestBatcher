@@ -185,9 +185,9 @@ No nested service provider is created.
   the same exception.
 - Caller cancellation removes work only before handler dispatch.
 - Once dispatch begins, the caller observes the actual handler outcome.
-- `StopAsync` stops admission, drains accepted work, and then stops dispatch.
-- `DisposeAsync` follows the same drain path and releases coordinator-owned
-  resources.
+- `DisposeAsync` stops admission, drains accepted work, stops dispatch, and
+  releases coordinator-owned resources. Concurrent and repeated calls share
+  the same disposal task. The application container owns async disposal.
 - Pending work is in-process and is not recovered after process failure.
 
 ## Validation

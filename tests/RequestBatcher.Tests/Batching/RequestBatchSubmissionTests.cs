@@ -162,7 +162,7 @@ public sealed class RequestBatchSubmissionTests
         var processing = batcher.ProcessAsync([1, 2, 3], cancellation.Token);
         await firstSliceStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
         cancellation.Cancel();
-        var stopping = coordinator.StopAsync().AsTask();
+        var stopping = coordinator.DisposeAsync().AsTask();
 
         Assert.False(processing.IsCompleted);
         Assert.False(stopping.IsCompleted);
@@ -176,7 +176,7 @@ public sealed class RequestBatchSubmissionTests
     }
 
     [Fact]
-    public async Task StopAsync_WaitModeOversizedBatch_DrainsAcceptedSlicesAndWaitingTail()
+    public async Task DisposeAsync_WaitModeOversizedBatch_DrainsAcceptedSlicesAndWaitingTail()
     {
         var firstRequestStarted = NewSource();
         var releaseFirstRequest = NewSource();
@@ -202,7 +202,7 @@ public sealed class RequestBatchSubmissionTests
 
         var processing = coordinator.ProcessAsync([1, 2, 3, 4, 5]);
         await firstRequestStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        var stopping = coordinator.StopAsync().AsTask();
+        var stopping = coordinator.DisposeAsync().AsTask();
 
         Assert.False(processing.IsCompleted);
         Assert.False(stopping.IsCompleted);

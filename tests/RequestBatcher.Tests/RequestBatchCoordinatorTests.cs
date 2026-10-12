@@ -254,7 +254,7 @@ public sealed class RequestBatchCoordinatorTests
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => canceled);
         releaseFirstBatch.SetResult();
         await Task.WhenAll(first, unaffected).WaitAsync(TimeSpan.FromSeconds(5));
-        await coordinator.StopAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
+        await coordinator.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5));
 
         Assert.Contains(1, handled);
         Assert.DoesNotContain(2, handled);
@@ -394,7 +394,7 @@ public sealed class RequestBatchCoordinatorTests
     }
 
     [Fact]
-    public async Task StopAsync_SubmittedAndWaitingRequests_DrainsBothAndRejectsNew()
+    public async Task DisposeAsync_SubmittedAndWaitingRequests_DrainsBothAndRejectsNew()
     {
         var handlerStarted = NewSource();
         var releaseHandler = NewSource();
@@ -416,7 +416,7 @@ public sealed class RequestBatchCoordinatorTests
         await handlerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
         var second = coordinator.ProcessAsync(2);
         var third = coordinator.ProcessAsync(3);
-        var stopping = coordinator.StopAsync().AsTask();
+        var stopping = coordinator.DisposeAsync().AsTask();
 
         await Assert.ThrowsAsync<ObjectDisposedException>(
             () => coordinator.ProcessAsync(4));
@@ -427,6 +427,42 @@ public sealed class RequestBatchCoordinatorTests
         releaseHandler.SetResult();
         await Task.WhenAll(first, second, third, stopping).WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Equal(new[] { 1, 2, 3 }, handledRequests.Order());
+    }
+
+    [Fact]
+    public async Task DisposeAsync_ConcurrentAndRepeatedCalls_ShareDrainAndRejectNewWork()
+    {
+        var handlerStarted = NewSource();
+        var releaseHandler = NewSource();
+        await using var provider = CreateProvider<int>(async (_, _) =>
+        {
+            handlerStarted.SetResult();
+            await releaseHandler.Task;
+        });
+        var coordinator = provider.GetRequiredService<RequestBatchCoordinator<int>>();
+        var processing = coordinator.ProcessAsync(1);
+        await handlerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Task disposal;
+        try
+        {
+            var calls = await Task.WhenAll(Enumerable.Range(0, 8)
+                .Select(_ => Task.Run(() => coordinator.DisposeAsync())));
+            disposal = calls[0].AsTask();
+            Assert.All(calls, call => Assert.Same(disposal, call.AsTask()));
+            Assert.False(disposal.IsCompleted);
+            await Assert.ThrowsAsync<ObjectDisposedException>(() => coordinator.ProcessAsync(2));
+            await Assert.ThrowsAsync<ObjectDisposedException>(() => coordinator.ProcessAsync(new[] { 3, 4 }));
+        }
+        finally
+        {
+            releaseHandler.TrySetResult();
+        }
+
+        await Task.WhenAll(processing, disposal).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Same(disposal, coordinator.DisposeAsync().AsTask());
+        await coordinator.DisposeAsync();
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => coordinator.ProcessAsync(5));
     }
 
     [Fact]

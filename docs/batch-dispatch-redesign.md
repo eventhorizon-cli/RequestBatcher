@@ -166,11 +166,21 @@ the configured wait/fail admission behavior directly.
   same exception, releases its slot, and does not terminate the dispatch loop.
 - An enumeration, auto-commit, or other queue infrastructure failure terminates
   the loop. The coordinator fails every queued request, stops admission, and
-  reports the same failure from `StopAsync` and `DisposeAsync`.
-- `StopAsync` first stops admission, waits until all accepted requests have a
+  records the failure for `DisposeAsync` to report after cleanup.
+- `DisposeAsync` first stops admission, waits until all accepted requests have a
   terminal result, then cancels the dispatch loop. A loop blocked waiting for an
   execution permit observes this cancellation. Running handlers are allowed to
-  report their actual outcome before shutdown completes.
+  report their actual outcome before shutdown completes. Disposal then waits for
+  consumer supervision to finish and releases coordinator-owned resources.
+- `DisposeAsync` is the sole public shutdown entry point. Concurrent and repeated
+  calls share one task, including its failure. DI owns disposal in registered
+  applications; no separate stop or restart operation is exposed.
+- A consumer failure immediately stops admission and fails queued work. Resource
+  cleanup runs when the owner disposes the coordinator.
+- Callers use async disposal for shutdown; there is no separate cancellable
+  shutdown-wait API. Submission signatures and processing semantics are unchanged.
+- Tests cover concurrent/repeated disposal, rejection after disposal begins,
+  draining active and capacity-waiting submissions, and failure cleanup.
 
 ## Tests
 
