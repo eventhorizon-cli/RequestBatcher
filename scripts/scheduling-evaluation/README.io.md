@@ -6,11 +6,20 @@ Run from the repository root:
 python3 scripts/scheduling-evaluation/run_io.py --output artifacts/http-scheduling-evaluation
 ```
 
+For a small build and loopback smoke test (one unkeyed direct/offload pair), use:
+
+```bash
+python3 scripts/scheduling-evaluation/run_io.py --smoke --output artifacts/http-scheduling-smoke
+```
+
 This reuses the isolated source preparation in `run.py` and replaces only the temporary
 probe. It does not change the checkout's production code. The experimental offload
-switch schedules the entire `ProcessBatchAsync` through `Task.Run` after acquiring an
-execution slot. As in the original experiment, this is a performance probe with an
-unresolved cancellation boundary, not a production implementation.
+switch schedules the `_batchConsumer.ProcessAsync` invocation through `Task.Run`
+after acquiring an execution slot, then uses the existing
+`ProcessBatchAsync(ValueTask)` cleanup path. As in the original experiment, this is
+a performance probe with an unresolved cancellation boundary, not a production
+implementation. The HTTP probe omits `UsePartitionKey`, so it exercises the current
+public unkeyed one-partition policy rather than a hidden partition override.
 
 `IoServer.cs` runs Kestrel in a separate process, bound to a temporary loopback port.
 Each HTTP/1.1 request waits asynchronously for its configured service delay and echoes

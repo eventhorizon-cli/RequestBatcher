@@ -15,7 +15,6 @@ internal static class Program
     private static async Task Main(string[] args)
     {
         var settings = JsonSerializer.Deserialize<Settings>(args[0])!;
-        RequestBatcherServiceCollectionExtensions.EvaluationPartitions = 1;
         BatchDispatchLoop<Work>.EvaluationOffload = settings.Offload;
         using var sockets = new SocketsHttpHandler { MaxConnectionsPerServer = settings.Connections, UseProxy = false };
         using var client = new HttpClient(sockets) { BaseAddress = new Uri(args[1]), Timeout = TimeSpan.FromSeconds(30) };
@@ -98,7 +97,6 @@ internal static class Program
         var cpu = process.TotalProcessorTime - initialCpu;
         sampling.Cancel();
         await sampler.ConfigureAwait(false);
-        await provider.GetRequiredService<RequestBatchCoordinator<Work>>().StopAsync();
         var downstream = await client.GetFromJsonAsync<ServerStats>("stats");
         if (work.Any(item => item.Visits != 1) || downstream!.Items != count || downstream.Calls != metrics.Batches)
         {

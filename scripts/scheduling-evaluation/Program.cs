@@ -10,9 +10,14 @@ internal static class Program
 {
     private static async Task Main(string[] args)
     {
+        if (args is ["--offload-self-check"])
+        {
+            await OffloadSelfCheckAsync();
+            return;
+        }
+
         var settings = new Settings(args[0], int.Parse(args[1]), int.Parse(args[2]), int.Parse(args[3]),
             bool.Parse(args[4]), int.Parse(args[5]), args[6], int.Parse(args[7]));
-        RequestBatcherServiceCollectionExtensions.EvaluationPartitions = settings.Partitions;
         BatchDispatchLoop<Work>.EvaluationOffload = settings.Offload;
         if (settings.Kind == "burst")
         {
@@ -37,6 +42,47 @@ internal static class Program
         }));
     }
 
+    private static async Task OffloadSelfCheckAsync()
+    {
+        var settings = new Settings("offload-check", 1, 1, 1, true, 1, "none", 1);
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        BatchDispatchLoop<Work>.EvaluationOffload = true;
+        BatchDispatchLoop<Work>.EvaluationOffloadGate = gate;
+        BatchDispatchLoop<Work>.EvaluationOffloadEntered = entered;
+        var metrics = new Metrics(settings);
+        var provider = CreateProvider(metrics);
+        try
+        {
+            var batcher = provider.GetRequiredService<IRequestBatcher<Work>>();
+            var work = new Work("self-check");
+            var completion = batcher.ProcessAsync(work);
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+            if (metrics.HandlerEntered.Task.IsCompleted)
+            {
+                throw new InvalidOperationException("Offload self-check observed handler invocation inline.");
+            }
+
+            gate.SetResult();
+            await completion.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+            await metrics.HandlerEntered.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+            if (work.Visits != 1)
+            {
+                throw new InvalidOperationException("Offload self-check did not complete the request exactly once.");
+            }
+
+            Console.WriteLine("Offload self-check passed: handler invocation waited for the scheduled delegate gate.");
+        }
+        finally
+        {
+            gate.TrySetResult();
+            BatchDispatchLoop<Work>.EvaluationOffloadGate = null;
+            BatchDispatchLoop<Work>.EvaluationOffloadEntered = null;
+            BatchDispatchLoop<Work>.EvaluationOffload = false;
+            await provider.DisposeAsync().ConfigureAwait(false);
+        }
+    }
+
     private static ServiceProvider CreateProvider(Metrics metrics)
     {
         var services = new ServiceCollection();
@@ -48,7 +94,7 @@ internal static class Program
             options.MaxPendingRequests = 8192;
             if (metrics.Settings.Keys != "none")
             {
-                options.UsePartitionKey(work => work.Key);
+                options.UsePartitionKey(work => work.Key, metrics.Settings.Partitions);
             }
         });
         return services.BuildServiceProvider();
@@ -97,7 +143,6 @@ internal static class Program
         stopwatch.Stop();
         var allocatedDelta = GC.GetTotalAllocatedBytes(true) - allocated;
         var gc = Enumerable.Range(0, 3).Select(i => GC.CollectionCount(i) - collections[i]).ToArray();
-        await provider.GetRequiredService<RequestBatchCoordinator<Work>>().StopAsync().ConfigureAwait(false);
         if (metrics.Handled != settings.Count || requests.Any(work => work.Visits != 1))
         {
             throw new InvalidOperationException("Missing or duplicate request processing.");
@@ -135,7 +180,6 @@ internal static class Program
         var submitted = batcher.ProcessAsync(requests);
         metrics.Release.SetResult();
         await Task.WhenAll(blockers.Append(submitted)).WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
-        await provider.GetRequiredService<RequestBatchCoordinator<Work>>().StopAsync().ConfigureAwait(false);
         if (metrics.Handled != settings.Count || requests.Any(work => work.Visits != 1))
         {
             throw new InvalidOperationException("Missing or duplicate burst work.");
@@ -173,12 +217,18 @@ internal static class Program
         public long BusyTicks;
         public int[] Sizes { get; } = new int[settings.BatchSize + 1];
         public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource HandlerEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     }
 
     private sealed class Handler(Metrics metrics) : IRequestBatchHandler<Work>
     {
         public async ValueTask HandleAsync(IReadOnlyList<Work> requests, CancellationToken cancellationToken = default)
         {
+            if (metrics.Settings.Kind == "offload-check")
+            {
+                metrics.HandlerEntered.SetResult();
+            }
+
             if (requests[0].Gate is { } gate)
             {
                 gate.SetResult();

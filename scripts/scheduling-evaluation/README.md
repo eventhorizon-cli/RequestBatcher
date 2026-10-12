@@ -10,14 +10,31 @@ python3 scripts/scheduling-evaluation/run.py --output artifacts/scheduling-evalu
 ```
 
 The script builds an isolated copy of the current library in a temporary directory.
-It adds two experimental switches only to that copy: a fixed partition count and
-`Task.Run` around `ProcessBatchAsync`, after the existing execution permit and
-in-flight registration. The checkout's runtime and public options are unchanged.
-The offload variant is a performance probe, not a proposed implementation: moving
-`TryStartProcessing` into the scheduled delegate changes the cancellation window.
+It adds one experimental switch only to that copy: after the execution permit and
+in-flight registration, the offload variant schedules the call to
+`_batchConsumer.ProcessAsync` and keeps the existing `ProcessBatchAsync(ValueTask)`
+cleanup path. The checkout's runtime and public options are unchanged. The offload
+variant is a performance probe, not a proposed implementation: moving
+`TryStartProcessing` into the scheduled delegate changes the cancellation window,
+and the prototype has explicit cleanup for a synchronous invocation failure.
 A production design needs to resolve that boundary and scheduling-failure cleanup.
 
-The script runs 40 configurations in a fixed shuffled order, one fresh process per
+Run the deterministic scheduling self-check without the matrix:
+
+```bash
+python3 scripts/scheduling-evaluation/run.py --self-check --output artifacts/scheduling-self-check
+```
+
+The check gates the scheduled delegate until after submission returns and fails if
+the handler body is entered inline.
+
+Partition topology is configured through the public API in every probe. Unkeyed cases
+omit `UsePartitionKey` and therefore use the production one-partition policy. Cases
+with more than one partition use `UsePartitionKey(work => work.Key, partitionCount)`;
+the probe does not force a hidden multi-partition topology for unkeyed work. The
+recorded matrix contains 33 regular configurations and six preloaded burst cases.
+
+The script runs 33 configurations in a fixed shuffled order, one fresh process per
 configuration, with one full workload warmup and three measured workloads. Tiered
 compilation is disabled equally for both variants to reduce short-run JIT drift.
 The .NET ThreadPool uses its defaults; the script does not raise minimum threads.
@@ -29,14 +46,15 @@ The workloads use the real coordinator, dependency injection, and BufferQueue:
 
 - Immediate synchronous completion, asynchronous `Task.Delay(1)`, fixed synchronous
   integer work, and synchronous `Thread.Sleep(1)`, with batch limits 1 and 64.
-- Execution limits 1, 8, and 64; partition counts 1 and 8; one or eight producers.
-- No key, uniformly repeated full string keys sharing `user:`, and 90% hot-key
-  traffic. Inputs are shuffled with a fixed seed. This is a selected matrix, not
-  the complete Cartesian product of every parameter.
+- Execution limits 1, 8, and 64; unkeyed cases use one partition, while keyed
+  routing cases use eight partitions and eight producers.
+- Unkeyed traffic, uniformly repeated full string keys, and 90% hot-key traffic.
+  Inputs are shuffled with a fixed seed. This is a selected matrix, not the
+  complete Cartesian product of every parameter.
 - Each producer submits at most 1,024 requests before awaiting that window. Queue
   capacity is 8,192. All work must complete exactly once. These are bounded-load
   diagnostic workloads, not open-loop arrival-rate or production capacity tests.
-- Burst cases first occupy every handler slot with gates, preload 64 or 2,048
+- Six burst cases first occupy every handler slot with gates, preload 64 or 2,048
   items through explicit batch submission, and then release the gates. They record
   handler batch sizes and total distinct-key work after per-batch deduplication.
 
