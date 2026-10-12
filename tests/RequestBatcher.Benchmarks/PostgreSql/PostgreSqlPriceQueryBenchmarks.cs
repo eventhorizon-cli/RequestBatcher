@@ -75,7 +75,7 @@ public class PostgreSqlPriceQueryBenchmarks
                 options.BatchSize = BatchSize;
                 options.MaxConcurrency = MaxConcurrency;
                 options.MaxPendingRequests = RequestCount;
-                options.UsePartitionKey(static request => request.ProductId);
+                options.UsePartitionKey(static request => request.ProductId, partitionCount: 4);
             });
 
         _serviceProvider = services.BuildServiceProvider(new ServiceProviderOptions

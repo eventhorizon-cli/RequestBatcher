@@ -8,13 +8,13 @@ Evaluated 2026-10-08 against RequestBatcher `7326fb31dc763cfa4ce8420af845bcbc6b2
 ## Evaluation-time Recommendation
 
 The recommendations below record the 2026-10-08 assessment. The current runtime
-policy is defined in the [dispatch design](../../batch-dispatch-redesign.md):
-unkeyed batchers use one partition, while keyed batchers retain the capped formula.
-The measurements remain useful comparisons of explicitly selected partition counts.
+policy is now defined in the [dispatch design](../../batch-dispatch-redesign.md):
+unkeyed batchers use one partition, while keyed batchers use an explicit count.
+The measurements remain useful comparisons for choosing that count.
 
 - Keep the current direct-dispatch default. Bounded offloading is worth a separate design for CPU or blocking handlers; the result does not justify scheduling every handler through the ThreadPool.
-- Keep the current internal partition formula for this upgrade. A single partition without a key remains a candidate for short bursts, but there is no consistent throughput win across these workloads. Keyed multi-partition queues retain measurable opportunities to merge duplicates.
-- Do not add public partition or execution-mode options in this dependency upgrade. RequestBatcher issues [#5](https://github.com/eventhorizon-cli/RequestBatcher/issues/5) and [#6](https://github.com/eventhorizon-cli/RequestBatcher/issues/6) still require separate design and acceptance work.
+- Keep one partition when no key is configured. Keyed workloads should choose an explicit count because the measurements show that partition count affects both locality and batch occupancy.
+- Partition count remains a RequestBatcher option bound to `UsePartitionKey`; BufferQueue topics, producers, and consumers remain internal.
 
 ## Upgrade validation
 
@@ -80,7 +80,7 @@ Distinct-key work sums the distinct keys in each handler batch. It represents op
 - No direct old-package/new-package performance comparison was performed. These measurements reevaluate scheduling choices on 2.0.3; they do not measure the speedup of upgrading from 2.0.2.
 - Before changing dispatch defaults, use longer repeated benchmark launches, representative handler costs, ThreadPool queued-work traces, and deterministic lifecycle tests for any offload implementation.
 - Before changing partition defaults, add paced short bursts and downstream fixed/per-key cost models, plus precise admission/queue/dispatch timing. Run PostgreSQL/Redis end-to-end checks when Docker is available.
-- Keep partition count internal. The next potential implementation is an explicit bounded-offload policy, with direct execution remaining the default unless broader evidence supports a change.
+- Use the measured P=1 and P=8 comparisons as workload guidance. The best count depends on key distribution, burst size, and downstream fixed cost; equal-key requests can still span batches.
 
 ## Reproduce
 

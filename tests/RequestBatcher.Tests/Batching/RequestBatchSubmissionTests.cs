@@ -454,7 +454,7 @@ public sealed class RequestBatchSubmissionTests
             {
                 options.BatchSize = 1;
                 options.MaxConcurrency = concurrency;
-                options.UsePartitionKey(request => request.Key);
+                options.UsePartitionKey(request => request.Key, partitionCount: concurrency);
             });
         var batcher = provider.GetRequiredService<IRequestBatcher<KeyedRequest>>();
 
@@ -490,7 +490,7 @@ public sealed class RequestBatchSubmissionTests
                 options.BatchSize = 1;
                 options.MaxConcurrency = 2;
                 options.MaxPendingRequests = 2;
-                options.UsePartitionKey(request => request.Key);
+                options.UsePartitionKey(request => request.Key, partitionCount: 2);
             });
         var batcher = provider.GetRequiredService<IRequestBatcher<KeyedRequest>>();
         KeyedRequest[] requests =
@@ -532,7 +532,7 @@ public sealed class RequestBatchSubmissionTests
             {
                 options.BatchSize = 1;
                 options.MaxConcurrency = 2;
-                options.UsePartitionKey(request => request.Key);
+                options.UsePartitionKey(request => request.Key, partitionCount: 2);
             });
         var batcher = provider.GetRequiredService<IRequestBatcher<KeyedRequest>>();
 
@@ -573,7 +573,7 @@ public sealed class RequestBatchSubmissionTests
             {
                 options.BatchSize = 1;
                 options.MaxConcurrency = 2;
-                options.UsePartitionKey(request => request.Key);
+                options.UsePartitionKey(request => request.Key, partitionCount: 2);
             });
         var batcher = provider.GetRequiredService<IRequestBatcher<KeyedRequest>>();
 
@@ -639,7 +639,9 @@ public sealed class RequestBatchSubmissionTests
             {
                 options.MaxConcurrency = 2;
                 options.MaxPendingRequests = 3;
-                options.UsePartitionKey(request => request >= 0 ? request : throw expected);
+                options.UsePartitionKey(
+                    request => request >= 0 ? request : throw expected,
+                    partitionCount: 2);
             });
         var batcher = provider.GetRequiredService<IRequestBatcher<int>>();
 

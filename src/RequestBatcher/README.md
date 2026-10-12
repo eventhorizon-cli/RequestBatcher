@@ -218,17 +218,17 @@ or synchronously blocking work before that point can delay other batches even wh
 The queue partition count is not the handler concurrency level. Partitions organize queueing and routing, while
 `MaxConcurrency` sets the global maximum number of concurrent handler batches. Without a partition key, the queue uses
 one internal partition to avoid fragmenting unrelated requests. With a finite integer numeric key or a non-null string
-key, it uses `min(MaxConcurrency, max(1, Environment.ProcessorCount))` internal partitions so equal keys retain locality
-while different keys can progress independently. Multiple batches from one partition can execute concurrently, and all
-partitions share the same execution slots. One `BatchDispatchLoop` owns them all. It acquires an execution slot before
-pulling an auto-committed batch, so there is no application-owned handoff queue behind BufferQueue. Each handler batch
-releases its slot independently when it finishes, keeping at most `MaxConcurrency` handler batches in flight.
-The partition count is fixed at registration and remains an internal detail; there is no separate partition-count option.
+key, it uses the explicit count supplied to `UsePartitionKey`, so equal keys retain locality while different keys can
+progress independently. Multiple batches from one partition can execute concurrently, and all partitions share the same
+execution slots. One `BatchDispatchLoop` owns them all. It acquires an execution slot before pulling an auto-committed
+batch, so there is no application-owned handoff queue behind BufferQueue. Each handler batch releases its slot independently
+when it finishes, keeping at most `MaxConcurrency` handler batches in flight. The partition count is fixed at registration
+and independent of CPU count.
 
 | Configuration | Routing and dispatch |
 | --- | --- |
 | No `UsePartitionKey` | All requests use one queue partition; one partition can supply multiple asynchronous handler batches that compete for global execution slots. |
-| `UsePartitionKey(...)` | The partition-key function runs for every item. Equal finite integer numeric keys or non-null string keys use one of the capped partitions; separate handler batches for an equal key can execute concurrently. |
+| `UsePartitionKey(selector, partitionCount)` | The partition-key function runs for every item. Equal finite integer numeric keys or non-null string keys use one of the configured partitions; separate handler batches for an equal key can execute concurrently. |
 
 RequestBatcher provides no global, partition-local, or partition-key handler execution ordering guarantee.
 
@@ -243,7 +243,7 @@ services.AddRequestBatcher<OrderWriteRequest, OrderWriteBatchHandler>(
         options.MaxConcurrency = 4;
 
         // Optional. Without a partition-key function, all requests use one shared partition.
-        options.UsePartitionKey(request => request.OrderId);
+        options.UsePartitionKey(request => request.OrderId, partitionCount: 4);
     });
 ```
 

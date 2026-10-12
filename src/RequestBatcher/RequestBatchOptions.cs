@@ -16,7 +16,7 @@ public sealed class RequestBatchOptions<TRequest>
     /// <summary>
     /// Gets or sets the maximum number of handler invocations that may run concurrently.
     /// Without a partition key, one queue partition supplies these invocations. With a partition key,
-    /// the internal partition count is capped by this value and the process-visible processor count.
+    /// the configured partition count is independent of this value.
     /// </summary>
     public int MaxConcurrency { get; set; } = 1;
 
@@ -40,28 +40,44 @@ public sealed class RequestBatchOptions<TRequest>
 
     /// <summary>
     /// Routes requests with equal finite, integer-valued numeric keys to the same queue partition.
+    /// The partition count must be greater than one and is independent of <see cref="MaxConcurrency"/>.
     /// Routing does not guarantee handler ordering or serial execution.
     /// </summary>
     /// <typeparam name="TNumber">The numeric key type.</typeparam>
     /// <param name="partitionKeySelector">A deterministic, side-effect-free function that selects a request key.</param>
-    public void UsePartitionKey<TNumber>(Func<TRequest, TNumber> partitionKeySelector)
+    /// <param name="partitionCount">The number of queue partitions used for keyed routing.</param>
+    public void UsePartitionKey<TNumber>(Func<TRequest, TNumber> partitionKeySelector, int partitionCount)
         where TNumber : INumber<TNumber>
     {
         ArgumentNullException.ThrowIfNull(partitionKeySelector);
-        PartitionKey = RequestBatchPartitionKey<TRequest>.Create(partitionKeySelector);
+        if (partitionCount <= 1)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(partitionCount), partitionCount, "Partition count must be greater than one.");
+        }
+
+        PartitionKey = RequestBatchPartitionKey<TRequest>.Create(partitionKeySelector, partitionCount);
     }
 
     /// <summary>
     /// Routes requests with equal string keys to the same queue partition.
+    /// The partition count must be greater than one and is independent of <see cref="MaxConcurrency"/>.
     /// Routing does not guarantee handler ordering or serial execution.
     /// </summary>
     /// <param name="partitionKeySelector">
     /// A deterministic, side-effect-free function that selects a non-null request key.
     /// </param>
-    public void UsePartitionKey(Func<TRequest, string> partitionKeySelector)
+    /// <param name="partitionCount">The number of queue partitions used for keyed routing.</param>
+    public void UsePartitionKey(Func<TRequest, string> partitionKeySelector, int partitionCount)
     {
         ArgumentNullException.ThrowIfNull(partitionKeySelector);
-        PartitionKey = RequestBatchPartitionKey<TRequest>.Create(partitionKeySelector);
+        if (partitionCount <= 1)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(partitionCount), partitionCount, "Partition count must be greater than one.");
+        }
+
+        PartitionKey = RequestBatchPartitionKey<TRequest>.Create(partitionKeySelector, partitionCount);
     }
 
     internal RequestBatchOptions<TRequest> ValidateAndClone()
