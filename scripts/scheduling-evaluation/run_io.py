@@ -19,6 +19,8 @@ def main():
     parser.add_argument('--launches', type=int, default=3)
     parser.add_argument('--batch-control', action='store_true')
     parser.add_argument('--latency-sweep', action='store_true')
+    parser.add_argument('--smoke', action='store_true',
+                        help='Build and run one small unkeyed direct/offload loopback case.')
     parser.add_argument('--delays', type=int, nargs='+', default=[10, 100, 500])
     parser.add_argument('--measured-requests', type=int, default=8192)
     parser.add_argument('--warmup-requests', type=int, default=4096)
@@ -32,6 +34,13 @@ def main():
             parser.error(f'--{name.replace("_", "-")} must be a positive multiple of 1024')
     if args.iterations < 1:
         parser.error('--iterations must be positive')
+    if args.smoke and (args.batch_control or args.latency_sweep):
+        parser.error('--smoke cannot be combined with --batch-control or --latency-sweep')
+    if args.smoke:
+        args.launches = 1
+        args.measured_requests = 1024
+        args.warmup_requests = 1024
+        args.iterations = 1
     if args.latency_sweep and any(delay < 0 for delay in args.delays):
         parser.error('--delays must contain only non-negative integers')
     output = args.output.resolve()
@@ -55,7 +64,9 @@ def main():
         reservation.bind(('127.0.0.1', 0))
         port = reservation.getsockname()[1]
     url = f'http://127.0.0.1:{port}/'
-    if args.latency_sweep:
+    if args.smoke:
+        cases = [('async', 1, 1, 1, 0)]
+    elif args.latency_sweep:
         cases = [
             (kind, delay, concurrency, connections, cpu)
             for delay in args.delays

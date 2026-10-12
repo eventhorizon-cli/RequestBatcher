@@ -22,6 +22,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--prepare-only", action="store_true")
+    parser.add_argument("--self-check", action="store_true")
     args = parser.parse_args()
     repo = Path(__file__).resolve().parents[2]
     scratch = Path(tempfile.mkdtemp(prefix="requestbatcher-scheduling-"))
@@ -33,18 +34,61 @@ def main():
                     ignore=shutil.ignore_patterns("bin", "obj"))
     replace_once(scratch / "src/RequestBatcher/Scheduling/BatchDispatchLoop.cs",
                  "    private readonly RequestBatchConsumer<TRequest> _batchConsumer;",
-                 "    internal static bool EvaluationOffload;\n    private readonly RequestBatchConsumer<TRequest> _batchConsumer;")
+                 "    internal static bool EvaluationOffload;\n"
+                 "    internal static TaskCompletionSource? EvaluationOffloadGate;\n"
+                 "    internal static TaskCompletionSource? EvaluationOffloadEntered;\n"
+                 "    private readonly RequestBatchConsumer<TRequest> _batchConsumer;")
     replace_once(scratch / "src/RequestBatcher/Scheduling/BatchDispatchLoop.cs",
-                 "        _ = ProcessBatchAsync(pendingRequests, cancellationToken);",
-                 "        _ = EvaluationOffload\n"
-                 "            ? Task.Run(() => ProcessBatchAsync(pendingRequests, cancellationToken))\n"
-                 "            : ProcessBatchAsync(pendingRequests, cancellationToken);")
-    replace_once(scratch / "src/RequestBatcher/RequestBatcherServiceCollectionExtensions.cs",
-                 "public static class RequestBatcherServiceCollectionExtensions\n{",
-                 "public static class RequestBatcherServiceCollectionExtensions\n{\n    internal static int? EvaluationPartitions;")
-    replace_once(scratch / "src/RequestBatcher/RequestBatcherServiceCollectionExtensions.cs",
-                 "topic.PartitionNumber = GetPartitionCount(",
-                 "topic.PartitionNumber = EvaluationPartitions ?? GetPartitionCount(")
+                 "        var processing = _batchConsumer.ProcessAsync(pendingRequests, cancellationToken);\n"
+                 "        if (processing.IsCompletedSuccessfully)\n"
+                 "        {\n"
+                 "            CompleteExecution();\n"
+                 "            _executionSlots.Release();\n"
+                 "            return;\n"
+                 "        }\n\n"
+                 "        _ = ProcessBatchAsync(processing);",
+                 "        if (EvaluationOffload)\n"
+                 "        {\n"
+                 "            _ = Task.Run(() => ProcessOffloadedBatchAsync(pendingRequests, cancellationToken));\n"
+                 "            return;\n"
+                 "        }\n\n"
+                 "        var processing = _batchConsumer.ProcessAsync(pendingRequests, cancellationToken);\n"
+                 "        if (processing.IsCompletedSuccessfully)\n"
+                 "        {\n"
+                 "            CompleteExecution();\n"
+                 "            _executionSlots.Release();\n"
+                 "            return;\n"
+                 "        }\n\n"
+                 "        _ = ProcessBatchAsync(processing);")
+    replace_once(scratch / "src/RequestBatcher/Scheduling/BatchDispatchLoop.cs",
+                 "    private async Task ProcessBatchAsync(ValueTask processing)",
+                 "    private async Task ProcessOffloadedBatchAsync(\n"
+                 "        IReadOnlyList<PendingBatchRequest<TRequest>> pendingRequests,\n"
+                 "        CancellationToken cancellationToken)\n"
+                 "    {\n"
+                 "        EvaluationOffloadEntered?.TrySetResult();\n"
+                 "        if (EvaluationOffloadGate is { } gate)\n"
+                 "        {\n"
+                 "            await gate.Task.ConfigureAwait(false);\n"
+                 "        }\n\n"
+                 "        ValueTask processing;\n"
+                 "        try\n"
+                 "        {\n"
+                 "            processing = _batchConsumer.ProcessAsync(pendingRequests, cancellationToken);\n"
+                 "        }\n"
+                 "        catch (Exception exception)\n"
+                 "        {\n"
+                 "            if (Interlocked.CompareExchange(ref _executionFailure, exception, null) is null)\n"
+                 "            {\n"
+                 "                _executionFailureCancellation.Cancel();\n"
+                 "            }\n\n"
+                 "            CompleteExecution();\n"
+                 "            _executionSlots.Release();\n"
+                 "            return;\n"
+                 "        }\n\n"
+                 "        await ProcessBatchAsync(processing).ConfigureAwait(false);\n"
+                 "    }\n\n"
+                 "    private async Task ProcessBatchAsync(ValueTask processing)")
     probe = scratch / "Probe"
     probe.mkdir()
     shutil.copy2(Path(__file__).with_name("Program.cs"), probe / "Program.cs")
@@ -67,12 +111,20 @@ def main():
                    cwd=scratch, env=env, check=True)
     (output / "environment.json").write_text(json.dumps({
         "Scratch": str(scratch), "TieredCompilation": False,
+        "RegularCases": 33, "BurstCases": 6,
+        "PartitionCounts": [1, 8],
+        "PartitionPolicy": "Unkeyed cases omit UsePartitionKey; keyed cases use UsePartitionKey(selector, count)",
         "SourceCommit": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=repo, text=True).strip(),
         "SourceDiff": subprocess.check_output(["git", "diff", "--", "src/RequestBatcher"], cwd=repo, text=True),
         "Sdk": subprocess.check_output(["dotnet", "--version"], cwd=scratch, text=True).strip(),
     }, indent=2) + "\n")
     print(f"Isolated source: {scratch}", flush=True)
+    dll = probe / "bin/Release/net8.0/RequestBatcher.Benchmarks.dll"
     if args.prepare_only:
+        return
+    if args.self_check:
+        subprocess.run(["dotnet", str(dll), "--offload-self-check"],
+                       cwd=scratch, env=env, check=True)
         return
     cases = []
     for kind in ["fast", "io", "cpu", "blocking"]:
@@ -80,22 +132,24 @@ def main():
             count = {"fast": 262144, "io": 512 * batch,
                      "cpu": 2048 * batch, "blocking": 512 * batch}[kind]
             for offload in [False, True]:
-                cases.append([kind, batch, 8, 8, offload, 8, "none", count])
+                cases.append([kind, batch, 8, 1, offload, 8, "none", count])
     for concurrency in [1, 64]:
         for kind in ["fast", "io", "blocking"]:
             for offload in [False, True]:
-                cases.append([kind, 1, concurrency, min(concurrency, 8), offload, 8, "none",
+                cases.append([kind, 1, concurrency, 1, offload, 8, "none",
                               262144 if kind == "fast" else 512])
-    for keys, producers, kind in [("none", 1, "fast"), ("none", 8, "fast"),
-                                  ("uniform", 8, "fast"), ("skew", 8, "fast"),
-                                  ("none", 8, "io"), ("uniform", 8, "io"), ("skew", 8, "io")]:
-        for partitions in [1, 8]:
-            case = [kind, 64, 8, partitions, False, producers, keys,
-                    262144 if kind == "fast" else 32768]
-            if case not in cases:
-                cases.append(case)
+    for keys, producers, kind, partitions in [("none", 1, "fast", 1),
+                                               ("none", 8, "fast", 1),
+                                               ("uniform", 8, "fast", 8),
+                                               ("skew", 8, "fast", 8),
+                                               ("none", 8, "io", 1),
+                                               ("uniform", 8, "io", 8),
+                                               ("skew", 8, "io", 8)]:
+        case = [kind, 64, 8, partitions, False, producers, keys,
+                262144 if kind == "fast" else 32768]
+        if case not in cases:
+            cases.append(case)
     random.Random(7824).shuffle(cases)
-    dll = probe / "bin/Release/net8.0/RequestBatcher.Benchmarks.dll"
     with (output / "measurements.jsonl").open("w") as stream:
         for index, case in enumerate(cases):
             result = subprocess.run(["dotnet", str(dll), *map(str, case)],
@@ -109,17 +163,16 @@ def main():
             print(f"{index + 1}/{len(cases)} {case}: {rate:.0f} requests/s", flush=True)
     with (output / "bursts.jsonl").open("w") as stream:
         for count in [64, 2048]:
-            for keys in ["none", "uniform", "skew"]:
-                for partitions in [1, 8]:
-                    case = ["burst", 64, 8, partitions, False, 1, keys, count]
-                    result = subprocess.run(["dotnet", str(dll), *map(str, case)],
-                                            cwd=scratch, env=env, text=True, capture_output=True, timeout=30)
-                    if result.returncode:
-                        raise RuntimeError(f"{case}\n{result.stdout}\n{result.stderr}")
-                    json.loads(result.stdout)
-                    stream.write(result.stdout)
-                    stream.flush()
-                    print(result.stdout.strip(), flush=True)
+            for keys, partitions in [("none", 1), ("uniform", 8), ("skew", 8)]:
+                case = ["burst", 64, 8, partitions, False, 1, keys, count]
+                result = subprocess.run(["dotnet", str(dll), *map(str, case)],
+                                        cwd=scratch, env=env, text=True, capture_output=True, timeout=30)
+                if result.returncode:
+                    raise RuntimeError(f"{case}\n{result.stdout}\n{result.stderr}")
+                json.loads(result.stdout)
+                stream.write(result.stdout)
+                stream.flush()
+                print(result.stdout.strip(), flush=True)
 
 
 if __name__ == "__main__":
