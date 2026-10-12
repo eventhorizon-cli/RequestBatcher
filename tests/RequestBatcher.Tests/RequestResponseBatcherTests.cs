@@ -61,6 +61,25 @@ public sealed class RequestResponseBatcherTests
     }
 
     [Fact]
+    public async Task ProcessAsync_StringPartitionKey_PreservesConfiguredPartitionCount()
+    {
+        await using var provider = CreateProvider<ResponseRequest, string>(
+            (items, _) =>
+            {
+                items.SetResponses(static request => request.Value.ToString());
+                return ValueTask.CompletedTask;
+            },
+            options => options.UsePartitionKey(
+                request => request.Value.ToString(),
+                partitionCount: 2));
+        var batcher = provider.GetRequiredService<IRequestBatcher<ResponseRequest, string>>();
+
+        var actual = await batcher.ProcessAsync(new ResponseRequest(7));
+
+        Assert.Equal("7", actual);
+    }
+
+    [Fact]
     public async Task ProcessAsync_ResponseHandlerFails_PropagatesOriginalException()
     {
         var expected = new TestBatchException();

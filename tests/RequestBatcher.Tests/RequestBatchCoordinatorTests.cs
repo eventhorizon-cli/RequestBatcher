@@ -598,6 +598,17 @@ public sealed class RequestBatchCoordinatorTests
     }
 
     [Fact]
+    public void UsePartitionKey_StringInvalidPartitionCount_Throws()
+    {
+        var options = new RequestBatchOptions<string>();
+
+        var exception = Assert.Throws<ArgumentOutOfRangeException>(() =>
+            options.UsePartitionKey(static request => request, partitionCount: 1));
+
+        Assert.Equal("partitionCount", exception.ParamName);
+    }
+
+    [Fact]
     public async Task AddRequestBatcher_MultipleRequestTypes_ShareInternalQueue()
     {
         var integerHandler = new Mock<IRequestBatchHandler<int>>(MockBehavior.Strict);
