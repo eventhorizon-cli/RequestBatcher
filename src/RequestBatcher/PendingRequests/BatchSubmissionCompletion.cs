@@ -1,11 +1,9 @@
 namespace RequestBatcher.PendingRequests;
 
-internal sealed class BatchSubmissionCompletion : IRequestCompletion
+internal sealed class BatchSubmissionCompletion : TaskCompletionSource, IRequestCompletion
 {
     private readonly CancellationToken _cancellationToken;
     private readonly object _exceptionsLock = new();
-    private readonly TaskCompletionSource _source =
-        new(TaskCreationOptions.RunContinuationsAsynchronously);
     private HashSet<Exception>? _exceptions;
     private int _remainingRequests;
     private int _wasCanceled;
@@ -13,14 +11,13 @@ internal sealed class BatchSubmissionCompletion : IRequestCompletion
     public BatchSubmissionCompletion(
         int requestCount,
         CancellationToken cancellationToken)
+        : base(TaskCreationOptions.RunContinuationsAsynchronously)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(requestCount);
 
         _remainingRequests = requestCount;
         _cancellationToken = cancellationToken;
     }
-
-    public Task Task => _source.Task;
 
     public void CompleteSuccessfully() => CompleteRequest();
 
@@ -61,15 +58,15 @@ internal sealed class BatchSubmissionCompletion : IRequestCompletion
 
         if (exceptions is not null)
         {
-            _source.TrySetException(exceptions);
+            TrySetException(exceptions);
         }
         else if (Volatile.Read(ref _wasCanceled) != 0)
         {
-            _source.TrySetCanceled(_cancellationToken);
+            TrySetCanceled(_cancellationToken);
         }
         else
         {
-            _source.TrySetResult();
+            TrySetResult();
         }
     }
 }

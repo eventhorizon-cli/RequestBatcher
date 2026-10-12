@@ -165,6 +165,20 @@ and concurrent disposal regressions. Identical before/after public-pipeline
 benchmarks cover singles, explicit groups of different sizes, mixed submissions,
 and partition routing; allocation and timing benefits are assessed separately.
 
+Each explicit submission owns a `BatchSubmissionCompletion` that derives from
+`TaskCompletionSource` and implements the request-completion contract. Its task
+uses `RunContinuationsAsynchronously`; all pending items in the submitted group
+share it. The object tracks remaining items, caller cancellation, and distinct
+exception references. The final item publishes failure before cancellation
+before success. It never publishes while other items remain outstanding. This
+avoids a separate TCS wrapper allocation per group without changing public APIs,
+per-item routing, terminal guards, capacity handling, or response collection.
+There is no task pooling. Existing completion, partial-cancellation, producer
+failure, and lifecycle regressions apply to both supported target frameworks.
+Primitive allocation measurements attribute the fixed per-group saving, while
+identical public-pipeline benchmarks compare small/large groups, success,
+failure, partial cancellation, capacity waits, and mixed single/group workloads.
+
 The permit is acquired before advancing the BufferQueue enumerator. With all
 handler slots occupied, the loop does not consume more work. The bounded
 BufferQueue then holds up to `MaxPendingRequests` queued requests and applies
