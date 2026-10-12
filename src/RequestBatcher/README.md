@@ -174,8 +174,8 @@ fit immediately. The submission does not force one handler call; it may still be
 routing.
 
 **An explicit group is not a partition boundary.** With more than one partition, every item is routed independently;
-the group stays in one partition when no partition key is configured, when `MaxConcurrency = 1`, or when every item
-produces the same partition key.
+the group stays in one partition when no partition key is configured or when every item produces the same partition
+key. `MaxConcurrency = 1` limits handler concurrency but does not merge keyed partitions.
 
 ## Submission Behavior
 

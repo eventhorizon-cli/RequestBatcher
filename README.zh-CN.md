@@ -224,8 +224,8 @@ RequestBatcher 会先为请求序列创建快照，再统一提交给内部队�
 可能按 `BatchSize` 或 Partition 路由拆成多个处理批次。
 
 > **显式批量提交不是 Partition 边界。** 配置多个 Partition 后，RequestBatcher 会逐项路由，并不会将整次提交
-> 强制放入同一 Partition。未配置 Partition Key 时，整组请求都在同一个 Partition；配置 Partition Key 时，
-> `MaxConcurrency = 1` 或每项请求计算出相同的 Partition Key，也能保证整组请求落在同一个 Partition。
+> 强制放入同一 Partition。未配置 Partition Key，或每项请求计算出相同的 Partition Key 时，整组请求才会落在同一个
+> Partition。`MaxConcurrency = 1` 只限制 Handler 并发数，不会合并带有不同 Key 的 Partition。
 
 ## 单次提交与批量提交
 

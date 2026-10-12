@@ -236,9 +236,9 @@ request from the submission. This does not force the sequence into one handler c
 `BatchSize` or partition routing.
 
 > **An explicit group is not a partition boundary.** With more than one partition, RequestBatcher routes every item
-> independently; it does not send the whole submission to one partition. The group is guaranteed to stay in one
-> partition when no partition key is configured, when `MaxConcurrency = 1`, or when every item produces the same
-> partition key.
+> independently; it does not send the whole submission to one partition. The group stays in one partition when no
+> partition key is configured or when every item produces the same partition key. `MaxConcurrency = 1` limits handler
+> concurrency but does not merge keyed partitions.
 
 ## Single and Group Submission
 

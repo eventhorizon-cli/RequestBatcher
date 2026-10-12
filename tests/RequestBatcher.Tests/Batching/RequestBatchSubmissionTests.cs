@@ -475,6 +475,36 @@ public sealed class RequestBatchSubmissionTests
     }
 
     [Fact]
+    public async Task ProcessAsync_PartitionedSubmission_WithSingleConcurrency_StillUsesEachKeyPartition()
+    {
+        var handledBatches = new ConcurrentQueue<KeyedRequest[]>();
+
+        await using var provider = CreateProvider<KeyedRequest>(
+            (requests, _) =>
+            {
+                handledBatches.Enqueue(requests.ToArray());
+                return ValueTask.CompletedTask;
+            },
+            options =>
+            {
+                options.BatchSize = 10;
+                options.MaxConcurrency = 1;
+                options.UsePartitionKey(request => request.Key, partitionCount: 2);
+            });
+        var batcher = provider.GetRequiredService<IRequestBatcher<KeyedRequest>>();
+
+        await batcher.ProcessAsync(
+                [new KeyedRequest(1, 1), new KeyedRequest(2, 2)])
+            .WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(2, handledBatches.Count);
+        Assert.All(handledBatches, batch => Assert.Single(batch));
+        Assert.Equal(
+            new[] { 1, 2 },
+            handledBatches.SelectMany(batch => batch).Select(request => request.Key).Order());
+    }
+
+    [Fact]
     public async Task ProcessAsync_WaitModeOversizedPartitionedBatch_ProcessesAllRoutedItems()
     {
         var handledRequests = new ConcurrentQueue<KeyedRequest>();
