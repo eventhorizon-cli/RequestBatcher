@@ -7,8 +7,7 @@ internal sealed class PendingBatchRequest<TRequest>
     private const int Canceled = 2;
     private const int Completed = 3;
 
-    // These states are mutually exclusive; one field keeps single requests from growing in size.
-    private readonly object _completion;
+    private readonly IRequestCompletion _completion;
     private readonly Action<PendingBatchRequest<TRequest>> _onFinished;
     private readonly CancellationToken _cancellationToken;
     private CancellationTokenRegistration _cancellationRegistration;
@@ -19,14 +18,12 @@ internal sealed class PendingBatchRequest<TRequest>
         TRequest request,
         CancellationToken cancellationToken,
         Action<PendingBatchRequest<TRequest>> onFinished,
-        BatchSubmissionCompletion? batchCompletion = null)
+        IRequestCompletion? completion = null)
     {
         Request = request;
         _cancellationToken = cancellationToken;
         _onFinished = onFinished;
-        _completion = batchCompletion is null
-            ? new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
-            : batchCompletion;
+        _completion = completion ?? new RequestCompletion();
 
         if (cancellationToken.CanBeCanceled)
         {
@@ -40,7 +37,7 @@ internal sealed class PendingBatchRequest<TRequest>
 
     public Task Completion => _completion is BatchSubmissionCompletion batchCompletion
         ? batchCompletion.Task
-        : ((TaskCompletionSource)_completion).Task;
+        : _completion.Task;
 
     public bool TryStartProcessing() =>
         Interlocked.CompareExchange(ref _status, Processing, Queued) == Queued;
@@ -49,7 +46,14 @@ internal sealed class PendingBatchRequest<TRequest>
     {
         if (Interlocked.CompareExchange(ref _status, Completed, Processing) == Processing)
         {
-            CompleteSuccessfullyCore();
+            if (_completion is BatchSubmissionCompletion batchCompletion)
+            {
+                batchCompletion.CompleteSuccessfully();
+            }
+            else
+            {
+                _completion.CompleteSuccessfully();
+            }
         }
 
         Finish();
@@ -90,19 +94,14 @@ internal sealed class PendingBatchRequest<TRequest>
     {
         if (Interlocked.CompareExchange(ref _status, Canceled, Queued) == Queued)
         {
-            CompleteCanceledCore();
-        }
-    }
-
-    private void CompleteSuccessfullyCore()
-    {
-        if (_completion is BatchSubmissionCompletion batchCompletion)
-        {
-            batchCompletion.CompleteSuccessfully();
-        }
-        else
-        {
-            ((TaskCompletionSource)_completion).TrySetResult();
+            if (_completion is BatchSubmissionCompletion batchCompletion)
+            {
+                batchCompletion.CompleteCanceled();
+            }
+            else
+            {
+                _completion.CompleteCanceled(_cancellationToken);
+            }
         }
     }
 
@@ -114,19 +113,7 @@ internal sealed class PendingBatchRequest<TRequest>
         }
         else
         {
-            ((TaskCompletionSource)_completion).TrySetException(exception);
-        }
-    }
-
-    private void CompleteCanceledCore()
-    {
-        if (_completion is BatchSubmissionCompletion batchCompletion)
-        {
-            batchCompletion.CompleteCanceled();
-        }
-        else
-        {
-            ((TaskCompletionSource)_completion).TrySetCanceled(_cancellationToken);
+            _completion.CompleteWithError(exception);
         }
     }
 

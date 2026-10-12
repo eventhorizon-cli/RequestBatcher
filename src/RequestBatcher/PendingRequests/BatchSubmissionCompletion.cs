@@ -1,6 +1,6 @@
 namespace RequestBatcher.PendingRequests;
 
-internal sealed class BatchSubmissionCompletion
+internal sealed class BatchSubmissionCompletion : IRequestCompletion
 {
     private readonly CancellationToken _cancellationToken;
     private readonly object _exceptionsLock = new();
@@ -42,6 +42,8 @@ internal sealed class BatchSubmissionCompletion
         Volatile.Write(ref _wasCanceled, 1);
         CompleteRequest();
     }
+
+    void IRequestCompletion.CompleteCanceled(CancellationToken cancellationToken) => CompleteCanceled();
 
     private void CompleteRequest()
     {

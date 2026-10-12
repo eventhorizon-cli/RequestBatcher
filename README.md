@@ -286,7 +286,10 @@ or synchronously blocking work before that point can delay other batches even wh
 ### Completion and Failure
 
 - A successful handler call completes every caller represented in that handler batch.
-- If the handler throws, those callers receive the original exception.
+- If the handler throws a non-cancellation exception, those callers receive the original exception.
+- Response tasks represent a handler `OperationCanceledException` as cancellation. A single response preserves its
+  cancellation token and throws `TaskCanceledException` when awaited; the original cancellation exception instance,
+  message, and derived type are not preserved.
 - RequestBatcher does not retry a failed handler.
 - The batch overload waits for the whole submitted group and faults if any handler call involved in that submission
   fails.

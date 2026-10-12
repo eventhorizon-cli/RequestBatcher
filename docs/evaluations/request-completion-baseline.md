@@ -26,10 +26,16 @@ managed allocation per benchmark operation.
 | Single request cancellation | 9.050 us / 41.13 KB | 80.971 us / 328.13 KB |
 
 Explicit submissions already share one completion source and use roughly half
-the allocation of independent single-request completion for these workloads.
-Failure completion is dominated by per-request exception task state, while
-cancellation is dominated by cancellation registrations. The benchmark does
-not show a safe object-pooling or result-box replacement that would preserve
-caller task ownership and lifecycle guarantees. Keep the current
-`TaskCompletionSource` ownership model and use this benchmark to validate any
-future completion-path change.
+the allocation of independent single-request completion in these primitive
+success workloads. This suite has no waiting continuations, response facade,
+queue admission, or concurrent handler work. Its failure cases do not observe
+the faulted tasks, so exception-holder finalization can contribute to their
+reported cost. Cancellation also includes array allocation and token-source
+registration work; this suite does not isolate those costs.
+
+These measurements do not establish whether a typed result box or a different
+completion path would help. Production decisions require a before/after public
+pipeline comparison with real awaiting callers, observed errors, and validated
+responses. Asynchronous tasks remain caller-owned and are not pooled. See the
+[typed response completion evaluation](typed-response-completion/README.md) for
+a public-pipeline before/after comparison.
