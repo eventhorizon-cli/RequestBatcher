@@ -127,6 +127,8 @@ handlers can therefore avoid a `Task` allocation, while asynchronous I/O can use
 dotnet add package RequestBatcher
 ```
 
+The package supports .NET 8 and .NET 10 applications through `net8.0` and `net10.0` assets.
+
 ## Request-Only Batching
 
 Define the request and the code that handles one batch:
