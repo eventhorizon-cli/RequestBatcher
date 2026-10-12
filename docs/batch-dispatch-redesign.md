@@ -127,6 +127,13 @@ uses a semaphore with `H` permits and an in-flight completion tracker.
 5. The execution task completes each request from the handler outcome, removes
    itself from the in-flight tracker, and releases its permit in `finally`.
 
+When `RequestBatchConsumer.ProcessAsync` returns a synchronously completed
+`ValueTask`, the dispatch loop completes the execution inline and releases the
+permit without creating an additional async `Task` wrapper. An incomplete
+`ValueTask` uses the asynchronous completion path. Both paths keep the same
+exactly-once request completion, in-flight tracking, failure propagation, and
+permit-release behavior.
+
 There is no `Task.WhenAll` in the normal dispatch path and no per-superbatch
 barrier. A handler suspended on an incomplete asynchronous wait holds only its
 own execution permit; batches already running in other slots complete normally.
