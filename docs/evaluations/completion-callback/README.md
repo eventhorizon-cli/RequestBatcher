@@ -93,6 +93,16 @@ validation. BenchmarkDotNet CSV and Markdown summaries, including confidence
 intervals, GC counts, and runtime details, are retained under [before](before/)
 and [after](after/).
 
+## Correctness and package validation
+
+After integrating the separate README and multi-targeting changes, the combined
+code passes all 116 tests on .NET 8 and all 116 on .NET 10. Solution formatting
+verification and the Release build pass with no warnings or errors. Package
+inspection confirms DLL/XML assets for both targets, the package README, and
+symbols for both targets in the symbol package. Existing regressions cover
+success, failure, cancellation, consumer failure, mixed submission capacity,
+and concurrent disposal.
+
 ## Limits
 
 These are public-API, in-process workloads using singleton handlers. They do not
