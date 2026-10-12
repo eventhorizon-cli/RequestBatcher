@@ -4,6 +4,14 @@ RequestBatcher lets application code submit one request and await one `Task` or 
 application handler receives multiple queued requests as an `IReadOnlyList<TRequest>` or
 `IReadOnlyList<RequestBatchItem<TRequest, TResponse>>`.
 
+The API entry point is resolved through dependency injection. Register the batcher and its handler with
+`services.AddRequestBatcher<TRequest, THandler>(ServiceLifetime.Scoped)`, then constructor-inject
+`IRequestBatcher<TRequest>` into the component that submits requests. Choose the handler lifetime explicitly.
+
+For typed results, register with `AddRequestBatcher<TRequest, TResponse, THandler>` and inject
+`IRequestBatcher<TRequest, TResponse>`. Both interfaces come from the application's service provider; see the
+[registration and injection examples](#request-only-batching) below.
+
 > **Batching does not require callers to assemble a collection.** Separate callers can each submit one `TRequest`
 > concurrently. RequestBatcher coalesces requests already queued for the same partition into handler batches of up to
 > `BatchSize`. `ProcessAsync(IEnumerable<TRequest>)` is an additional submission option, not a prerequisite for
@@ -49,6 +57,8 @@ to the handler and cannot cancel the shared handler call.
 ```bash
 dotnet add package RequestBatcher
 ```
+
+The package supports .NET 8 and .NET 10 applications through `net8.0` and `net10.0` assets.
 
 ## Request-Only Batching
 
