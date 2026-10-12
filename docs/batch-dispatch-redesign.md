@@ -214,9 +214,7 @@ The implementation must add or adjust deterministic tests for:
 
 ## Evaluation Evidence
 
-The [historical dispatch benchmark](evaluations/parallel-dispatch-baseline.md)
-records the original paced database comparison. The
-[BufferQueue 2.0.3 evaluation](evaluations/bufferqueue-2.0.3/README.md) compares
+The [BufferQueue 2.0.3 evaluation](evaluations/bufferqueue-2.0.3/README.md) compares
 partition counts and handler offloading with controlled in-memory workloads.
 These measurements are evidence for tradeoffs, not throughput guarantees.
 
