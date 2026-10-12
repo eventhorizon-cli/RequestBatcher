@@ -119,7 +119,7 @@ public static class RequestBatcherServiceCollectionExtensions
                 handlerLifetime)));
         services.AddSingleton<IRequestBatcher<TRequest, TResponse>>(
             provider => new ResponseRequestBatcher<TRequest, TResponse>(
-                provider.GetRequiredService<IRequestBatcher<RequestBatchItem<TRequest, TResponse>>>()));
+                provider.GetRequiredService<RequestBatchCoordinator<RequestBatchItem<TRequest, TResponse>>>()));
 
         return services;
     }

@@ -165,6 +165,37 @@ keys route to the same queue partition but do not guarantee serialized handler
 execution or ordering. The partition count must be greater than one and is
 independent of `MaxConcurrency` and process CPU count.
 
+## Typed Single-Request Completion
+
+Single response submissions create an internal `ResponseCompletion<TRequest,
+TResponse>` result box that inherits `TaskCompletionSource<TResponse>`. It
+references the response item and implements the pending-request completion
+contract. Pending state uses this box instead of an untyped completion source.
+The facade returns its typed task directly when queue production completes
+synchronously. If production must wait, the existing producer observation path
+is awaited before returning the response; enqueue failure and cancellation
+remain observed.
+
+`SetResponse` only stores a value. Successful completion is published after the
+handler, response validation for the entire handler batch, and async scope
+cleanup all succeed. Pre-dispatch cancellation, queue failures, and handler
+failures complete the same box. An `OperationCanceledException` retains the
+canceled-task behavior and cancellation token of the response facade's async
+wait. A single response task uses standard TCS cancellation: awaiting it throws
+`TaskCanceledException`, rather than preserving a handler's original cancellation
+exception instance, message, or derived type. Non-cancellation failures retain
+the original exception instance. Continuations use
+`RunContinuationsAsynchronously`; result boxes and their tasks are never pooled.
+
+Explicit submissions still use one shared batch completion, with responses
+collected in input order. Request-only submissions retain one untyped source.
+There are no public API, partition routing, capacity, or lifetime changes.
+The cancellation-exception normalization above is an observable behavior change. Regression tests cover delayed success, response set then
+failure, missing responses, cancellation before/after dispatch, backpressure,
+queue rejection, and disposal. Public-pipeline benchmarks compare the same
+source before and after this change, including real waiting continuations,
+failures that are observed, and request-only/explicit-batch controls.
+
 ## Handler Lifetime
 
 The handler type is registered in the application-owned service collection
@@ -181,8 +212,10 @@ No nested service provider is created.
 
 - A caller completes successfully only after its handler batch succeeds and
   its response slot contains a value. A null response is valid.
-- A handler exception faults every active request in that handler batch with
-  the same exception.
+- A non-cancellation handler exception faults every active request in that
+  handler batch with the same exception. Response tasks represent a handler
+  `OperationCanceledException` as cancellation; single responses preserve its
+  token rather than its exception identity.
 - Caller cancellation removes work only before handler dispatch.
 - Once dispatch begins, the caller observes the actual handler outcome.
 - `DisposeAsync` stops admission, drains accepted work, stops dispatch, and

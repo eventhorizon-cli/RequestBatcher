@@ -89,7 +89,13 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
     }
 
     /// <inheritdoc />
-    public Task ProcessAsync(TRequest request, CancellationToken cancellationToken = default)
+    public Task ProcessAsync(TRequest request, CancellationToken cancellationToken = default) =>
+        ProcessAsync(request, null, cancellationToken);
+
+    internal Task ProcessAsync(
+        TRequest request,
+        IRequestCompletion? completion,
+        CancellationToken cancellationToken)
     {
         if (Volatile.Read(ref _state) != Running)
         {
@@ -101,7 +107,7 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
             return Task.FromCanceled(cancellationToken);
         }
 
-        return AcceptRequest(request, cancellationToken);
+        return AcceptRequest(request, completion, cancellationToken);
     }
 
     /// <inheritdoc />
@@ -169,6 +175,7 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
 
     private Task AcceptRequest(
         TRequest request,
+        IRequestCompletion? completion,
         CancellationToken cancellationToken)
     {
         PendingBatchRequest<TRequest> pendingRequest;
@@ -183,7 +190,8 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
             pendingRequest = new PendingBatchRequest<TRequest>(
                 request,
                 cancellationToken,
-                OnRequestFinished);
+                OnRequestFinished,
+                completion);
             _pendingRequests.TryAdd(pendingRequest, 0);
         }
 

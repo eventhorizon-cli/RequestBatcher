@@ -1,13 +1,19 @@
+using RequestBatcher.PendingRequests;
+
 namespace RequestBatcher;
 
 internal sealed class ResponseRequestBatcher<TRequest, TResponse>(
-    IRequestBatcher<RequestBatchItem<TRequest, TResponse>> batcher)
+    RequestBatchCoordinator<RequestBatchItem<TRequest, TResponse>> batcher)
     : IRequestBatcher<TRequest, TResponse>
 {
     public Task<TResponse> ProcessAsync(TRequest request, CancellationToken cancellationToken = default)
     {
         var item = new RequestBatchItem<TRequest, TResponse>(request);
-        return ProcessItemAsync(item, cancellationToken);
+        var completion = new ResponseCompletion<TRequest, TResponse>(item);
+        var submission = batcher.ProcessAsync(item, completion, cancellationToken);
+        return ReferenceEquals(submission, completion.Task)
+            ? completion.Task
+            : AwaitSubmissionAsync(submission, item);
     }
 
     public Task<IReadOnlyList<TResponse>> ProcessAsync(
@@ -19,11 +25,11 @@ internal sealed class ResponseRequestBatcher<TRequest, TResponse>(
         return ProcessItemsAsync(requests, cancellationToken);
     }
 
-    private async Task<TResponse> ProcessItemAsync(
-        RequestBatchItem<TRequest, TResponse> item,
-        CancellationToken cancellationToken)
+    private static async Task<TResponse> AwaitSubmissionAsync(
+        Task submission,
+        RequestBatchItem<TRequest, TResponse> item)
     {
-        await batcher.ProcessAsync(item, cancellationToken).ConfigureAwait(false);
+        await submission.ConfigureAwait(false);
         return item.GetResponse();
     }
 

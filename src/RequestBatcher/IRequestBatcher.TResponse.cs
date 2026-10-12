@@ -13,6 +13,10 @@ public interface IRequestBatcher<in TRequest, TResponse>
     /// <param name="request">The request to enqueue.</param>
     /// <param name="cancellationToken">A token that cancels the request before handler dispatch.</param>
     /// <returns>A task that returns the response for <paramref name="request"/>.</returns>
+    /// <remarks>
+    /// Completion includes handler scope disposal. A handler cancellation produces a canceled task with the
+    /// original cancellation token, without preserving the cancellation exception instance or derived type.
+    /// </remarks>
     Task<TResponse> ProcessAsync(TRequest request, CancellationToken cancellationToken = default);
 
     /// <summary>

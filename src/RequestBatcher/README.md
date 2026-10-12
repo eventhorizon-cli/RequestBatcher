@@ -152,7 +152,11 @@ public sealed class PriceService(IRequestBatcher<PriceQuery, PriceQuote?> priceB
 The handler must set exactly one response for every item before it returns. `item.SetResponse(response)` sets one item
 directly; `items.SetResponses(responses)` maps the nth response in the enumeration to the nth request item. The response
 enumeration must have the same order and one entry per item. The caller's `Task<TResponse>` completes only after the
-handler succeeds and its item's response has been set.
+handler succeeds, its item's response has been set, and its handler scope has been disposed.
+
+Non-cancellation handler failures propagate the original exception. A handler `OperationCanceledException` produces a
+canceled response task. For a single response, awaiting it throws `TaskCanceledException` with the original token;
+the cancellation exception instance, message, and derived type are not preserved.
 
 For a response-enabled batcher, the explicit-group overload returns one response per input request in the same order,
 even when the requests are split across handler batches or queue partitions. If several handler calls fail for one
