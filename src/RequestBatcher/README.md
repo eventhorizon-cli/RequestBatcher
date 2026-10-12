@@ -50,6 +50,8 @@ to the handler and cannot cancel the shared handler call.
 dotnet add package RequestBatcher
 ```
 
+The package supports .NET 8 and .NET 10 applications through `net8.0` and `net10.0` assets.
+
 ## Request-Only Batching
 
 Define a request and a handler for one batch:
