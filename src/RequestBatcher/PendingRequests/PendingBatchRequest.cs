@@ -35,7 +35,9 @@ internal sealed class PendingBatchRequest<TRequest>
 
     public TRequest Request { get; }
 
-    public Task Completion => _completion.Task;
+    public Task Completion => _completion is BatchSubmissionCompletion batchCompletion
+        ? batchCompletion.Task
+        : _completion.Task;
 
     public bool TryStartProcessing() =>
         Interlocked.CompareExchange(ref _status, Processing, Queued) == Queued;
@@ -44,7 +46,14 @@ internal sealed class PendingBatchRequest<TRequest>
     {
         if (Interlocked.CompareExchange(ref _status, Completed, Processing) == Processing)
         {
-            _completion.CompleteSuccessfully();
+            if (_completion is BatchSubmissionCompletion batchCompletion)
+            {
+                batchCompletion.CompleteSuccessfully();
+            }
+            else
+            {
+                _completion.CompleteSuccessfully();
+            }
         }
 
         Finish();
@@ -56,7 +65,7 @@ internal sealed class PendingBatchRequest<TRequest>
 
         if (Interlocked.CompareExchange(ref _status, Completed, Processing) == Processing)
         {
-            _completion.CompleteWithError(exception);
+            CompleteWithErrorCore(exception);
         }
 
         Finish();
@@ -72,7 +81,7 @@ internal sealed class PendingBatchRequest<TRequest>
         var status = Interlocked.CompareExchange(ref _status, Completed, Queued);
         if (status == Queued)
         {
-            _completion.CompleteWithError(exception);
+            CompleteWithErrorCore(exception);
             Finish();
         }
         else if (status != Processing)
@@ -85,7 +94,26 @@ internal sealed class PendingBatchRequest<TRequest>
     {
         if (Interlocked.CompareExchange(ref _status, Canceled, Queued) == Queued)
         {
-            _completion.CompleteCanceled(_cancellationToken);
+            if (_completion is BatchSubmissionCompletion batchCompletion)
+            {
+                batchCompletion.CompleteCanceled();
+            }
+            else
+            {
+                _completion.CompleteCanceled(_cancellationToken);
+            }
+        }
+    }
+
+    private void CompleteWithErrorCore(Exception exception)
+    {
+        if (_completion is BatchSubmissionCompletion batchCompletion)
+        {
+            batchCompletion.CompleteWithError(exception);
+        }
+        else
+        {
+            _completion.CompleteWithError(exception);
         }
     }
 

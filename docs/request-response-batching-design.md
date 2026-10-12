@@ -188,7 +188,9 @@ the original exception instance. Continuations use
 `RunContinuationsAsynchronously`; result boxes and their tasks are never pooled.
 
 Explicit submissions still use one shared batch completion, with responses
-collected in input order. Request-only submissions retain one untyped source.
+collected in input order. Pending state calls shared-batch completion methods
+directly, avoiding interface dispatch for every item in an explicit submission.
+Request-only submissions retain one untyped source.
 There are no public API, partition routing, capacity, or lifetime changes.
 The cancellation-exception normalization above is an observable behavior change. Regression tests cover delayed success, response set then
 failure, missing responses, cancellation before/after dispatch, backpressure,
