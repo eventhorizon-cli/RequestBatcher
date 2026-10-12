@@ -323,9 +323,9 @@ on the number of callers waiting for capacity:
 
 ### Shutdown
 
-`StopAsync` and `DisposeAsync` stop accepting new requests and drain every submission that started before shutdown,
-including submissions waiting for capacity. Canceling the token passed to `StopAsync` stops only that wait; shutdown
-continues in the background.
+`DisposeAsync` stops accepting new requests, drains every accepted submission (including submissions waiting for
+capacity), then releases coordinator-owned resources. Concurrent and repeated disposal calls share the same operation.
+When registered through `AddRequestBatcher`, the application container owns async disposal.
 
 ## Configuration
 

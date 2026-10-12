@@ -200,8 +200,9 @@ key. `MaxConcurrency = 1` limits handler concurrency but does not merge keyed pa
   capacity-sized slices. `Fail` rejects the whole submission unless it fits immediately.
 - Caller cancellation removes a request only before handler dispatch. After dispatch, the caller observes the real
   handler outcome.
-- Shutdown rejects new calls and drains every submission that started before shutdown, including submissions waiting
-  for capacity. Requests still cannot be recovered after a process failure.
+- `DisposeAsync` rejects new calls, drains accepted submissions including those waiting for capacity, and releases
+  coordinator-owned resources. Concurrent and repeated calls share one operation; the application container owns
+  async disposal. Requests still cannot be recovered after a process failure.
 
 ## Routing and Dispatch
 

@@ -30,7 +30,7 @@ You are an AI coding assistant for this repository.
   concurrently. Do not imply that an entire key is collected into one batch or that routing serializes execution.
 - Caller cancellation may remove work only before handler dispatch. Once a batch is dispatched, report its actual
   outcome so retrying callers cannot unknowingly duplicate side effects.
-- `StopAsync` and `DisposeAsync` stop admission before draining accepted work. Keep lifecycle transitions idempotent
+- `DisposeAsync` stops admission before draining accepted work. Keep lifecycle transitions idempotent
   and safe under concurrent calls.
 - Keep one top-level type per C# file, except for nested implementation details and test helpers. Namespaces mirror the
   owning project and source directory.

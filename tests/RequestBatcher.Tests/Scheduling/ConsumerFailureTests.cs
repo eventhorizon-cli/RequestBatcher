@@ -10,7 +10,7 @@ namespace RequestBatcher.Tests.Scheduling;
 public sealed class ConsumerFailureTests
 {
     [Fact]
-    public async Task ConsumerEnumerationFails_CompletesAcceptedRequestAndStop()
+    public async Task DisposeAsync_ConsumerEnumerationFails_ReportsFailureOnRepeatedCalls()
     {
         var expected = new TestConsumerException();
         var submitted = new TaskCompletionSource<PendingBatchRequest<int>>(
@@ -43,13 +43,13 @@ public sealed class ConsumerFailureTests
 
         var requestException = await Assert.ThrowsAsync<TestConsumerException>(
             () => processing.WaitAsync(TimeSpan.FromSeconds(5)));
-        var stopException = await Assert.ThrowsAsync<TestConsumerException>(
-            () => coordinator.StopAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5)));
+        var firstDisposeException = await Assert.ThrowsAsync<TestConsumerException>(
+            () => coordinator.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5)));
         var disposeException = await Assert.ThrowsAsync<TestConsumerException>(
             () => coordinator.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5)));
 
         Assert.Same(expected, requestException);
-        Assert.Same(expected, stopException);
+        Assert.Same(expected, firstDisposeException);
         Assert.Same(expected, disposeException);
         bufferQueue.VerifyAll();
     }
