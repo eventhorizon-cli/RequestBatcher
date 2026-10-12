@@ -142,6 +142,15 @@ scope resolution, delays the next pull even if other execution slots are free.
 The dispatch loop does not offload each handler to the ThreadPool. The in-flight tracker is used only to
 observe terminal drain and task failures without creating a second queue.
 
+The coordinator keeps accepted requests in a concurrent pending registry so
+terminal request completion does not take the lifecycle lock for every item.
+Admission and stop transitions still use the lifecycle lock. A finished item
+is removed from the registry and decrements the pending count atomically; only
+the transition from one pending item to zero re-enters the lifecycle lock to
+capture and signal the current drain source. Consumer-failure snapshots may
+observe requests that finish concurrently, and each request's terminal state
+still prevents duplicate completion or capacity release.
+
 The permit is acquired before advancing the BufferQueue enumerator. With all
 handler slots occupied, the loop does not consume more work. The bounded
 BufferQueue then holds up to `MaxPendingRequests` queued requests and applies

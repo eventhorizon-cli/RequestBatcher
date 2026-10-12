@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Runtime.ExceptionServices;
 using BufferQueue;
 using Microsoft.Extensions.Logging;
@@ -25,7 +26,7 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
     private readonly object _lifecycleLock = new();
     private readonly ILogger<RequestBatchCoordinator<TRequest>> _logger;
     private readonly RequestBatchOptions<TRequest> _options;
-    private readonly HashSet<PendingBatchRequest<TRequest>> _pendingRequests = [];
+    private readonly ConcurrentDictionary<PendingBatchRequest<TRequest>, byte> _pendingRequests = new();
     private readonly PendingRequestProducer<TRequest> _producer;
     private readonly CancellationTokenSource _producerCancellation = new();
     private readonly CancellationTokenSource _consumerCancellation = new();
@@ -196,7 +197,7 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
                 request,
                 cancellationToken,
                 OnRequestFinished);
-            _pendingRequests.Add(pendingRequest);
+            _pendingRequests.TryAdd(pendingRequest, 0);
         }
 
         return _producer.ProduceAsync(pendingRequest, cancellationToken);
@@ -225,7 +226,7 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
                     cancellationToken,
                     OnRequestFinished,
                     batchCompletion);
-                _pendingRequests.Add(pendingRequests[i]);
+                _pendingRequests.TryAdd(pendingRequests[i], 0);
             }
         }
 
@@ -234,16 +235,22 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
 
     private void OnRequestFinished(PendingBatchRequest<TRequest> pendingRequest)
     {
+        if (!_pendingRequests.TryRemove(pendingRequest, out _))
+        {
+            return;
+        }
+
+        if (Interlocked.Decrement(ref _pendingRequestCount) != 0)
+        {
+            return;
+        }
+
         TaskCompletionSource? drained = null;
         lock (_lifecycleLock)
         {
-            if (_pendingRequests.Remove(pendingRequest))
+            if (Volatile.Read(ref _pendingRequestCount) == 0)
             {
-                _pendingRequestCount--;
-                if (_pendingRequestCount == 0)
-                {
-                    drained = _drained;
-                }
+                drained = _drained;
             }
         }
 
@@ -252,12 +259,12 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
 
     private void TrackRequestsLocked(int requestCount)
     {
-        if (_pendingRequestCount == 0)
+        if (Volatile.Read(ref _pendingRequestCount) == 0)
         {
             _drained = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         }
 
-        _pendingRequestCount += requestCount;
+        Interlocked.Add(ref _pendingRequestCount, requestCount);
     }
 
     private Task GetOrStartStopTaskLocked()
@@ -333,7 +340,7 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
                 _stopTask = StopCoreAsync(_drained.Task);
             }
 
-            pendingRequests = _pendingRequests.ToArray();
+            pendingRequests = _pendingRequests.Keys.ToArray();
         }
 
         foreach (var pendingRequest in pendingRequests)
