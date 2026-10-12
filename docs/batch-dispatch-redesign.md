@@ -160,6 +160,21 @@ so sharing the delegate does not share item state or change cancellation,
 capacity release, partition routing, or handler ordering. Public APIs and
 lifetime contracts are unchanged, and no task or pending object is pooled.
 
+Each pending item retains its request, completion, finish callback, and
+cancellation registration, but does not retain a second copy of the caller's
+`CancellationToken`. The registration uses
+`CancellationToken.UnsafeRegister(Action<object?, CancellationToken>, object?)`,
+so the cancellation callback receives the original token supplied by the caller.
+This also covers the synchronous callback made while registering an already-
+canceled token. Cancellation still changes only queued items; after
+`TryStartProcessing` succeeds, the handler's terminal result remains authoritative.
+The existing state transitions, exactly-once completion, and capacity release
+contracts are unchanged.
+
+Direct pending-item tests cover synchronous registration of an already-canceled
+token, queued cancellation with one finish notification, and cancellation after
+dispatch with both successful and failed handler outcomes.
+
 Validation uses the existing success, failure, cancellation, consumer-failure,
 and concurrent disposal regressions. Identical before/after public-pipeline
 benchmarks cover singles, explicit groups of different sizes, mixed submissions,

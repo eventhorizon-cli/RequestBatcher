@@ -9,7 +9,6 @@ internal sealed class PendingBatchRequest<TRequest>
 
     private readonly IRequestCompletion _completion;
     private readonly Action<PendingBatchRequest<TRequest>> _onFinished;
-    private readonly CancellationToken _cancellationToken;
     private CancellationTokenRegistration _cancellationRegistration;
     private int _status;
     private int _finished;
@@ -21,14 +20,14 @@ internal sealed class PendingBatchRequest<TRequest>
         IRequestCompletion? completion = null)
     {
         Request = request;
-        _cancellationToken = cancellationToken;
         _onFinished = onFinished;
         _completion = completion ?? new RequestCompletion();
 
         if (cancellationToken.CanBeCanceled)
         {
             _cancellationRegistration = cancellationToken.UnsafeRegister(
-                static state => ((PendingBatchRequest<TRequest>)state!).CancelWhileQueued(),
+                static (state, originalToken) =>
+                    ((PendingBatchRequest<TRequest>)state!).CancelWhileQueued(originalToken),
                 this);
         }
     }
@@ -90,7 +89,7 @@ internal sealed class PendingBatchRequest<TRequest>
         }
     }
 
-    private void CancelWhileQueued()
+    private void CancelWhileQueued(CancellationToken originalToken)
     {
         if (Interlocked.CompareExchange(ref _status, Canceled, Queued) == Queued)
         {
@@ -100,7 +99,7 @@ internal sealed class PendingBatchRequest<TRequest>
             }
             else
             {
-                _completion.CompleteCanceled(_cancellationToken);
+                _completion.CompleteCanceled(originalToken);
             }
         }
     }
