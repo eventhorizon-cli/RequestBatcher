@@ -116,16 +116,22 @@ internal sealed class BatchDispatchLoop<TRequest> : IDisposable
         CancellationToken cancellationToken)
     {
         TrackExecution();
-        _ = ProcessBatchAsync(pendingRequests, cancellationToken);
+        var processing = _batchConsumer.ProcessAsync(pendingRequests, cancellationToken);
+        if (processing.IsCompletedSuccessfully)
+        {
+            CompleteExecution();
+            _executionSlots.Release();
+            return;
+        }
+
+        _ = ProcessBatchAsync(processing);
     }
 
-    private async Task ProcessBatchAsync(
-        IReadOnlyList<PendingBatchRequest<TRequest>> pendingRequests,
-        CancellationToken cancellationToken)
+    private async Task ProcessBatchAsync(ValueTask processing)
     {
         try
         {
-            await _batchConsumer.ProcessAsync(pendingRequests, cancellationToken).ConfigureAwait(false);
+            await processing.ConfigureAwait(false);
         }
         catch (Exception exception)
         {
