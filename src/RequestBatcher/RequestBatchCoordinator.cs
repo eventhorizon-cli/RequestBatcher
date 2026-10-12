@@ -27,6 +27,7 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
     private readonly ILogger<RequestBatchCoordinator<TRequest>> _logger;
     private readonly RequestBatchOptions<TRequest> _options;
     private readonly ConcurrentDictionary<PendingBatchRequest<TRequest>, byte> _pendingRequests = new();
+    private readonly Action<PendingBatchRequest<TRequest>> _onRequestFinished;
     private readonly PendingRequestProducer<TRequest> _producer;
     private readonly CancellationTokenSource _producerCancellation = new();
     private readonly CancellationTokenSource _consumerCancellation = new();
@@ -48,6 +49,7 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
     {
         _logger = logger;
         _options = options.Value.ValidateAndClone();
+        _onRequestFinished = OnRequestFinished;
 
         _producer = new PendingRequestProducer<TRequest>(
             bufferQueue.GetProducer<PendingBatchRequest<TRequest>>(TopicName),
@@ -190,7 +192,7 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
             pendingRequest = new PendingBatchRequest<TRequest>(
                 request,
                 cancellationToken,
-                OnRequestFinished,
+                _onRequestFinished,
                 completion);
             _pendingRequests.TryAdd(pendingRequest, 0);
         }
@@ -219,7 +221,7 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
                 pendingRequests[i] = new PendingBatchRequest<TRequest>(
                     requests[i],
                     cancellationToken,
-                    OnRequestFinished,
+                    _onRequestFinished,
                     batchCompletion);
                 _pendingRequests.TryAdd(pendingRequests[i], 0);
             }
