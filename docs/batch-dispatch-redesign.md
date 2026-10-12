@@ -151,6 +151,20 @@ capture and signal the current drain source. Consumer-failure snapshots may
 observe requests that finish concurrently, and each request's terminal state
 still prevents duplicate completion or capacity release.
 
+Each coordinator creates one bound `OnRequestFinished` delegate before consumer
+startup and keeps it in a readonly field. Single and explicit-group admission
+pass that same delegate to every pending item. The callback remains specific to
+its owning coordinator; it removes only that coordinator's pending state and
+signals its drain source. Pending items retain their exactly-once finish guard,
+so sharing the delegate does not share item state or change cancellation,
+capacity release, partition routing, or handler ordering. Public APIs and
+lifetime contracts are unchanged, and no task or pending object is pooled.
+
+Validation uses the existing success, failure, cancellation, consumer-failure,
+and concurrent disposal regressions. Identical before/after public-pipeline
+benchmarks cover singles, explicit groups of different sizes, mixed submissions,
+and partition routing; allocation and timing benefits are assessed separately.
+
 The permit is acquired before advancing the BufferQueue enumerator. With all
 handler slots occupied, the loop does not consume more work. The bounded
 BufferQueue then holds up to `MaxPendingRequests` queued requests and applies
