@@ -36,4 +36,6 @@ registration work; this suite does not isolate those costs.
 These measurements do not establish whether a typed result box or a different
 completion path would help. Production decisions require a before/after public
 pipeline comparison with real awaiting callers, observed errors, and validated
-responses. Asynchronous tasks remain caller-owned and are not pooled.
+responses. Asynchronous tasks remain caller-owned and are not pooled. See the
+[typed response completion evaluation](typed-response-completion/README.md) for
+a public-pipeline before/after comparison.
