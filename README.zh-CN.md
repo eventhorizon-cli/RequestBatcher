@@ -7,6 +7,24 @@
 
 [English](README.md) | **简体中文**
 
+**请从依赖注入开始：启动时使用 `AddRequestBatcher` 注册，然后从应用程序的 DI 容器获取
+`IRequestBatcher<TRequest>` 来提交请求。**
+
+```csharp
+// At startup: register with the application's IServiceCollection.
+services.AddRequestBatcher<OrderWriteRequest, OrderWriteBatchHandler>(ServiceLifetime.Scoped);
+
+// At the call site: resolve from that application's service provider.
+var batcher = serviceProvider.GetRequiredService<IRequestBatcher<OrderWriteRequest>>();
+await batcher.ProcessAsync(new OrderWriteRequest(OrderId: 1, Amount: 100m));
+```
+
+示例需要引入 `Microsoft.Extensions.DependencyInjection` 和 `RequestBatcher` 命名空间。应用服务中推荐通过
+构造函数注入 `IRequestBatcher<TRequest>`。若需要强类型返回值，请使用
+`AddRequestBatcher<TRequest, TResponse, THandler>` 注册，并注入 `IRequestBatcher<TRequest, TResponse>`。
+请求和 Handler 的定义见下方[无返回值批处理](#无返回值批处理)示例；Handler 所需的依赖
+（例如你自己的 `IOrderStore` 实现）也应注册在同一个容器中。
+
 RequestBatcher 会在 .NET 进程内汇集来自不同调用方的并发请求，将其中已排队的请求合并为批次，交由 Handler
 统一处理。调用方仍可逐项提交并等待各自的 `Task` 或 `Task<TResponse>`，无需关心请求最终进入哪个批次。
 

@@ -7,17 +7,27 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
+**Start with dependency injection: register with `AddRequestBatcher`, then obtain
+`IRequestBatcher<TRequest>` from your application's DI container to submit requests.**
+
+```csharp
+// At startup: register with the application's IServiceCollection.
+services.AddRequestBatcher<OrderWriteRequest, OrderWriteBatchHandler>(ServiceLifetime.Scoped);
+
+// At the call site: resolve from that application's service provider.
+var batcher = serviceProvider.GetRequiredService<IRequestBatcher<OrderWriteRequest>>();
+await batcher.ProcessAsync(new OrderWriteRequest(OrderId: 1, Amount: 100m));
+```
+
+Use `Microsoft.Extensions.DependencyInjection` and `RequestBatcher`. In application services, constructor-inject
+`IRequestBatcher<TRequest>` instead of resolving it manually. For typed results, register with
+`AddRequestBatcher<TRequest, TResponse, THandler>` and inject `IRequestBatcher<TRequest, TResponse>`.
+See the [request and handler definitions](#request-only-batching) below, and register the handler's dependencies
+(such as your `IOrderStore` implementation) in the same container.
+
 RequestBatcher lets application code submit one request and await one `Task` or `Task<TResponse>`, while an
 application handler receives multiple queued requests at a time. It is an in-process way to use a downstream batch
 operation without exposing batch coordination to every caller.
-
-The API entry point is resolved through dependency injection. Register the batcher and its handler with
-`services.AddRequestBatcher<TRequest, THandler>(ServiceLifetime.Scoped)`, then constructor-inject
-`IRequestBatcher<TRequest>` into the component that submits requests. Choose the handler lifetime explicitly.
-
-For typed results, register with `AddRequestBatcher<TRequest, TResponse, THandler>` and inject
-`IRequestBatcher<TRequest, TResponse>`. Both interfaces come from the application's service provider; see the
-[registration and injection examples](#request-only-batching) below.
 
 > **Batching does not require callers to assemble a collection.** Separate callers can each submit one `TRequest`
 > concurrently. RequestBatcher coalesces requests already queued for the same partition into handler batches of up to
