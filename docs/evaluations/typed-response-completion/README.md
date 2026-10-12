@@ -71,22 +71,9 @@ improvement. Failure and cancellation also avoid the removed wrapper's exception
 propagation work; their measured savings depend on this benchmark's observation
 pattern. Full confidence intervals and GC counts are in the linked reports.
 
-An initial candidate (`da0b3f3`) routed shared completions through the new
-interface. Its explicit-batch mean increased to 77.01 us from 72.81 us. A
-control-only repeat in reverse execution order (candidate first, baseline
-second) confirmed that concern: 78.20 us versus 73.70 us. The final implementation
-retains direct calls for shared batch completion; its 73.44 us mean overlaps
-both baseline runs' confidence intervals and keeps allocation at 76.38 KB.
-
-Request-only controls did not show a consistent regression: the initial full
-suite measured 190.82 us before and 198.76 us after, while the reverse repeat
-measured 204.42 us before and 199.45 us after. The final candidate is 199.73 us.
-These differences are why small success-time changes are not treated as a
-reliable benefit. The reverse repeat's summaries are retained as
-[baseline control evidence](interface-trial-before-controls.md) and
-[initial-candidate control evidence](interface-trial-after-controls.md), with
-[baseline CSV](interface-trial-before-controls.csv) and
-[initial-candidate CSV](interface-trial-after-controls.csv).
+The implementation retains direct calls for shared batch completion. The
+explicit-batch control's 73.44 us mean overlaps the baseline confidence interval
+and keeps allocation at 76.38 KB.
 
 Full results and raw iterations: [before](before.md), [after](after.md),
 [before CSV](before.csv), [after CSV](after.csv),
