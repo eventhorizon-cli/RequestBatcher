@@ -40,8 +40,9 @@ The explicit-submission suite uses 512 logical requests per operation, group
 sizes 16 and 256, handler batch size 32, four partitions, concurrency 8, and
 queue capacity 1,024. Mixed waves submit the first 256 requests singly and the
 remaining 256 in groups. Every request's processing count must equal one. A
-gate holds handlers until all returned tasks have waiting continuations. Input
-groups and DI setup are outside measurement; gate reset, submission arrays,
+gate holds handlers until all submissions have been issued and the benchmark
+has created `Task.WhenAll` for their returned tasks; it then releases the wave.
+Input groups and DI setup are outside measurement; gate reset, submission arrays,
 enqueueing, dispatch, waiting, and result validation are included. Each case
 uses two processes, five warmups, twelve measured iterations, and a 300 ms
 iteration target.
