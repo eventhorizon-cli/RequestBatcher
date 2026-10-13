@@ -1,11 +1,11 @@
 namespace RequestBatcher.PendingRequests;
 
-internal sealed class ResponseCompletion<TRequest, TResponse>(RequestBatchItem<TRequest, TResponse> item)
+internal sealed class ResponseCompletion<TRequest, TResponse>(RequestBatchItem<TRequest, TResponse> entry)
     : TaskCompletionSource<TResponse>(TaskCreationOptions.RunContinuationsAsynchronously), IRequestCompletion
 {
     Task IRequestCompletion.Task => Task;
 
-    public void CompleteSuccessfully() => TrySetResult(item.GetResponse());
+    public void CompleteSuccessfully() => TrySetResult(entry.GetResponse());
 
     public void CompleteWithError(Exception exception)
     {

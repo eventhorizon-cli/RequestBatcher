@@ -72,18 +72,18 @@ public sealed class UnkeyedPartitionTests
         var batches = new ConcurrentQueue<int[]>();
 
         await using var provider = CreateResponseProvider(
-            async (items, _) =>
+            async (entries, _) =>
             {
-                if (items[0].Request < 0)
+                if (entries[0].Request < 0)
                 {
-                    items.SetResponses(static _ => "blocked");
-                    entered[-items[0].Request - 1].SetResult();
+                    entries.SetResponses(static _ => "blocked");
+                    entered[-entries[0].Request - 1].SetResult();
                     await release.Task;
                     return;
                 }
 
-                batches.Enqueue(items.Select(item => item.Request).ToArray());
-                items.SetResponses(request => $"response-{request}");
+                batches.Enqueue(entries.Select(entry => entry.Request).ToArray());
+                entries.SetResponses(request => $"response-{request}");
             },
             options =>
             {
@@ -154,8 +154,8 @@ public sealed class UnkeyedPartitionTests
         : IRequestBatchHandler<int, string>
     {
         public ValueTask HandleAsync(
-            IReadOnlyList<RequestBatchItem<int, string>> items,
+            IReadOnlyList<RequestBatchItem<int, string>> entries,
             CancellationToken cancellationToken = default) =>
-            handler(items, cancellationToken);
+            handler(entries, cancellationToken);
     }
 }

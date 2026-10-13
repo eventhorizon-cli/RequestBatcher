@@ -15,12 +15,12 @@ internal sealed class PriceQueryHandler(NpgsqlDataSource dataSource)
         """;
 
     public async ValueTask HandleAsync(
-        IReadOnlyList<RequestBatchItem<PriceQuery, PriceUpdate?>> items,
+        IReadOnlyList<RequestBatchItem<PriceQuery, PriceUpdate?>> entries,
         CancellationToken cancellationToken = default)
     {
-        // Duplicate callers share one database lookup for their product ID.
-        var productIds = items
-            .Select(item => item.Request.ProductId)
+        // Duplicate callers in this handler batch share one database lookup for their product ID.
+        var productIds = entries
+            .Select(entry => entry.Request.ProductId)
             .Distinct()
             .ToArray();
 
@@ -35,6 +35,6 @@ internal sealed class PriceQueryHandler(NpgsqlDataSource dataSource)
         var pricesByProductId = prices.ToDictionary(price => price.ProductId);
 
         // Publish results only after the query succeeds, so a failed batch cannot expose partial results.
-        items.SetResponses(items.Select(item => pricesByProductId.GetValueOrDefault(item.Request.ProductId)));
+        entries.SetResponses(entries.Select(entry => pricesByProductId.GetValueOrDefault(entry.Request.ProductId)));
     }
 }

@@ -340,7 +340,7 @@ public class ResponseCompletionBenchmarks
         public void ReleaseWave() => _gate.Release();
 
         public async ValueTask HandleAsync(
-            IReadOnlyList<RequestBatchItem<int, int>> requests,
+            IReadOnlyList<RequestBatchItem<int, int>> entries,
             CancellationToken cancellationToken = default)
         {
             await _gate.WaitAsync().ConfigureAwait(false);
@@ -349,9 +349,9 @@ public class ResponseCompletionBenchmarks
                 throw new BenchmarkHandlerException();
             }
 
-            foreach (var request in requests)
+            foreach (var entry in entries)
             {
-                request.SetResponse(request.Request);
+                entry.SetResponse(entry.Request);
             }
         }
     }
@@ -400,18 +400,18 @@ public class ResponseCompletionBenchmarks
         public void ReleaseBlocker() => Volatile.Read(ref _releaseBlocker).TrySetResult();
 
         public async ValueTask HandleAsync(
-            IReadOnlyList<RequestBatchItem<BlockedRequest, int>> requests,
+            IReadOnlyList<RequestBatchItem<BlockedRequest, int>> entries,
             CancellationToken cancellationToken = default)
         {
-            foreach (var request in requests)
+            foreach (var entry in entries)
             {
-                if (request.Request.Value == BlockerRequestId)
+                if (entry.Request.Value == BlockerRequestId)
                 {
                     Volatile.Read(ref _blockerStarted).TrySetResult();
                     await Volatile.Read(ref _releaseBlocker).Task.ConfigureAwait(false);
                 }
 
-                request.SetResponse(request.Request.Value);
+                entry.SetResponse(entry.Request.Value);
             }
         }
     }

@@ -8,12 +8,12 @@ internal sealed class ResponseRequestBatcher<TRequest, TResponse>(
 {
     public Task<TResponse> ProcessAsync(TRequest request, CancellationToken cancellationToken = default)
     {
-        var item = new RequestBatchItem<TRequest, TResponse>(request);
-        var completion = new ResponseCompletion<TRequest, TResponse>(item);
-        var submission = batcher.ProcessAsync(item, completion, cancellationToken);
+        var entry = new RequestBatchItem<TRequest, TResponse>(request);
+        var completion = new ResponseCompletion<TRequest, TResponse>(entry);
+        var submission = batcher.ProcessAsync(entry, completion, cancellationToken);
         return ReferenceEquals(submission, completion.Task)
             ? completion.Task
-            : AwaitSubmissionAsync(submission, item);
+            : AwaitSubmissionAsync(submission, entry);
     }
 
     public Task<IReadOnlyList<TResponse>> ProcessAsync(
@@ -22,49 +22,49 @@ internal sealed class ResponseRequestBatcher<TRequest, TResponse>(
     {
         ArgumentNullException.ThrowIfNull(requests);
 
-        return ProcessItemsAsync(requests, cancellationToken);
+        return ProcessEntriesAsync(requests, cancellationToken);
     }
 
     private static async Task<TResponse> AwaitSubmissionAsync(
         Task submission,
-        RequestBatchItem<TRequest, TResponse> item)
+        RequestBatchItem<TRequest, TResponse> entry)
     {
         await submission.ConfigureAwait(false);
-        return item.GetResponse();
+        return entry.GetResponse();
     }
 
-    private async Task<IReadOnlyList<TResponse>> ProcessItemsAsync(
+    private async Task<IReadOnlyList<TResponse>> ProcessEntriesAsync(
         IEnumerable<TRequest> requests,
         CancellationToken cancellationToken)
     {
-        var items = new List<RequestBatchItem<TRequest, TResponse>>();
+        var entries = new List<RequestBatchItem<TRequest, TResponse>>();
         await batcher
-            .ProcessAsync(CreateItems(requests, items), cancellationToken)
+            .ProcessAsync(CreateEntries(requests, entries), cancellationToken)
             .ConfigureAwait(false);
 
-        if (items.Count == 0)
+        if (entries.Count == 0)
         {
             return Array.Empty<TResponse>();
         }
 
-        var responses = new TResponse[items.Count];
-        for (var index = 0; index < items.Count; index++)
+        var responses = new TResponse[entries.Count];
+        for (var index = 0; index < entries.Count; index++)
         {
-            responses[index] = items[index].GetResponse();
+            responses[index] = entries[index].GetResponse();
         }
 
         return responses;
     }
 
-    private static IEnumerable<RequestBatchItem<TRequest, TResponse>> CreateItems(
+    private static IEnumerable<RequestBatchItem<TRequest, TResponse>> CreateEntries(
         IEnumerable<TRequest> requests,
-        ICollection<RequestBatchItem<TRequest, TResponse>> items)
+        ICollection<RequestBatchItem<TRequest, TResponse>> entries)
     {
         foreach (var request in requests)
         {
-            var item = new RequestBatchItem<TRequest, TResponse>(request);
-            items.Add(item);
-            yield return item;
+            var entry = new RequestBatchItem<TRequest, TResponse>(request);
+            entries.Add(entry);
+            yield return entry;
         }
     }
 }

@@ -104,14 +104,14 @@ public static class RequestBatcherServiceCollectionExtensions
         RegisterBatcherPipeline<TRequest>(services);
 
         var configuredOptions = ConfigureOptions(services, configure);
-        var itemOptions = configuredOptions
-            .Project<RequestBatchItem<TRequest, TResponse>>(static item => item.Request);
+        var entryOptions = configuredOptions
+            .Project<RequestBatchItem<TRequest, TResponse>>(static entry => entry.Request);
 
         registerHandler(services);
         AddRequestBatcherCore<RequestBatchItem<TRequest, TResponse>>(
             services,
             handlerLifetime,
-            options => options.CopyFrom(itemOptions),
+            options => options.CopyFrom(entryOptions),
             services => services.Add(new ServiceDescriptor(
                 typeof(IRequestBatchHandler<RequestBatchItem<TRequest, TResponse>>),
                 provider => new ResponseRequestBatchHandler<TRequest, TResponse>(
