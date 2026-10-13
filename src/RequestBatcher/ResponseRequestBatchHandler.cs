@@ -5,14 +5,14 @@ internal sealed class ResponseRequestBatchHandler<TRequest, TResponse>(
     : IRequestBatchHandler<RequestBatchItem<TRequest, TResponse>>
 {
     public async ValueTask HandleAsync(
-        IReadOnlyList<RequestBatchItem<TRequest, TResponse>> requests,
+        IReadOnlyList<RequestBatchItem<TRequest, TResponse>> entries,
         CancellationToken cancellationToken = default)
     {
-        await handler.HandleAsync(requests, cancellationToken).ConfigureAwait(false);
+        await handler.HandleAsync(entries, cancellationToken).ConfigureAwait(false);
 
-        foreach (var request in requests)
+        foreach (var entry in entries)
         {
-            _ = request.GetResponse();
+            _ = entry.GetResponse();
         }
     }
 }

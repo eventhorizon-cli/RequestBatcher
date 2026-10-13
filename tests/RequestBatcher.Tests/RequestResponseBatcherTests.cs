@@ -14,11 +14,11 @@ public sealed class RequestResponseBatcherTests
         handler
             .Setup(subject => subject.HandleAsync(
                 It.Is<IReadOnlyList<RequestBatchItem<ResponseRequest, string>>>(
-                    items => items.Count == 1 && items[0].Request.Value == 42),
+                    entries => entries.Count == 1 && entries[0].Request.Value == 42),
                 It.IsAny<CancellationToken>()))
-            .Returns((IReadOnlyList<RequestBatchItem<ResponseRequest, string>> items, CancellationToken _) =>
+            .Returns((IReadOnlyList<RequestBatchItem<ResponseRequest, string>> entries, CancellationToken _) =>
             {
-                items[0].SetResponse("answer");
+                entries[0].SetResponse("answer");
                 return ValueTask.CompletedTask;
             })
             .Verifiable();
@@ -40,9 +40,9 @@ public sealed class RequestResponseBatcherTests
     public async Task ProcessAsync_ExplicitBatch_ReturnsResponsesInInputOrder()
     {
         await using var provider = CreateProvider<int, string>(
-            (items, _) =>
+            (entries, _) =>
             {
-                items.SetResponses(request => $"response-{request}");
+                entries.SetResponses(request => $"response-{request}");
                 return ValueTask.CompletedTask;
             },
             options =>
@@ -64,9 +64,9 @@ public sealed class RequestResponseBatcherTests
     public async Task ProcessAsync_StringPartitionKey_PreservesConfiguredPartitionCount()
     {
         await using var provider = CreateProvider<ResponseRequest, string>(
-            (items, _) =>
+            (entries, _) =>
             {
-                items.SetResponses(static request => request.Value.ToString());
+                entries.SetResponses(static request => request.Value.ToString());
                 return ValueTask.CompletedTask;
             },
             options => options.UsePartitionKey(
@@ -98,9 +98,9 @@ public sealed class RequestResponseBatcherTests
     public async Task ProcessAsync_HandlerLeavesResponseUnset_FailsHandlerBatch()
     {
         await using var provider = CreateProvider<int, string>(
-            (items, _) =>
+            (entries, _) =>
             {
-                items[0].SetResponse("only-first");
+                entries[0].SetResponse("only-first");
                 return ValueTask.CompletedTask;
             },
             options => options.BatchSize = 2);
@@ -116,10 +116,10 @@ public sealed class RequestResponseBatcherTests
     public async Task ProcessAsync_HandlerSetsResponseTwice_FailsHandlerBatch()
     {
         await using var provider = CreateProvider<int, string>(
-            (items, _) =>
+            (entries, _) =>
             {
-                items[0].SetResponse("first");
-                items[0].SetResponse("second");
+                entries[0].SetResponse("first");
+                entries[0].SetResponse("second");
                 return ValueTask.CompletedTask;
             },
             options => options.BatchSize = 2);
@@ -134,20 +134,20 @@ public sealed class RequestResponseBatcherTests
     [Fact]
     public void SetResponse_SameItemTwice_PreservesFirstResponse()
     {
-        var item = new RequestBatchItem<int, string>(1);
+        var entry = new RequestBatchItem<int, string>(1);
 
-        item.SetResponse("first");
+        entry.SetResponse("first");
 
-        var exception = Assert.Throws<InvalidOperationException>(() => item.SetResponse("second"));
+        var exception = Assert.Throws<InvalidOperationException>(() => entry.SetResponse("second"));
 
         Assert.Contains("already been assigned", exception.Message, StringComparison.Ordinal);
-        Assert.Equal("first", item.GetResponse());
+        Assert.Equal("first", entry.GetResponse());
     }
 
     [Fact]
     public void SetResponses_EnumerableMatchesInputOrder_AssignsResponses()
     {
-        var items = CreateItems();
+        var entries = CreateEntries();
         var enumerationCount = 0;
 
         IEnumerable<string> Responses()
@@ -157,29 +157,29 @@ public sealed class RequestResponseBatcherTests
             yield return "second";
         }
 
-        items.SetResponses(Responses());
+        entries.SetResponses(Responses());
 
         Assert.Equal(1, enumerationCount);
-        Assert.Equal("first", items[0].GetResponse());
-        Assert.Equal("second", items[1].GetResponse());
+        Assert.Equal("first", entries[0].GetResponse());
+        Assert.Equal("second", entries[1].GetResponse());
     }
 
     [Fact]
     public void SetResponses_EnumerableHasDifferentCount_DoesNotAssignAnyResponse()
     {
-        var items = CreateItems();
+        var entries = CreateEntries();
 
-        var exception = Assert.Throws<ArgumentException>(() => items.SetResponses(["first"]));
+        var exception = Assert.Throws<ArgumentException>(() => entries.SetResponses(["first"]));
 
         Assert.Equal("responses", exception.ParamName);
-        AssertResponseIsUnset(items[0]);
-        AssertResponseIsUnset(items[1]);
+        AssertResponseIsUnset(entries[0]);
+        AssertResponseIsUnset(entries[1]);
     }
 
     [Fact]
     public void SetResponses_EnumerationFails_DoesNotAssignAnyResponse()
     {
-        var items = CreateItems();
+        var entries = CreateEntries();
         var expected = new TestBatchException();
 
         IEnumerable<string> Responses()
@@ -188,25 +188,25 @@ public sealed class RequestResponseBatcherTests
             throw expected;
         }
 
-        var actual = Assert.Throws<TestBatchException>(() => items.SetResponses(Responses()));
+        var actual = Assert.Throws<TestBatchException>(() => entries.SetResponses(Responses()));
 
         Assert.Same(expected, actual);
-        AssertResponseIsUnset(items[0]);
-        AssertResponseIsUnset(items[1]);
+        AssertResponseIsUnset(entries[0]);
+        AssertResponseIsUnset(entries[1]);
     }
 
     [Fact]
     public void SetResponses_ResponseFactoryFails_DoesNotAssignAnyResponse()
     {
-        var items = CreateItems();
+        var entries = CreateEntries();
         var expected = new TestBatchException();
 
-        var actual = Assert.Throws<TestBatchException>(() => items.SetResponses(request =>
+        var actual = Assert.Throws<TestBatchException>(() => entries.SetResponses(request =>
             request == 1 ? "first" : throw expected));
 
         Assert.Same(expected, actual);
-        AssertResponseIsUnset(items[0]);
-        AssertResponseIsUnset(items[1]);
+        AssertResponseIsUnset(entries[0]);
+        AssertResponseIsUnset(entries[1]);
     }
 
     [Fact]
@@ -216,10 +216,10 @@ public sealed class RequestResponseBatcherTests
         var invocationCount = 0;
 
         await using var provider = CreateProvider<int, string>(
-            (items, _) =>
+            (entries, _) =>
             {
                 Interlocked.Increment(ref invocationCount);
-                items.SetResponses(static request => request.ToString());
+                entries.SetResponses(static request => request.ToString());
                 return ValueTask.CompletedTask;
             },
             options => options.UsePartitionKey(
@@ -239,9 +239,9 @@ public sealed class RequestResponseBatcherTests
         var selectedKeys = new ConcurrentQueue<int>();
 
         await using var provider = CreateProvider<KeyedResponseRequest, string>(
-            (items, _) =>
+            (entries, _) =>
             {
-                items.SetResponses(static request => request.Value.ToString());
+                entries.SetResponses(static request => request.Value.ToString());
                 return ValueTask.CompletedTask;
             },
             options =>
@@ -268,9 +268,9 @@ public sealed class RequestResponseBatcherTests
         var services = new ServiceCollection();
         AddResponseHandler<int, string>(
             services,
-            (items, _) =>
+            (entries, _) =>
             {
-                items.SetResponses(static request => request.ToString());
+                entries.SetResponses(static request => request.ToString());
                 return ValueTask.CompletedTask;
             });
 
@@ -286,9 +286,9 @@ public sealed class RequestResponseBatcherTests
         var services = new ServiceCollection();
         AddResponseHandler<int, string>(
             services,
-            (items, _) =>
+            (entries, _) =>
             {
-                items.SetResponses(static request => request.ToString());
+                entries.SetResponses(static request => request.ToString());
                 return ValueTask.CompletedTask;
             },
             configure: options =>
@@ -354,9 +354,9 @@ public sealed class RequestResponseBatcherTests
         var services = new ServiceCollection();
         AddResponseHandler<int, string>(
             services,
-            (items, _) =>
+            (entries, _) =>
             {
-                items.SetResponses(static request => request.ToString());
+                entries.SetResponses(static request => request.ToString());
                 return ValueTask.CompletedTask;
             },
             ServiceLifetime.Singleton,
@@ -388,9 +388,9 @@ public sealed class RequestResponseBatcherTests
         var handledRequests = new ConcurrentQueue<int>();
 
         await using var provider = CreateProvider<int, string>(
-            async (items, _) =>
+            async (entries, _) =>
             {
-                var request = Assert.Single(items).Request;
+                var request = Assert.Single(entries).Request;
                 handledRequests.Enqueue(request);
                 if (request == 1)
                 {
@@ -398,7 +398,7 @@ public sealed class RequestResponseBatcherTests
                     await releaseFirstHandler.Task;
                 }
 
-                items[0].SetResponse(request.ToString());
+                entries[0].SetResponse(request.ToString());
             },
             options =>
             {
@@ -427,16 +427,16 @@ public sealed class RequestResponseBatcherTests
         var releaseFirstHandler = NewSource();
 
         await using var provider = CreateProvider<int, string>(
-            async (items, _) =>
+            async (entries, _) =>
             {
-                var request = Assert.Single(items).Request;
+                var request = Assert.Single(entries).Request;
                 if (request == 1)
                 {
                     firstHandlerStarted.SetResult();
                     await releaseFirstHandler.Task;
                 }
 
-                items[0].SetResponse(request.ToString());
+                entries[0].SetResponse(request.ToString());
             },
             options => options.BatchSize = 1);
         var batcher = provider.GetRequiredService<IRequestBatcher<int, string>>();
@@ -475,14 +475,14 @@ public sealed class RequestResponseBatcherTests
             new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
     }
 
-    private static RequestBatchItem<int, string>[] CreateItems() =>
+    private static RequestBatchItem<int, string>[] CreateEntries() =>
     [
         new RequestBatchItem<int, string>(1),
         new RequestBatchItem<int, string>(2),
     ];
 
-    private static void AssertResponseIsUnset(RequestBatchItem<int, string> item) =>
-        Assert.Throws<InvalidOperationException>(() => item.GetResponse());
+    private static void AssertResponseIsUnset(RequestBatchItem<int, string> entry) =>
+        Assert.Throws<InvalidOperationException>(() => entry.GetResponse());
 
     private static TaskCompletionSource NewSource() =>
         new(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -498,9 +498,9 @@ public sealed class RequestResponseBatcherTests
         : IRequestBatchHandler<TRequest, TResponse>
     {
         public ValueTask HandleAsync(
-            IReadOnlyList<RequestBatchItem<TRequest, TResponse>> requests,
+            IReadOnlyList<RequestBatchItem<TRequest, TResponse>> entries,
             CancellationToken cancellationToken = default) =>
-            handler(requests, cancellationToken);
+            handler(entries, cancellationToken);
     }
 
     private sealed class NoResponseHandler : IRequestBatchHandler<int>
@@ -514,7 +514,7 @@ public sealed class RequestResponseBatcherTests
     private sealed class DuplicateResponseHandler : IRequestBatchHandler<int, string>
     {
         public ValueTask HandleAsync(
-            IReadOnlyList<RequestBatchItem<int, string>> requests,
+            IReadOnlyList<RequestBatchItem<int, string>> entries,
             CancellationToken cancellationToken = default) =>
             ValueTask.CompletedTask;
     }
@@ -536,11 +536,11 @@ public sealed class RequestResponseBatcherTests
         private readonly Guid _id = Guid.NewGuid();
 
         public ValueTask HandleAsync(
-            IReadOnlyList<RequestBatchItem<int, string>> requests,
+            IReadOnlyList<RequestBatchItem<int, string>> entries,
             CancellationToken cancellationToken = default)
         {
             probe.HandlerIds.Enqueue(_id);
-            requests.SetResponses(static request => request.ToString());
+            entries.SetResponses(static request => request.ToString());
             return ValueTask.CompletedTask;
         }
 

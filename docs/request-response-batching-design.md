@@ -57,7 +57,7 @@ public interface IRequestBatchHandler<TRequest>
 public interface IRequestBatchHandler<TRequest, TResponse>
 {
     ValueTask HandleAsync(
-        IReadOnlyList<RequestBatchItem<TRequest, TResponse>> requests,
+        IReadOnlyList<RequestBatchItem<TRequest, TResponse>> entries,
         CancellationToken cancellationToken = default);
 }
 ```
@@ -87,11 +87,21 @@ The public registration surface is type-based: applications provide an
 registering the batcher. Request-only and request/response pipelines retain
 their respective submission contracts shown above.
 
+Response-handler parameters and response-assignment extension receivers are named
+`entries`. Static calls using named arguments must use `entries:`; null receiver
+validation reports `entries` as the parameter name. Public types and positional
+calls retain the same contract.
+
 ## Response Items
 
 `RequestBatchItem<TRequest, TResponse>` is the physical request type carried by
 the response pipeline. It exposes the submitted `Request` and one response
 slot.
+
+Variables and parameters use `entry` / `entries` for these wrappers and
+`request` / `requests` for the original `TRequest` values. The public wrapper type
+remains `RequestBatchItem<TRequest, TResponse>`. This naming convention does not
+change routing, response assignment, or the completion flow described below.
 
 The handler sets a response with `SetResponse(TResponse)`. The response slot
 accepts exactly one assignment. A second assignment throws and preserves the
@@ -226,6 +236,10 @@ No nested service provider is created.
 - Pending work is in-process and is not recovered after process failure.
 
 ## Validation
+
+The naming convention is checked by compiling the library, sample, and benchmark
+projects and running the existing response and full test suites on both target
+frameworks; it adds no runtime behavior.
 
 Deterministic tests cover:
 

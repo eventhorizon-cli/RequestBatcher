@@ -16,9 +16,9 @@ public sealed class ResponseCompletionTests
 
         await using var provider = CreateScopedProvider(
             probe,
-            async (items, _) =>
+            async (entries, _) =>
             {
-                items[0].SetResponse("answer");
+                entries[0].SetResponse("answer");
                 handlerStarted.SetResult();
                 await releaseHandler.Task;
             });
@@ -56,9 +56,9 @@ public sealed class ResponseCompletionTests
 
         await using var provider = CreateScopedProvider(
             probe,
-            (items, _) =>
+            (entries, _) =>
             {
-                items[0].SetResponse("ignored");
+                entries[0].SetResponse("ignored");
                 return ValueTask.CompletedTask;
             });
         var batcher = provider.GetRequiredService<IRequestBatcher<int, string>>();
@@ -86,9 +86,9 @@ public sealed class ResponseCompletionTests
         var expected = new TestBatchException();
 
         await using var provider = CreateProvider(
-            (items, _) =>
+            (entries, _) =>
             {
-                items[0].SetResponse("ignored");
+                entries[0].SetResponse("ignored");
                 return ValueTask.FromException(expected);
             });
         var batcher = provider.GetRequiredService<IRequestBatcher<int, string>>();
@@ -107,18 +107,18 @@ public sealed class ResponseCompletionTests
         var targetBatchSize = NewSource<int>();
 
         await using var provider = CreateProvider(
-            async (items, _) =>
+            async (entries, _) =>
             {
-                if (items[0].Request == 0)
+                if (entries[0].Request == 0)
                 {
-                    items[0].SetResponse("blocker");
+                    entries[0].SetResponse("blocker");
                     blockerStarted.SetResult();
                     await releaseBlocker.Task;
                     return;
                 }
 
-                targetBatchSize.SetResult(items.Count);
-                items[0].SetResponse("first");
+                targetBatchSize.SetResult(entries.Count);
+                entries[0].SetResponse("first");
             },
             options => options.BatchSize = 2);
         var batcher = provider.GetRequiredService<IRequestBatcher<int, string>>();
@@ -153,11 +153,11 @@ public sealed class ResponseCompletionTests
         var releaseHandler = NewSource();
 
         await using var provider = CreateProvider(
-            async (items, _) =>
+            async (entries, _) =>
             {
                 handlerStarted.SetResult();
                 await releaseHandler.Task;
-                items[0].SetResponse("success");
+                entries[0].SetResponse("success");
             });
         var batcher = provider.GetRequiredService<IRequestBatcher<int, string>>();
         using var cancellation = new CancellationTokenSource();
@@ -219,16 +219,16 @@ public sealed class ResponseCompletionTests
         var handledRequests = new ConcurrentQueue<int>();
 
         await using var provider = CreateProvider(
-            async (items, _) =>
+            async (entries, _) =>
             {
-                handledRequests.Enqueue(items[0].Request);
-                if (items[0].Request == 1)
+                handledRequests.Enqueue(entries[0].Request);
+                if (entries[0].Request == 1)
                 {
                     handlerStarted.SetResult();
                     await releaseHandler.Task;
                 }
 
-                items[0].SetResponse(items[0].Request.ToString());
+                entries[0].SetResponse(entries[0].Request.ToString());
             },
             options => options.BatchSize = 1);
         var batcher = provider.GetRequiredService<IRequestBatcher<int, string>>();
@@ -261,15 +261,15 @@ public sealed class ResponseCompletionTests
         var releaseHandler = NewSource();
 
         await using var provider = CreateProvider(
-            async (items, _) =>
+            async (entries, _) =>
             {
-                if (items[0].Request == 1)
+                if (entries[0].Request == 1)
                 {
                     handlerStarted.SetResult();
                     await releaseHandler.Task;
                 }
 
-                items[0].SetResponse(items[0].Request.ToString());
+                entries[0].SetResponse(entries[0].Request.ToString());
             },
             options => options.MaxPendingRequests = 1);
         var batcher = provider.GetRequiredService<IRequestBatcher<int, string>>();
@@ -302,15 +302,15 @@ public sealed class ResponseCompletionTests
         var releaseHandler = NewSource();
 
         await using var provider = CreateProvider(
-            async (items, _) =>
+            async (entries, _) =>
             {
-                if (items[0].Request == 1)
+                if (entries[0].Request == 1)
                 {
                     handlerStarted.SetResult();
                     await releaseHandler.Task;
                 }
 
-                items[0].SetResponse(items[0].Request.ToString());
+                entries[0].SetResponse(entries[0].Request.ToString());
             },
             options =>
             {
@@ -452,9 +452,9 @@ public sealed class ResponseCompletionTests
         : IRequestBatchHandler<int, string>
     {
         public ValueTask HandleAsync(
-            IReadOnlyList<RequestBatchItem<int, string>> requests,
+            IReadOnlyList<RequestBatchItem<int, string>> entries,
             CancellationToken cancellationToken = default) =>
-            handler(requests, cancellationToken);
+            handler(entries, cancellationToken);
     }
 
     private sealed class AsyncScopedResponseHandler(
@@ -463,9 +463,9 @@ public sealed class ResponseCompletionTests
         : IRequestBatchHandler<int, string>, IAsyncDisposable
     {
         public ValueTask HandleAsync(
-            IReadOnlyList<RequestBatchItem<int, string>> requests,
+            IReadOnlyList<RequestBatchItem<int, string>> entries,
             CancellationToken cancellationToken = default) =>
-            handler(requests, cancellationToken);
+            handler(entries, cancellationToken);
 
         public async ValueTask DisposeAsync()
         {
@@ -483,10 +483,10 @@ public sealed class ResponseCompletionTests
     private sealed class ResponseValueHandler : IRequestBatchHandler<int, ResponseValue>
     {
         public ValueTask HandleAsync(
-            IReadOnlyList<RequestBatchItem<int, ResponseValue>> requests,
+            IReadOnlyList<RequestBatchItem<int, ResponseValue>> entries,
             CancellationToken cancellationToken = default)
         {
-            requests[0].SetResponse(new ResponseValue(requests[0].Request));
+            entries[0].SetResponse(new ResponseValue(entries[0].Request));
             return ValueTask.CompletedTask;
         }
     }

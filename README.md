@@ -213,13 +213,13 @@ public sealed class PriceQueryHandler(IPriceStore store)
     : IRequestBatchHandler<PriceQuery, PriceQuote?>
 {
     public async ValueTask HandleAsync(
-        IReadOnlyList<RequestBatchItem<PriceQuery, PriceQuote?>> items,
+        IReadOnlyList<RequestBatchItem<PriceQuery, PriceQuote?>> entries,
         CancellationToken cancellationToken = default)
     {
         var responses = await store.FindAsync(
-            items.Select(item => item.Request.ProductId),
+            entries.Select(entry => entry.Request.ProductId),
             cancellationToken);
-        items.SetResponses(responses);
+        entries.SetResponses(responses);
     }
 }
 
@@ -236,8 +236,8 @@ public sealed class PriceService(IRequestBatcher<PriceQuery, PriceQuote?> priceB
 }
 ```
 
-The handler must set exactly one response for every item before it returns. `item.SetResponse(response)` sets one
-item directly; `items.SetResponses(responses)` maps the nth response in the enumeration to the nth request item. The
+The handler must set exactly one response for every item before it returns. `entry.SetResponse(response)` sets one
+item directly; `entries.SetResponses(responses)` maps the nth response in the enumeration to the nth request item. The
 response enumeration must therefore have the same request order and one entry per item.
 The caller's `Task<TResponse>` completes only after the handler succeeds and its item's response has been set.
 

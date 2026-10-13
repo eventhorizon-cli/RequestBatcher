@@ -200,13 +200,13 @@ public sealed class PriceQueryHandler(IPriceStore store)
     : IRequestBatchHandler<PriceQuery, PriceQuote?>
 {
     public async ValueTask HandleAsync(
-        IReadOnlyList<RequestBatchItem<PriceQuery, PriceQuote?>> items,
+        IReadOnlyList<RequestBatchItem<PriceQuery, PriceQuote?>> entries,
         CancellationToken cancellationToken = default)
     {
         var responses = await store.FindAsync(
-            items.Select(item => item.Request.ProductId),
+            entries.Select(entry => entry.Request.ProductId),
             cancellationToken);
-        items.SetResponses(responses);
+        entries.SetResponses(responses);
     }
 }
 
@@ -223,8 +223,8 @@ public sealed class PriceService(IRequestBatcher<PriceQuery, PriceQuote?> priceB
 }
 ```
 
-Handler 返回前，必须为每个请求设置一次返回值，不能遗漏或重复设置。`item.SetResponse(response)` 用于设置
-单个请求的返回值；`items.SetResponses(responses)` 用于按请求顺序批量设置。批量设置时，结果必须与请求数量一致、
+Handler 返回前，必须为每个请求设置一次返回值，不能遗漏或重复设置。`entry.SetResponse(response)` 用于设置
+单个请求的返回值；`entries.SetResponses(responses)` 用于按请求顺序批量设置。批量设置时，结果必须与请求数量一致、
 顺序对应。只有 Handler 成功完成且对应请求的返回值已设置，调用方的 `Task<TResponse>` 才会成功完成。
 
 ## 显式批量提交
