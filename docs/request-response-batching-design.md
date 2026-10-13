@@ -120,6 +120,47 @@ first value.
 After a response handler completes successfully, every item is validated. An
 unset item fails its handler batch.
 
+## Key-Based Response Assignment and Deduplication
+
+When backend results are unordered or omit missing keys, handlers index the
+results by a business key and use the existing
+`SetResponses(Func<TRequest, TResponse> responseFactory)` overload. The factory
+receives each original `TRequest` once per entry, including duplicate requests.
+It resolves a result by key without depending on backend result order. The sample
+returns null for missing products; applications choose their own missing-result
+policy. All responses are computed before assignment, so a factory failure leaves
+previously unset entries unchanged. Reference-type results may be shared between
+duplicate callers; the library does not clone them.
+
+The response sample deduplicates lookup keys with standard LINQ `Distinct`,
+performs one backend query for those keys, builds a result dictionary, and calls
+`entries.SetResponses(request => resultsByKey.GetValueOrDefault(request.Key))`.
+All original entries remain available for response assignment. To omit query
+deduplication, remove `Distinct` and retain the same response factory. Grouping
+is unnecessary for lookup deduplication; standard LINQ `GroupBy` remains useful
+when a handler must aggregate multiple requests, such as selecting the latest
+version in the write sample. No additional grouping or response-assignment API
+is introduced.
+
+Deduplication applies only within a handler invocation. The business lookup key
+is independent of `UsePartitionKey`; duplicate keys in separate batches can
+perform backend operations concurrently. Response assignment does not publish
+caller success before the handler, full response validation, and scope disposal
+finish.
+
+README examples include DI registration, handler implementation, and single and
+explicit-batch submission. One response handler demonstrates deduplicated lookup
+and key-based assignment. Comments explain two other assignment styles: setting
+each entry individually, or passing an already aligned response sequence to the
+ordered overload. Ordered sequences must have exactly one response per original
+entry in input order, including duplicates and missing results; raw unordered
+database results must not be passed directly to that overload.
+
+Validation compiles all three README variants, including the commented assignment
+alternatives, and exercises duplicate and missing keys against the PostgreSQL
+sample. Existing tests cover ordered response completion and response-factory
+failure; this sample and documentation change retains production API behavior.
+
 ## Internal Flow
 
 The response facade creates one item for every caller request and submits those

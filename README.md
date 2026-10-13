@@ -194,17 +194,24 @@ request; the caller does not need to know which batch or partition contained it.
 
 ## Request/Response Batching
 
-Use the response-enabled API when each request should return a value. The handler receives an item containing the
-original request and its response slot:
+Use the response-enabled API when each request should return a value. The handler receives entries that wrap the
+original request and its response slot; `entry.Request` is the original `TRequest`. This example deduplicates repeated
+product IDs within the current handler batch before querying the store:
 
 ```csharp
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using RequestBatcher;
+
 public sealed record PriceQuery(long ProductId);
 public sealed record PriceQuote(long ProductId, decimal Price);
 
 public interface IPriceStore
 {
-    // The store returns one entry per input ID, in the same order.
-    Task<IReadOnlyList<PriceQuote?>> FindAsync(
+    // The store returns at most one found quote per requested ID, in any order.
+    Task<IReadOnlyList<PriceQuote>> FindAsync(
         IEnumerable<long> productIds,
         CancellationToken cancellationToken);
 }
@@ -216,16 +223,36 @@ public sealed class PriceQueryHandler(IPriceStore store)
         IReadOnlyList<RequestBatchItem<PriceQuery, PriceQuote?>> entries,
         CancellationToken cancellationToken = default)
     {
-        var responses = await store.FindAsync(
-            entries.Select(entry => entry.Request.ProductId),
+        var keys = entries
+            .Select(entry => entry.Request.ProductId)
+            .Distinct()
+            .ToArray();
+        var prices = await store.FindAsync(
+            keys,
             cancellationToken);
-        entries.SetResponses(responses);
+        var pricesByProductId = prices.ToDictionary(price => price.ProductId);
+
+        entries.SetResponses(request => pricesByProductId.GetValueOrDefault(request.ProductId));
+
+        // If query deduplication is unnecessary, remove Distinct() and keep the response factory.
+        // Alternatively, replace the query and assignment above with ONE of these styles:
+        // 1. Query all requested IDs, then assign each entry directly:
+        // var prices = await store.FindAsync(entries.Select(entry => entry.Request.ProductId), cancellationToken);
+        // var pricesByProductId = prices.ToDictionary(price => price.ProductId);
+        // foreach (var entry in entries)
+        // {
+        //     entry.SetResponse(pricesByProductId.GetValueOrDefault(entry.Request.ProductId));
+        // }
+        // 2. If an already aligned response sequence is available, use the ordered overload:
+        // var prices = await store.FindAsync(entries.Select(entry => entry.Request.ProductId), cancellationToken);
+        // var pricesByProductId = prices.ToDictionary(price => price.ProductId);
+        // var orderedResponses = entries
+        //     .Select(entry => pricesByProductId.GetValueOrDefault(entry.Request.ProductId))
+        //     .ToArray();
+        // entries.SetResponses(orderedResponses);
+        // Never pass raw backend results to the ordered overload: they may be unordered or omit missing keys.
     }
 }
-
-services.AddRequestBatcher<PriceQuery, PriceQuote?, PriceQueryHandler>(
-    ServiceLifetime.Scoped,
-    options => options.BatchSize = 256);
 
 public sealed class PriceService(IRequestBatcher<PriceQuery, PriceQuote?> priceBatcher)
 {
@@ -233,12 +260,41 @@ public sealed class PriceService(IRequestBatcher<PriceQuery, PriceQuote?> priceB
         long productId,
         CancellationToken cancellationToken = default) =>
         priceBatcher.ProcessAsync(new PriceQuery(productId), cancellationToken);
+
+    public Task<IReadOnlyList<PriceQuote?>> FindManyAsync(
+        IEnumerable<PriceQuery> requests,
+        CancellationToken cancellationToken = default) =>
+        priceBatcher.ProcessAsync(requests, cancellationToken);
 }
 ```
 
-The handler must set exactly one response for every item before it returns. `entry.SetResponse(response)` sets one
-item directly; `entries.SetResponses(responses)` maps the nth response in the enumeration to the nth request item. The
-response enumeration must therefore have the same request order and one entry per item.
+Register your application's `IPriceStore` implementation (shown as `PriceStore`) and the batcher in the existing
+service collection, then inject `IRequestBatcher<PriceQuery, PriceQuote?>` into application services. The runnable
+[PostgreSQL Web API sample](samples/RequestBatcher.Deduplication) implements the same lookup flow directly with Dapper and PostgreSQL.
+
+```csharp
+using Microsoft.Extensions.DependencyInjection;
+using RequestBatcher;
+
+services.AddScoped<IPriceStore, PriceStore>();
+services.AddRequestBatcher<PriceQuery, PriceQuote?, PriceQueryHandler>(
+    ServiceLifetime.Scoped,
+    options => options.BatchSize = 256);
+```
+
+The handler must set exactly one response for every item before it returns. The example uses standard LINQ `Distinct`
+to query each product ID once within the current handler invocation. `Distinct` also supports anonymous composite keys,
+value tuples, and custom equality comparers. Missing product IDs are absent from the store result and map to `null`.
+It does not combine entries across handler batches or queue partitions. The selector overload evaluates the raw request
+for every entry after the unordered backend result has been indexed by key, so duplicate entries receive the same response.
+All responses are computed before assignment; a factory failure leaves unset entries unchanged. Reference-type results
+are shared, not cloned.
+
+If deduplication is unnecessary, remove `Distinct()` and keep the same response factory. Alternatively, assign entries
+individually with `entry.SetResponse(response)`, or use the ordered `entries.SetResponses(responses)` overload after producing exactly one response per original entry in input order,
+including duplicates and missing requests. The keyed selector overload is recommended for unordered backend results;
+the ordered overload must receive the aligned sequence, never raw backend rows. The explicit-group overload returns
+responses in input order even when RequestBatcher splits the requests across handler batches or queue partitions.
 The caller's `Task<TResponse>` completes only after the handler succeeds and its item's response has been set.
 
 ## Explicit Group Submission
