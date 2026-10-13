@@ -181,17 +181,24 @@ public sealed class OrderService(IRequestBatcher<OrderWriteRequest> batcher)
 
 ## 带返回值批处理
 
-如果每个请求都需要返回一个值，请使用带返回值的 API。Handler 接收一组
-`RequestBatchItem<TRequest, TResponse>`，通过每项的 `Request` 属性读取原始请求，并为该请求设置返回值：
+如果每个请求都需要返回一个值，请使用带返回值的 API。Handler 接收一组包装原始请求和返回值槽位的
+`RequestBatchItem<TRequest, TResponse>`，其中 `entry.Request` 是原始的 `TRequest`。下面的示例使用标准 LINQ
+`Distinct`，先在当前处理批次内合并重复的商品 ID，再查询存储层：
 
 ```csharp
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using RequestBatcher;
+
 public sealed record PriceQuery(long ProductId);
 public sealed record PriceQuote(long ProductId, decimal Price);
 
 public interface IPriceStore
 {
-    // 存储层按相同顺序为每个输入 ID 返回一个结果。
-    Task<IReadOnlyList<PriceQuote?>> FindAsync(
+    // The store returns at most one found quote per requested ID, in any order.
+    Task<IReadOnlyList<PriceQuote>> FindAsync(
         IEnumerable<long> productIds,
         CancellationToken cancellationToken);
 }
@@ -203,16 +210,36 @@ public sealed class PriceQueryHandler(IPriceStore store)
         IReadOnlyList<RequestBatchItem<PriceQuery, PriceQuote?>> entries,
         CancellationToken cancellationToken = default)
     {
-        var responses = await store.FindAsync(
-            entries.Select(entry => entry.Request.ProductId),
+        var keys = entries
+            .Select(entry => entry.Request.ProductId)
+            .Distinct()
+            .ToArray();
+        var prices = await store.FindAsync(
+            keys,
             cancellationToken);
-        entries.SetResponses(responses);
+        var pricesByProductId = prices.ToDictionary(price => price.ProductId);
+
+        entries.SetResponses(request => pricesByProductId.GetValueOrDefault(request.ProductId));
+
+        // If query deduplication is unnecessary, remove Distinct() and keep the response factory.
+        // Alternatively, replace the query and assignment above with ONE of these styles:
+        // 1. Query all requested IDs, then assign each entry directly:
+        // var prices = await store.FindAsync(entries.Select(entry => entry.Request.ProductId), cancellationToken);
+        // var pricesByProductId = prices.ToDictionary(price => price.ProductId);
+        // foreach (var entry in entries)
+        // {
+        //     entry.SetResponse(pricesByProductId.GetValueOrDefault(entry.Request.ProductId));
+        // }
+        // 2. If an already aligned response sequence is available, use the ordered overload:
+        // var prices = await store.FindAsync(entries.Select(entry => entry.Request.ProductId), cancellationToken);
+        // var pricesByProductId = prices.ToDictionary(price => price.ProductId);
+        // var orderedResponses = entries
+        //     .Select(entry => pricesByProductId.GetValueOrDefault(entry.Request.ProductId))
+        //     .ToArray();
+        // entries.SetResponses(orderedResponses);
+        // Never pass raw backend results to the ordered overload: they may be unordered or omit missing keys.
     }
 }
-
-services.AddRequestBatcher<PriceQuery, PriceQuote?, PriceQueryHandler>(
-    ServiceLifetime.Scoped,
-    options => options.BatchSize = 256);
 
 public sealed class PriceService(IRequestBatcher<PriceQuery, PriceQuote?> priceBatcher)
 {
@@ -220,12 +247,39 @@ public sealed class PriceService(IRequestBatcher<PriceQuery, PriceQuote?> priceB
         long productId,
         CancellationToken cancellationToken = default) =>
         priceBatcher.ProcessAsync(new PriceQuery(productId), cancellationToken);
+
+    public Task<IReadOnlyList<PriceQuote?>> FindManyAsync(
+        IEnumerable<PriceQuery> requests,
+        CancellationToken cancellationToken = default) =>
+        priceBatcher.ProcessAsync(requests, cancellationToken);
 }
 ```
 
-Handler 返回前，必须为每个请求设置一次返回值，不能遗漏或重复设置。`entry.SetResponse(response)` 用于设置
-单个请求的返回值；`entries.SetResponses(responses)` 用于按请求顺序批量设置。批量设置时，结果必须与请求数量一致、
-顺序对应。只有 Handler 成功完成且对应请求的返回值已设置，调用方的 `Task<TResponse>` 才会成功完成。
+先在应用现有的服务集合中注册应用自己的 `IPriceStore` 实现（示例中写作 `PriceStore`）和 Batcher，再在应用服务中注入
+`IRequestBatcher<PriceQuery, PriceQuote?>`。可运行的 [PostgreSQL Web API 示例](samples/RequestBatcher.Deduplication)
+直接用 Dapper 和 PostgreSQL 实现同样的查询流程：
+
+```csharp
+using Microsoft.Extensions.DependencyInjection;
+using RequestBatcher;
+
+services.AddScoped<IPriceStore, PriceStore>();
+services.AddRequestBatcher<PriceQuery, PriceQuote?, PriceQueryHandler>(
+    ServiceLifetime.Scoped,
+    options => options.BatchSize = 256);
+```
+
+Handler 返回前，必须为每个请求设置一次返回值，不能遗漏或重复设置。示例使用标准 LINQ `Distinct`，只为当前
+Handler 调用中的每个不同商品 ID 查询一次存储层。`Distinct` 也支持匿名组合键、值元组和自定义相等比较器。存储层未
+返回的商品 ID 会映射为 `null`；它不会合并不同处理批次或不同队列 Partition 中的 entry。selector 重载会在后端无序
+结果按 key 建立字典后，为每个 entry 的原始 request 执行一次，因此重复 entry 会得到相同返回值。所有返回值计算
+成功后才会统一赋值；factory 抛出异常不会留下部分赋值。引用类型结果会被共享，不会复制。
+
+如果不需要去重，移除 `Distinct()` 并保留相同的 response factory 即可。还可以选择逐个调用
+`entry.SetResponse(response)`，或先生成严格按原始输入顺序排列、包含重复和缺失请求位置的结果，再调用
+`entries.SetResponses(responses)`。面向 key 的 selector 重载适合
+后端无序结果；有序重载不能直接接收后端原始行。显式批量重载即使将请求拆到多个处理批次或队列 Partition，仍会按输入顺序返回结果。
+只有 Handler 成功完成且对应请求的返回值已设置，调用方的 `Task<TResponse>` 才会成功完成。
 
 ## 显式批量提交
 

@@ -34,7 +34,19 @@ internal sealed class PriceQueryHandler(NpgsqlDataSource dataSource)
                 cancellationToken: cancellationToken)).ConfigureAwait(false);
         var pricesByProductId = prices.ToDictionary(price => price.ProductId);
 
-        // Publish results only after the query succeeds, so a failed batch cannot expose partial results.
-        entries.SetResponses(entries.Select(entry => pricesByProductId.GetValueOrDefault(entry.Request.ProductId)));
+        // Resolve every original request, including duplicates, without depending on database row order.
+        // Missing products return null. The factory receives TRequest, not its entry wrapper.
+        entries.SetResponses(request => pricesByProductId.GetValueOrDefault(request.ProductId));
+
+        // If query deduplication is unnecessary, remove Distinct() above and keep the same response factory.
+        // Two other assignment styles are available; use only ONE style for each entry:
+        // 1. Assign each entry individually:
+        // foreach (var entry in entries)
+        //     entry.SetResponse(pricesByProductId.GetValueOrDefault(entry.Request.ProductId));
+        // 2. Assign an already aligned response sequence:
+        // var responses = entries.Select(entry => pricesByProductId.GetValueOrDefault(entry.Request.ProductId));
+        // entries.SetResponses(responses);
+        // This overload requires input order and exactly one result per original entry, including duplicates and
+        // missing keys. Do not pass database rows directly; map them back to the entries as shown above.
     }
 }

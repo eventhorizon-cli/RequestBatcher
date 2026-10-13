@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.0.9
+
+- Name response wrapper variables and public parameters `entry` / `entries`, while retaining the public
+  `RequestBatchItem<TRequest, TResponse>` type. Named calls to response handlers and static `SetResponses` calls
+  must use `entries:`; null receiver validation also reports `entries`.
+- Demonstrate deduplicated lookup keys and key-based response assignment with the existing
+  `SetResponses(Func<TRequest, TResponse>)` overload, without relying on backend result order.
+- Expand the English, Chinese, and NuGet READMEs with DI registration, single and explicit-batch response submission,
+  missing-result handling, and commented individual and ordered assignment alternatives. Synchronize the PostgreSQL
+  sample and clarify that lookup deduplication applies only within each handler batch.
+
 ## 0.0.8
 
 - Require an explicit partition count with `UsePartitionKey(selector, partitionCount)`; the selector-only overloads

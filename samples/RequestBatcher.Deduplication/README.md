@@ -4,9 +4,18 @@ This is a small RequestBatcher example. Concurrent `POST /prices` calls are coll
 handler keeps the highest version for each product and writes its batch with one Dapper PostgreSQL upsert.
 
 Concurrent `GET /prices/{productId}` calls are also batched. The query handler deduplicates product IDs, performs one
-PostgreSQL query for the distinct IDs, and distributes each returned price to all matching callers.
-Deduplication applies within each handler batch; separate batches may query the same product again. A dictionary maps
-each result back to every original entry, so database result order does not matter and missing products return null.
+PostgreSQL query for the distinct IDs, and distributes each returned price to all matching callers. The query handler
+uses LINQ `Distinct()` on product IDs and then calls
+`entries.SetResponses(request => pricesByProductId.GetValueOrDefault(request.ProductId))`.
+The factory receives the original request once per entry, including duplicates; database result order does not matter
+and missing products return null. Reference-type results are shared, not cloned. Deduplication applies within each
+handler batch; separate batches may query the same product again.
+
+If query deduplication is unnecessary, remove `Distinct()` and keep the same response factory. The query handler also
+shows two commented assignment alternatives: `entry.SetResponse(response)` for individual entries, or
+`entries.SetResponses(responses)` for an already aligned response sequence. Use one assignment approach per entry.
+The ordered-sequence overload requires exactly one response per original entry in input order, including duplicates
+and missing products; do not pass the database rows directly to it.
 
 `UsePartitionKey(update => update.ProductId, partitionCount: 4)` keeps equal product IDs in one of four keyed processing
 partitions while allowing
