@@ -421,9 +421,10 @@ builder.Services.AddRequestBatcher<ProductQueryItem, ProductBatchHandler>(
 
 ### 用利特尔法则（Little’s Law）估算 `MaxConcurrency`
 
-利特尔法则应该应用在 Handler 批次流量上，而不是直接应用在请求项流量上。对于已有功能，可以从现有监控指标中取得
-同一种下游批量操作的批次到达率（`λ_batch`，单位为 QPS）和平均响应时间（`RT`，单位为秒）；对于新功能，可以先使用
-预期批次到达率、目标响应时间或压测结果进行估算。两项数据必须针对同一种操作：
+利特尔法则应该应用在 Handler 批次流量上，而不是直接应用在请求项流量上。以查询为例，如果一次 Handler 批次对应
+一次下游批量查询，那么应使用批量查询 QPS（`λ_batch`，即每秒批量查询次数）和平均响应时间（`RT`，单位为秒）。
+对于已有功能，可以从现有监控指标中取得这两个值；对于新功能，可以先使用预期查询 QPS、目标响应时间或压测结果
+进行估算。QPS 和响应时间必须针对同一种查询操作：
 
 ```text
 并发中的批次数 = λ_batch x RT
@@ -432,7 +433,7 @@ L = λ x W
 
 其中，`L` 表示在途 Handler 批次数，`λ` 表示批次到达率，`W` 表示平均响应时间。
 
-如果已经有批次到达率和响应时间，可以直接估算整个集群的在途批次数：
+如果已经有批量查询 QPS 和响应时间，可以直接估算整个集群的在途批次数：
 
 ```text
 单 Pod MaxConcurrency ≈ ceil(λ_batch x RT / Pod 数量 x 安全系数)
@@ -444,8 +445,8 @@ L = λ x W
 设置 `MaxConcurrency = 16` 可提供总计 96 个名额。这是平均负载下的估算，不是延迟或吞吐保证。是否提高或降低它，还要结合队列等待、下游限流、CPU 和连接池上限
 重新测量。
 
-如果监控的是请求项 QPS，就要按每个 Partition 分别测量有效批次大小。对于 Partition `p`，设 `λ_item,p` 为该
-Partition 的请求项到达率，`B_eff,p` 为实测的平均每批请求项数量，`RT_p` 为该批次 Handler 的平均响应时间：
+如果监控的是商品项或请求项 QPS，就要按每个 Partition 分别测量有效批次大小。对于 Partition `p`，设 `λ_item,p`
+为该 Partition 的请求项 QPS，`B_eff,p` 为实测的平均每批请求项数量，`RT_p` 为该批次 Handler 的平均响应时间：
 
 ```text
 λ_batch,p ≈ λ_item,p / B_eff,p

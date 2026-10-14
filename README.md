@@ -440,10 +440,11 @@ A single partition can also supply several concurrent batches.
 
 ### Sizing `MaxConcurrency` with Little's Law
 
-Use Little's Law on handler-batch traffic, not directly on item traffic. For an existing operation, obtain the batch-call
-rate (`λ_batch`, in QPS) and mean response time (`RT`, in seconds) from monitoring metrics. For a new operation, use its
-expected batch rate and target response time or a load-test result as the initial estimate. Use the same operation for both
-values:
+Use Little's Law on handler-batch traffic, not directly on item traffic. For example, if one handler batch issues one
+downstream batch query, use the batch-query QPS (`λ_batch`, queries per second) and its mean response time (`RT`, in
+seconds). For an existing operation, obtain them from monitoring metrics; for a new operation, use the expected query QPS
+and target response time or a load-test result as the initial estimate. Keep the QPS and response time for the same query
+operation:
 
 ```text
 Concurrency (in flight) = λ_batch × RT
@@ -452,7 +453,7 @@ L = λ x W
 
 Here, `L` is the number of in-flight handler batches, `λ` is their arrival rate, and `W` is their mean response time.
 
-If the batch rate and response time are available, estimate the cluster-wide in-flight batch count with
+If the batch-query QPS and response time are available, estimate the cluster-wide in-flight batch count with
 `L = λ_batch × RT`. Divide by the number of active pods and round up, then add a small safety margin. Expected values
 produce a starting configuration; replace them with production metrics after the feature is running.
 
