@@ -29,9 +29,9 @@ RequestBatcher 采用 **机会式合并（Opportunistic Merging）**：请求写
 > `TRequest`；RequestBatcher 会将同一 Partition 中已排队的零散请求合并为最多 `BatchSize` 项的处理批次。
 > `ProcessAsync(IEnumerable<TRequest>)` 只是额外的提交方式，并不是产生批量处理的前提。
 
-![多个请求合并示意](docs/assets/request-batcher-request-coalescing.zh-CN.png)
+![请求合并示意图](docs/assets/request-batcher-request-coalescing.zh-CN.png)
 
-多个独立的并发请求可以先合并为一个批次，再执行一次下游批量操作。图中只是示例：只有已在同一 Partition 排队的请求
+多个独立的并发请求可以先合并为一个批次，再执行一次下游批量操作。图示仅用于说明：只有已经在同一 Partition 中排队的请求
 才可能合并为同一批。
 
 ## 安装与 DI 注册
@@ -369,16 +369,16 @@ RequestBatcher 会先为请求序列创建快照，再统一提交给内部队�
 单个批次设置额外的收集窗口：只要有执行名额，它就会立即用当前已排队的请求发起 Handler 调用，即使只有一个请求。
 `BatchSize` 只限制单次调用的最大请求数。
 
-![RequestBatcher 架构](docs/assets/request-batcher-architecture.zh-CN.png)
+![RequestBatcher 架构图](docs/assets/request-batcher-architecture.zh-CN.png)
 
-架构图展示协调器、内存队列中的各个 Partition，以及每个已接收请求独立完成 `Task` 的详细路径。
+架构图展示了协调器、内存队列中的各个 Partition，以及每个已接收请求独立完成 `Task` 的处理路径。
 
-### 调度方式
+### 调度流程
 
 `H = MaxConcurrency` 是全局同时执行的 Handler 批次数上限。未配置 Partition Key 时，内部只有一个 Partition；配置
 数值或字符串 Partition Key 时，`P` 是传给 `UsePartitionKey` 的显式 Partition 数量。
 
-![内部调度设计](docs/assets/request-batcher-dispatch-scheduling.zh-CN.png)
+![内部调度流程](docs/assets/request-batcher-dispatch-scheduling.zh-CN.png)
 
 一个 `BatchDispatchLoop` 负责所有 Partition，并共享同一组全局执行名额。它只有在取得执行名额后才会从队列拉取
 批次，因此请求只在 BufferQueue 中等待，不会进入应用自行维护的转交队列。名额按一次 Handler 批次调用完成释放，
