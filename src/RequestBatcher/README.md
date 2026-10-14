@@ -1,11 +1,54 @@
 # RequestBatcher
 
-**Start with dependency injection: register with `AddRequestBatcher`, then obtain
-`IRequestBatcher<TRequest>` from your application's DI container to submit requests.**
+## How Batches Are Formed: Opportunistic Merging
+
+RequestBatcher uses [BufferQueue](https://github.com/eventhorizon-cli/BufferQueue) to combine queued requests within a
+.NET process and pass them to an application handler. Callers obtain `IRequestBatcher<TRequest>` or
+`IRequestBatcher<TRequest, TResponse>` through DI, submit requests, and await their individual results. The current
+dependency is [BufferQueue 2.0.3](https://www.nuget.org/packages/BufferQueue/2.0.3); applications do not register or
+configure it separately.
+
+RequestBatcher uses **Opportunistic Merging**. Writing a request to BufferQueue signals that data is available and wakes
+the consumer path. When an execution slot is free, RequestBatcher pulls the requests already queued. Consumption is
+triggered by a push notification and uses a pull API to retrieve the batch; there is no periodic polling or fixed
+collection window. With a free slot, waiting mainly comes from wake-up and scheduling; when all slots are occupied,
+requests must wait for capacity to execute. `BatchSize` limits the number of requests per handler call: a batch may
+contain just one request at low traffic or several requests already queued in the same partition during a burst.
+
+Requests are held in memory and cannot be recovered after a process failure.
+
+> **Batching does not require callers to assemble a collection.** Separate callers can each submit one `TRequest`
+> concurrently. RequestBatcher coalesces requests already queued for the same partition into handler batches of up to
+> `BatchSize`. `ProcessAsync(IEnumerable<TRequest>)` is an additional submission option, not a prerequisite for
+> batching.
+
+[Full documentation](https://github.com/eventhorizon-cli/RequestBatcher#readme) |
+[简体中文](https://github.com/eventhorizon-cli/RequestBatcher/blob/main/README.zh-CN.md)
+
+## Installation and DI Registration
+
+```bash
+dotnet add package RequestBatcher
+```
+
+The package supports .NET 8 and .NET 10 applications through `net8.0` and `net10.0` assets.
+
+Register the handler and batcher with `AddRequestBatcher` at startup. At the call site, resolve
+`IRequestBatcher<TRequest>` from the same DI container or inject it into an application service's constructor.
 
 ```csharp
 // At startup: register with the application's IServiceCollection.
-services.AddRequestBatcher<OrderWriteRequest, OrderWriteBatchHandler>(ServiceLifetime.Scoped);
+services.AddRequestBatcher<OrderWriteRequest, OrderWriteBatchHandler>(
+    ServiceLifetime.Scoped,
+    options =>
+    {
+        // Four concurrent handler batches, shared by all eight queue partitions.
+        options.MaxConcurrency = 4;
+        options.BatchSize = 100;
+        options.MaxPendingRequests = 5_000;
+        // Equal order IDs route to the same partition; separate batches can still run concurrently.
+        options.UsePartitionKey(request => request.OrderId, partitionCount: 8);
+    });
 
 // At the call site: resolve from that application's service provider.
 var batcher = serviceProvider.GetRequiredService<IRequestBatcher<OrderWriteRequest>>();
@@ -17,31 +60,6 @@ Use `Microsoft.Extensions.DependencyInjection` and `RequestBatcher`. In applicat
 `AddRequestBatcher<TRequest, TResponse, THandler>` and inject `IRequestBatcher<TRequest, TResponse>`.
 See the [request and handler definitions](#request-only-batching) below, and register the handler's dependencies
 (such as your `IOrderStore` implementation) in the same container.
-
-RequestBatcher lets application code submit one request and await one `Task` or `Task<TResponse>`, while an
-application handler receives multiple queued requests as an `IReadOnlyList<TRequest>` or
-`IReadOnlyList<RequestBatchItem<TRequest, TResponse>>`.
-
-> **Batching does not require callers to assemble a collection.** Separate callers can each submit one `TRequest`
-> concurrently. RequestBatcher coalesces requests already queued for the same partition into handler batches of up to
-> `BatchSize`. `ProcessAsync(IEnumerable<TRequest>)` is an additional submission option, not a prerequisite for
-> batching.
-
-[Full documentation](https://github.com/eventhorizon-cli/RequestBatcher#readme) |
-[简体中文](https://github.com/eventhorizon-cli/RequestBatcher/blob/main/README.zh-CN.md)
-
-## APIs
-
-### Request-Only
-
-`IRequestBatcher<TRequest>` returns `Task` after an `IRequestBatchHandler<TRequest>` has processed the submitted
-request, or every request in an explicit group.
-
-### Request/Response
-
-`IRequestBatcher<TRequest, TResponse>` returns `Task<TResponse>` for one request or `Task<IReadOnlyList<TResponse>>`
-for an explicit group, with responses in input order. Its `IRequestBatchHandler<TRequest, TResponse>` assigns exactly
-one response to each request item and returns `ValueTask`.
 
 ## When to Use It
 
@@ -62,13 +80,18 @@ suitable when an in-flight downstream operation must stop as soon as its individ
 cancels. One handler batch can contain requests from several callers, so caller cancellation tokens are not forwarded
 to the handler and cannot cancel the shared handler call.
 
-## Install
+## APIs
 
-```bash
-dotnet add package RequestBatcher
-```
+### Request-Only
 
-The package supports .NET 8 and .NET 10 applications through `net8.0` and `net10.0` assets.
+`IRequestBatcher<TRequest>` returns `Task` after an `IRequestBatchHandler<TRequest>` has processed the submitted
+request, or every request in an explicit group.
+
+### Request/Response
+
+`IRequestBatcher<TRequest, TResponse>` returns `Task<TResponse>` for one request or `Task<IReadOnlyList<TResponse>>`
+for an explicit group, with responses in input order. Its `IRequestBatchHandler<TRequest, TResponse>` assigns exactly
+one response to each request item and returns `ValueTask`.
 
 ## Request-Only Batching
 
@@ -106,7 +129,10 @@ services.AddRequestBatcher<OrderWriteRequest, OrderWriteBatchHandler>(
     ServiceLifetime.Scoped,
     options =>
     {
+        options.MaxConcurrency = 4;
         options.BatchSize = 256;
+        options.MaxPendingRequests = 5_000;
+        options.UsePartitionKey(request => request.OrderId, partitionCount: 8);
     });
 ```
 
@@ -212,7 +238,13 @@ using RequestBatcher;
 services.AddScoped<IPriceStore, PriceStore>();
 services.AddRequestBatcher<PriceQuery, PriceQuote?, PriceQueryHandler>(
     ServiceLifetime.Scoped,
-    options => options.BatchSize = 256);
+    options =>
+    {
+        options.MaxConcurrency = 4;
+        options.BatchSize = 100;
+        options.MaxPendingRequests = 5_000;
+        options.UsePartitionKey(query => query.ProductId, partitionCount: 8);
+    });
 ```
 
 The handler must set exactly one response for every item before it returns. The example uses standard LINQ `Distinct`
@@ -268,6 +300,71 @@ key. `MaxConcurrency = 1` limits handler concurrency but does not merge keyed pa
 | Completion | Represents this request's actual outcome. | Waits for every item in the submission. |
 | Failure | Fails when its handler batch fails. | Can contain both successful work and failed work; the returned `Task` faults without rolling back successes. |
 | Cancellation | Cancels only before dispatch. | Applies one token to every item; dispatched items still report their actual outcome. |
+
+## Configuration
+
+| Option | Default | Behavior |
+| --- | ---: | --- |
+| `BatchSize` | `128` | Maximum requests passed to one handler call. |
+| `MaxConcurrency` | `1` | Maximum concurrent handler batches. It is independent of the keyed partition count. |
+| `MaxPendingRequests` | `8192` | Internal BufferQueue capacity for requests that have not yet been pulled for execution. |
+| `FullMode` | `Wait` | Waits for capacity; `Fail` rejects immediately when capacity is unavailable. |
+| `UsePartitionKey(selector, partitionCount)` | Not set | Enables keyed routing with the explicitly configured partition count; `partitionCount` must be greater than one and equal keys use one partition. |
+
+No ordering is guaranteed for handler execution, including when `MaxConcurrency = 1`.
+
+### Partitions and Concurrency
+
+This configuration uses eight queue partitions sharing four handler execution slots:
+
+```csharp
+builder.Services.AddRequestBatcher<ProductQueryItem, ProductBatchHandler>(
+    ServiceLifetime.Scoped,
+    options =>
+    {
+        // Per-pod downstream limit. Six pods x four slots = at most 24 handler batches cluster-wide.
+        options.MaxConcurrency = 4;
+        options.BatchSize = 100;
+        options.MaxPendingRequests = 5_000;
+
+        // Routing/locality only. Eight queue partitions are independent of the four execution slots.
+        options.UsePartitionKey(item => item.ProductId, partitionCount: 8);
+    });
+```
+
+`partitionCount` controls how requests are distributed across queues; equal keys always route to the same partition.
+`MaxConcurrency` limits concurrent handler batches for one registered batcher, with all partitions sharing those slots.
+A single partition can also supply several concurrent batches.
+
+### Size `MaxConcurrency` with Little's Law
+
+Estimate concurrency from downstream batch-call QPS and mean response time. Measure both for the same operation and
+express response time in seconds:
+
+```text
+Concurrency (in flight) = arrival rate (QPS) x response time (seconds)
+L = λ x W
+```
+
+Assuming one handler invocation issues one downstream batch operation and holds its slot until that operation completes,
+if the downstream metrics are batch-call QPS and batch response time, estimate the cluster-wide in-flight batch count
+with `L = QPS_batch × RT_batch`. Divide by the number of active pods and round up, then add a small safety margin:
+
+```text
+MaxConcurrency_per_pod ≈ ceil(QPS_batch × RT_batch_seconds / pod_count × headroom)
+```
+
+For example, six active pods handling 480 downstream batch calls/second at a 50 ms mean response time need about
+`480 × 0.050 = 24` in-flight batch calls. With evenly distributed traffic, `MaxConcurrency = 4` gives four slots per pod
+and 24 slots across six pods. This estimates average load; it does not guarantee latency or throughput. Adjust the limit
+using measured queue wait, downstream throttling, CPU, and connection limits.
+
+When QPS is measured per item but one handler call sends an effective average of `B` items, estimate cluster-wide batch slots as
+`ceil(QPS_item × RT_batch_seconds / B)` then divide by the pod count and round up.
+Re-measure after changing `BatchSize`, because the effective batch size and response time can change together.
+
+`MaxPendingRequests` is a backlog limit, not another execution slot count. Choose it from the amount of queueing you are
+willing to absorb (`request-item QPS per batcher × acceptable queue time`), then verify admission latency and memory use under bursts.
 
 ## Batching and Capacity
 
@@ -325,7 +422,7 @@ services.AddRequestBatcher<OrderWriteRequest, OrderWriteBatchHandler>(
         options.MaxConcurrency = 4;
 
         // Optional. Without a partition-key function, all requests use one shared partition.
-        options.UsePartitionKey(request => request.OrderId, partitionCount: 4);
+        options.UsePartitionKey(request => request.OrderId, partitionCount: 8);
     });
 ```
 
