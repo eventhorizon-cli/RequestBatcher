@@ -1,9 +1,9 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="720" viewBox="0 0 1500 720" role="img" aria-labelledby="title description">
+<svg xmlns="http://www.w3.org/2000/svg" width="1720" height="650" viewBox="0 0 1720 650" role="img" aria-labelledby="title description">
 <title id="title">Opportunistic merging consumer loop</title><desc id="description">Acquire a slot, try pulling, dispatch a batch, then repeat. Wait for notifications only when all assigned partitions have no data.</desc>
 <defs>
 <marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto" markerUnits="strokeWidth"><path d="M0 0 L9 4.5 L0 9 Z" fill="#596773"/></marker>
 <style>
-text { font-family: Arial, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill:#303b44; text-anchor:middle; font-size:24px; }
+text { font-family: Arial, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill:#303b44; text-anchor:middle; font-size:22px; }
 .node { stroke-width:2; }
 .core { fill:#edf1f5; stroke:#596773; }
 .handler { fill:#f4edfb; stroke:#75529b; }
@@ -14,28 +14,28 @@ text { font-family: Arial, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill:#3
 .label { font-size:22px; }
 .note { font-size:21px; fill:#596773; }
 </style></defs>
-<rect width="1500" height="720" fill="white"/>
-<path class="edge" d="M350 275 H470"/>
-<path class="edge" d="M870 275 H1040"/>
-<path class="edge" d="M1220 220 V90 H200 V220"/>
-<path class="edge" d="M670 380 V520"/>
-<path class="edge control" d="M500 575 H410 V275 H470"/>
-<path class="edge control" d="M1040 575 H840"/>
-<rect class="node core" x="50" y="220" width="300" height="110" rx="8"/>
-<path class="node core" d="M670 170 L870 275 L670 380 L470 275 Z"/>
-<rect class="node handler" x="1040" y="220" width="360" height="110" rx="8"/>
-<rect class="node wait" x="500" y="520" width="340" height="110" rx="8"/>
-<rect class="node client" x="1040" y="520" width="360" height="110" rx="8"/>
+<rect width="1720" height="650" fill="white"/>
+<path class="edge control" d="M370 355 H460"/>
+<path class="edge control" d="M800 355 H860"/>
+<path class="edge" d="M1060 170 V250"/>
+<path class="edge" d="M1260 355 H1340"/>
+<path class="edge" d="M1515 300 V115 H1210"/>
+<path class="edge" d="M1060 460 V540 H630 V410"/>
+<rect class="node client" x="30" y="300" width="340" height="110" rx="8"/>
+<rect class="node wait" x="460" y="300" width="340" height="110" rx="8"/>
+<rect class="node core" x="910" y="60" width="300" height="110" rx="8"/>
+<path class="node core" d="M1060 250 L1260 355 L1060 460 L860 355 Z"/>
+<rect class="node handler" x="1340" y="300" width="350" height="110" rx="8"/>
 
-<text x="200" y="266" class=""><tspan x="200" dy="0">Acquire an execution slot</tspan><tspan x="200" dy="34">wait if all slots are in use</tspan></text>
-<text x="670" y="266" class=""><tspan x="670" dy="0">Try pulling the next batch</tspan><tspan x="670" dy="34">Data available?</tspan></text>
-<text x="1220" y="266" class=""><tspan x="1220" dy="0">Start the handler batch</tspan><tspan x="1220" dy="34">release its slot when finished</tspan></text>
-<text x="670" y="566" class=""><tspan x="670" dy="0">Wait for a push notification</tspan><tspan x="670" dy="34">idle while there is no traffic</tspan></text>
-<text x="1220" y="566" class=""><tspan x="1220" dy="0">Requests enter the queue</tspan><tspan x="1220" dy="34">BufferQueue signals new data</tspan></text>
-<text x="710" y="65" class="label"><tspan x="710" dy="0">Continue dispatching without waiting for the previous batch to finish</tspan></text>
-<text x="955" y="253" class="label"><tspan x="955" dy="0">Yes</tspan></text>
-<text x="770" y="434" class="label"><tspan x="770" dy="0">No data in any</tspan><tspan x="770" dy="30">assigned partition</tspan></text>
-<text x="310" y="430" class="label"><tspan x="310" dy="0">On notification,</tspan><tspan x="310" dy="30">try pulling again</tspan></text>
-<text x="940" y="550" class="label"><tspan x="940" dy="0">push notification</tspan></text>
-<text x="750" y="690" class="note"><tspan x="750" dy="0">Pull up to BatchSize queued requests from one partition; no wait to fill a batch and no collection window.</tspan></text>
+<text x="200" y="346" class=""><tspan x="200" dy="0">Requests enter the queue</tspan><tspan x="200" dy="34">BufferQueue signals new data</tspan></text>
+<text x="630" y="346" class=""><tspan x="630" dy="0">Wait for a push notification</tspan><tspan x="630" dy="34">idle while there is no traffic</tspan></text>
+<text x="1060" y="106" class=""><tspan x="1060" dy="0">Acquire an execution slot</tspan><tspan x="1060" dy="34">wait if all slots are in use</tspan></text>
+<text x="1060" y="346" class=""><tspan x="1060" dy="0">Try pulling the next batch</tspan><tspan x="1060" dy="34">Data available?</tspan></text>
+<text x="1515" y="346" class=""><tspan x="1515" dy="0">Start the handler batch</tspan><tspan x="1515" dy="34">release its slot when finished</tspan></text>
+<text x="1450" y="55" class="label"><tspan x="1450" dy="0">Continue dispatching</tspan><tspan x="1450" dy="30">without awaiting the last batch</tspan></text>
+<text x="1300" y="332" class="label"><tspan x="1300" dy="0">Yes</tspan></text>
+<text x="845" y="520" class="label"><tspan x="845" dy="0">No data in any assigned partition</tspan></text>
+<text x="830" y="332" class="label"><tspan x="830" dy="0">wake</tspan></text>
+<text x="415" y="332" class="label"><tspan x="415" dy="0">push</tspan></text>
+<text x="860" y="625" class="note"><tspan x="860" dy="0">Pull up to BatchSize queued requests from one partition; no wait to fill a batch and no collection window.</tspan></text>
 </svg>
