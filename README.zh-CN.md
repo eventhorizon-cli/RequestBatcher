@@ -46,20 +46,20 @@ dotnet add package RequestBatcher
 `IRequestBatcher<TRequest>`，或在应用服务的构造函数中注入它。
 
 ```csharp
-// At startup: register with the application's IServiceCollection.
+// 应用启动时，在应用的 IServiceCollection 中注册。
 services.AddRequestBatcher<OrderWriteRequest, OrderWriteBatchHandler>(
     ServiceLifetime.Scoped,
     options =>
     {
-        // Four concurrent handler batches, shared by all eight queue partitions.
+        // 4 个 Handler 批次并发执行名额，由 8 个队列 Partition 共享。
         options.MaxConcurrency = 4;
         options.BatchSize = 100;
         options.MaxPendingRequests = 5_000;
-        // Equal order IDs route to the same partition; separate batches can still run concurrently.
+        // 相同的订单 ID 路由到同一 Partition；不同批次仍可能并发执行。
         options.UsePartitionKey(request => request.OrderId, partitionCount: 8);
     });
 
-// At the call site: resolve from that application's service provider.
+// 调用处从应用自己的 Service Provider 获取服务。
 var batcher = serviceProvider.GetRequiredService<IRequestBatcher<OrderWriteRequest>>();
 await batcher.ProcessAsync(new OrderWriteRequest(OrderId: 1, Amount: 100m));
 ```
@@ -101,21 +101,53 @@ RequestBatcher 既不是持久化后台队列，也不是事务协调器：
 
 调用方只需要知道 Handler 是否成功完成时，使用 `IRequestBatcher<TRequest>`：
 
-| 使用方 | API | 含义 |
-| --- | --- | --- |
-| 调用方 | `Task ProcessAsync(TRequest)` | 提交一个请求，返回反映该请求实际处理结果的 `Task`。 |
-| 调用方 | `Task ProcessAsync(IEnumerable<TRequest>)` | 提交调用方已持有的一组请求，返回等待整次提交完成的 `Task`。 |
-| Handler | `ValueTask IRequestBatchHandler<TRequest>.HandleAsync(IReadOnlyList<TRequest>)` | 处理一批请求，无需为每个请求设置返回值。 |
+```csharp
+public interface IRequestBatcher<in TRequest>
+{
+    // 提交一个请求，等待它实际的 Handler 处理结果。
+    Task ProcessAsync(TRequest request, CancellationToken cancellationToken = default);
+
+    // 提交调用方已有的一组请求；返回的 Task 等待整次提交完成。
+    Task ProcessAsync(
+        IEnumerable<TRequest> requests,
+        CancellationToken cancellationToken = default);
+}
+
+public interface IRequestBatchHandler<TRequest>
+{
+    // 处理一个批次；成功返回后，该批次中的所有请求都会完成。
+    ValueTask HandleAsync(
+        IReadOnlyList<TRequest> requests,
+        CancellationToken cancellationToken = default);
+}
+```
 
 ### 带返回值 API
 
 每个已接收请求都需要一个强类型返回值时，使用 `IRequestBatcher<TRequest, TResponse>`：
 
-| 使用方 | API | 含义 |
-| --- | --- | --- |
-| 调用方 | `Task<TResponse> ProcessAsync(TRequest)` | 提交一个请求，返回其 `Task<TResponse>`。 |
-| 调用方 | `Task<IReadOnlyList<TResponse>> ProcessAsync(IEnumerable<TRequest>)` | 提交调用方已持有的一组请求，按输入顺序返回结果。 |
-| Handler | `ValueTask IRequestBatchHandler<TRequest, TResponse>.HandleAsync(IReadOnlyList<RequestBatchItem<TRequest, TResponse>>)` | 处理一批请求，并为每个请求设置一次返回值。 |
+```csharp
+public interface IRequestBatcher<in TRequest, TResponse>
+{
+    // 提交一个请求，返回它的强类型结果。
+    Task<TResponse> ProcessAsync(
+        TRequest request,
+        CancellationToken cancellationToken = default);
+
+    // 提交一组请求，返回结果的顺序与输入序列保持一致。
+    Task<IReadOnlyList<TResponse>> ProcessAsync(
+        IEnumerable<TRequest> requests,
+        CancellationToken cancellationToken = default);
+}
+
+public interface IRequestBatchHandler<TRequest, TResponse>
+{
+    // 处理一个批次，并为每个 entry 设置且仅设置一个结果。
+    ValueTask HandleAsync(
+        IReadOnlyList<RequestBatchItem<TRequest, TResponse>> entries,
+        CancellationToken cancellationToken = default);
+}
+```
 
 RequestBatcher 只会在内部等待每次 Handler 调用返回的 `ValueTask` 一次，不会将它返回给调用方。同步完成的 Handler
 可以因此避免分配 `Task`；普通异步 I/O 仍可直接使用 `async ValueTask` 实现。
@@ -193,7 +225,7 @@ public sealed record PriceQuote(long ProductId, decimal Price);
 
 public interface IPriceStore
 {
-    // The store returns at most one found quote per requested ID, in any order.
+    // 存储层对每个请求的 ID 最多返回一条结果，返回顺序不固定。
     Task<IReadOnlyList<PriceQuote>> FindAsync(
         IEnumerable<long> productIds,
         CancellationToken cancellationToken);
@@ -217,23 +249,23 @@ public sealed class PriceQueryHandler(IPriceStore store)
 
         entries.SetResponses(request => pricesByProductId.GetValueOrDefault(request.ProductId));
 
-        // If query deduplication is unnecessary, remove Distinct() and keep the response factory.
-        // Alternatively, replace the query and assignment above with ONE of these styles:
-        // 1. Query all requested IDs, then assign each entry directly:
+        // 如果不需要查询去重，可以删除 Distinct()，保留同一个响应工厂。
+        // 也可以将上面的查询和赋值替换为下面两种方式之一：
+        // 1. 查询所有请求 ID，再逐个为 entry 设置结果：
         // var prices = await store.FindAsync(entries.Select(entry => entry.Request.ProductId), cancellationToken);
         // var pricesByProductId = prices.ToDictionary(price => price.ProductId);
         // foreach (var entry in entries)
         // {
         //     entry.SetResponse(pricesByProductId.GetValueOrDefault(entry.Request.ProductId));
         // }
-        // 2. If an already aligned response sequence is available, use the ordered overload:
+        // 2. 已经得到与输入顺序对齐的结果序列时，使用按顺序赋值的重载：
         // var prices = await store.FindAsync(entries.Select(entry => entry.Request.ProductId), cancellationToken);
         // var pricesByProductId = prices.ToDictionary(price => price.ProductId);
         // var orderedResponses = entries
         //     .Select(entry => pricesByProductId.GetValueOrDefault(entry.Request.ProductId))
         //     .ToArray();
         // entries.SetResponses(orderedResponses);
-        // Never pass raw backend results to the ordered overload: they may be unordered or omit missing keys.
+        // 不要将原始后端结果直接传给按顺序赋值的重载：结果可能无序，也可能缺少某些请求的 ID。
     }
 }
 

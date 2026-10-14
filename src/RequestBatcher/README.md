@@ -90,13 +90,57 @@ to the handler and cannot cancel the shared handler call.
 ### Request-Only
 
 `IRequestBatcher<TRequest>` returns `Task` after an `IRequestBatchHandler<TRequest>` has processed the submitted
-request, or every request in an explicit group.
+request, or every request in an explicit group:
+
+```csharp
+public interface IRequestBatcher<in TRequest>
+{
+    // Submit one request and wait for its actual handler outcome.
+    Task ProcessAsync(TRequest request, CancellationToken cancellationToken = default);
+
+    // Submit an existing group; the task waits for every request in that submission.
+    Task ProcessAsync(
+        IEnumerable<TRequest> requests,
+        CancellationToken cancellationToken = default);
+}
+
+public interface IRequestBatchHandler<TRequest>
+{
+    // Process one handler batch. A successful return completes every request in the batch.
+    ValueTask HandleAsync(
+        IReadOnlyList<TRequest> requests,
+        CancellationToken cancellationToken = default);
+}
+```
 
 ### Request/Response
 
 `IRequestBatcher<TRequest, TResponse>` returns `Task<TResponse>` for one request or `Task<IReadOnlyList<TResponse>>`
 for an explicit group, with responses in input order. Its `IRequestBatchHandler<TRequest, TResponse>` assigns exactly
-one response to each request item and returns `ValueTask`.
+one response to each request item and returns `ValueTask`:
+
+```csharp
+public interface IRequestBatcher<in TRequest, TResponse>
+{
+    // Submit one request and return its typed response.
+    Task<TResponse> ProcessAsync(
+        TRequest request,
+        CancellationToken cancellationToken = default);
+
+    // Submit a group and return responses in the same order as the input sequence.
+    Task<IReadOnlyList<TResponse>> ProcessAsync(
+        IEnumerable<TRequest> requests,
+        CancellationToken cancellationToken = default);
+}
+
+public interface IRequestBatchHandler<TRequest, TResponse>
+{
+    // Process one batch and assign exactly one response to every entry.
+    ValueTask HandleAsync(
+        IReadOnlyList<RequestBatchItem<TRequest, TResponse>> entries,
+        CancellationToken cancellationToken = default);
+}
+```
 
 ## Request-Only Batching
 
