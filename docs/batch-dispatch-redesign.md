@@ -142,6 +142,23 @@ scope resolution, delays the next pull even if other execution slots are free.
 The dispatch loop does not offload each handler to the ThreadPool. The in-flight tracker is used only to
 observe terminal drain and task failures without creating a second queue.
 
+`RequestBatchConsumer` reuses the queue's immutable pending-item snapshot when
+all requests enter processing. On the first skipped request, it creates a
+filtered list containing the requests already started, then appends any later
+requests that enter processing. The returned collection contains only active
+requests, and its `Count` always represents the number to process; callers do
+not maintain a separate valid length. Batches without skipped items do not
+allocate a second pending-item collection, and fully canceled batches do not
+invoke the handler. Handler-facing request arrays remain independently
+allocated; no buffers, tasks, or request objects are pooled. Request selection
+and handler-input construction use synchronous helpers, leaving the execution
+method responsible for invoking the handler and propagating its outcome. Public APIs,
+cancellation boundaries, failure fan-out, and shutdown behavior are unchanged.
+Tests cover skipped items at the start, middle, and end, overlapping batches
+with different outcomes, exactly-once finish callbacks, and handler inputs
+retained across subsequent dispatches. The delayed-downstream benchmark checks
+allocation and timing under both sustained single/batch submissions and bursts.
+
 The coordinator keeps accepted requests in a concurrent pending registry so
 terminal request completion does not take the lifecycle lock for every item.
 Admission and stop transitions still use the lifecycle lock. A finished item
