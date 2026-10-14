@@ -7,6 +7,10 @@
 
 [English](README.md) | **简体中文**
 
+RequestBatcher 是一个运行在进程内的 .NET 批处理库，用于将单个请求组织成下游批量操作。调用方可以逐个提交请求并
+等待各自的结果；RequestBatcher 会合并已经排队的请求，限制 Handler 批次并发数和队列容量，再将批次交给应用的
+Handler 处理。它适用于支持一次处理多个数据项的数据库、缓存和下游 API。
+
 ## 批次形成方式：机会式合并
 
 RequestBatcher 基于 [BufferQueue](https://github.com/eventhorizon-cli/BufferQueue)，将 .NET 进程内已排队的并发请求

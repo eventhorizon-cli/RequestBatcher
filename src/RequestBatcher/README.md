@@ -1,5 +1,10 @@
 # RequestBatcher
 
+RequestBatcher is an in-process .NET library for turning individual requests into downstream batch operations. Callers
+submit one request at a time and await their own result, while RequestBatcher combines requests that are already queued,
+limits handler-batch concurrency and queue capacity, and invokes the application handler with a batch. It is intended for
+database, cache, and API operations that support processing multiple items together.
+
 ## How Batches Are Formed: Opportunistic Merging
 
 RequestBatcher uses [BufferQueue](https://github.com/eventhorizon-cli/BufferQueue) to combine queued requests within a
