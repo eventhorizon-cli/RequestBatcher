@@ -11,6 +11,11 @@ RequestBatcher 是一个运行在进程内的 .NET 批处理库，用于将单�
 并等待各自的结果；RequestBatcher 会合并已经排队的请求，限制 Handler 批次并发数和队列容量，再将批次交给应用的
 Handler 处理。它适用于支持一次处理多个数据项的数据库、缓存和下游 API。
 
+![请求合并示意图](docs/assets/request-batcher-request-coalescing.zh-CN.png)
+
+多个独立的并发请求可以先合并为一个批次，再执行一次下游批量操作。图示仅用于说明：只有已经在同一 Partition 中排队的请求
+才可能合并为同一批。
+
 ## 请求如何合并：机会式合并
 
 RequestBatcher 基于 [BufferQueue](https://github.com/eventhorizon-cli/BufferQueue)，将 .NET 进程内已经排队的并发请求
@@ -18,21 +23,23 @@ RequestBatcher 基于 [BufferQueue](https://github.com/eventhorizon-cli/BufferQu
 `IRequestBatcher<TRequest, TResponse>`，提交请求并等待各自的结果。当前依赖
 [BufferQueue 2.0.3](https://www.nuget.org/packages/BufferQueue/2.0.3)，应用无需单独注册或配置它。
 
-RequestBatcher 采用 **机会式合并（Opportunistic Merging）**：请求写入 BufferQueue 后会发出可用数据通知，唤醒消费
-流程；只要有空闲执行名额，就会拉取当前已排队的请求。消费流程由 push 通知唤醒，再通过 pull API 取得批次，不依赖
-定时轮询，也没有固定的收集窗口。有空闲名额时，等待主要来自唤醒和调度；名额占满时，请求仍需排队。
+RequestBatcher 采用 **机会式合并（Opportunistic Merging）**：请求写入 BufferQueue 后会发出数据可用通知，唤醒等待中的
+消费流程。调度循环先取得空闲执行名额，再通过 pull API 拉取当前已排队的请求；分发批次后便继续循环，只要还有名额，
+就可以继续拉取和分发，无需等待刚分发的批次完成。只有扫描所有分配的 Partition 都没有数据时，才等待下一次 push 通知。
+
+这个过程不依赖定时轮询，也没有固定的收集窗口。有空闲名额时，等待主要来自唤醒和调度；名额占满时，请求仍需排队。
 `BatchSize` 只限制每批的最大数量：低流量时一批可能只有一个请求，突发流量时则可能合并同一 Partition 中的多个请求。
+
+![机会式合并流程图](docs/assets/request-batcher-opportunistic-merging.zh-CN.png)
+
+图中展示正常消费流程，省略了取消与停止分支。[BufferQueue 的消费循环](https://github.com/eventhorizon-cli/BufferQueue/blob/90c6208f940592f797ab8cf78ad4af88d1163649/src/BufferQueue/BufferPullConsumer.cs#L59)
+会在进入等待前检查通知版本；如果这期间有新数据通知到达，就重新尝试拉取，避免漏掉唤醒。
 
 请求仅保存在进程内，进程故障后无法恢复尚未完成的请求。
 
 > **调用方无需先收集请求，也能获得批量处理。** 多个调用方可以并发地各自提交一个
 > `TRequest`；RequestBatcher 会将同一 Partition 中已排队的零散请求合并为最多 `BatchSize` 项的处理批次。
 > `ProcessAsync(IEnumerable<TRequest>)` 只是额外的提交方式，并不是产生批量处理的前提。
-
-![多个请求合并示意](docs/assets/request-batcher-request-coalescing.zh-CN.png)
-
-多个独立的并发请求可以先合并为一个批次，再执行一次下游批量操作。图中只是示例：只有已在同一 Partition 排队的请求
-才可能合并为同一批。
 
 ## 安装与 DI 注册
 
@@ -42,12 +49,16 @@ dotnet add package RequestBatcher
 
 包提供 `net8.0` 和 `net10.0` 资产，支持 .NET 8 和 .NET 10 应用。
 
-启动时通过 `AddRequestBatcher` 注册 Handler 和批处理服务；调用时从同一个 DI 容器获取
-`IRequestBatcher<TRequest>`，或在应用服务的构造函数中注入它。
+启动时通过 `AddRequestBatcher` 注册带返回值的 Handler 和批处理服务。Handler 依赖应用自己的 `IPriceStore` 实现；调用时从
+同一个 DI 容器获取 `IRequestBatcher<PriceQuery, PriceQuote?>`，或在应用服务的构造函数中注入它。
 
 ```csharp
-// 应用启动时，在应用的 IServiceCollection 中注册。
-services.AddRequestBatcher<OrderWriteRequest, OrderWriteBatchHandler>(
+using Microsoft.Extensions.DependencyInjection;
+using RequestBatcher;
+
+// 应用启动时，注册存储服务和带返回值的批处理服务。
+services.AddScoped<IPriceStore, PriceStore>();
+services.AddRequestBatcher<PriceQuery, PriceQuote?, PriceQueryHandler>(
     ServiceLifetime.Scoped,
     options =>
     {
@@ -55,20 +66,18 @@ services.AddRequestBatcher<OrderWriteRequest, OrderWriteBatchHandler>(
         options.MaxConcurrency = 4;
         options.BatchSize = 100;
         options.MaxPendingRequests = 5_000;
-        // 相同的订单 ID 路由到同一 Partition；不同批次仍可能并发执行。
-        options.UsePartitionKey(request => request.OrderId, partitionCount: 8);
+        // 相同的商品 ID 路由到同一 Partition；不同批次仍可能并发执行。
+        options.UsePartitionKey(query => query.ProductId, partitionCount: 8);
     });
 
-// 调用处从应用自己的 Service Provider 获取服务。
-var batcher = serviceProvider.GetRequiredService<IRequestBatcher<OrderWriteRequest>>();
-await batcher.ProcessAsync(new OrderWriteRequest(OrderId: 1, Amount: 100m));
+// 调用处从应用自己的 Service Provider 获取带返回值的泛型接口。
+var batcher = serviceProvider.GetRequiredService<IRequestBatcher<PriceQuery, PriceQuote?>>();
+var quote = await batcher.ProcessAsync(new PriceQuery(ProductId: 101));
 ```
 
-代码示例需要引入 `Microsoft.Extensions.DependencyInjection` 和 `RequestBatcher` 命名空间。应用服务中推荐通过
-构造函数注入 `IRequestBatcher<TRequest>`。若需要强类型返回值，请使用
-`AddRequestBatcher<TRequest, TResponse, THandler>` 注册，并注入 `IRequestBatcher<TRequest, TResponse>`。
-请求和 Handler 的定义见下方[无返回值批处理](#无返回值批处理)示例；Handler 所需的依赖
-（例如你自己的 `IOrderStore` 实现）也应注册在同一个容器中。
+代码示例需要引入 `Microsoft.Extensions.DependencyInjection` 和 `RequestBatcher` 命名空间。下方[带返回值批处理](#带返回值批处理)定义了
+`PriceQuery`、`PriceQuote`、`PriceQueryHandler` 以及 `IPriceStore` 依赖。应用服务中推荐通过构造函数注入
+`IRequestBatcher<PriceQuery, PriceQuote?>`。
 
 ## 适用场景
 
@@ -369,16 +378,16 @@ RequestBatcher 会先为请求序列创建快照，再统一提交给内部队�
 单个批次设置额外的收集窗口：只要有执行名额，它就会立即用当前已排队的请求发起 Handler 调用，即使只有一个请求。
 `BatchSize` 只限制单次调用的最大请求数。
 
-![RequestBatcher 架构](docs/assets/request-batcher-architecture.zh-CN.png)
+![RequestBatcher 架构图](docs/assets/request-batcher-architecture.zh-CN.png)
 
-架构图展示协调器、内存队列中的各个 Partition，以及每个已接收请求独立完成 `Task` 的详细路径。
+架构图展示了协调器、内存队列中的各个 Partition，以及每个已接收请求独立完成 `Task` 的处理路径。
 
-### 调度方式
+### 调度流程
 
 `H = MaxConcurrency` 是全局同时执行的 Handler 批次数上限。未配置 Partition Key 时，内部只有一个 Partition；配置
 数值或字符串 Partition Key 时，`P` 是传给 `UsePartitionKey` 的显式 Partition 数量。
 
-![内部调度设计](docs/assets/request-batcher-dispatch-scheduling.zh-CN.png)
+![内部调度流程](docs/assets/request-batcher-dispatch-scheduling.zh-CN.png)
 
 一个 `BatchDispatchLoop` 负责所有 Partition，并共享同一组全局执行名额。它只有在取得执行名额后才会从队列拉取
 批次，因此请求只在 BufferQueue 中等待，不会进入应用自行维护的转交队列。名额按一次 Handler 批次调用完成释放，
@@ -421,26 +430,47 @@ builder.Services.AddRequestBatcher<ProductQueryItem, ProductBatchHandler>(
 
 ### 用利特尔法则（Little’s Law）估算 `MaxConcurrency`
 
-用下游批量调用的 QPS 和平均响应时间估算所需并发数。两个指标必须针对同一种操作，响应时间换算为秒：
+利特尔法则应该应用在 Handler 批次流量上，而不是直接应用在请求项流量上。以查询为例，如果一次 Handler 批次对应
+一次下游批量查询，那么应使用批量查询 QPS（`λ_batch`，即每秒批量查询次数）和平均响应时间（`RT`，单位为秒）。
+对于已有功能，可以从现有监控指标中取得这两个值；对于新功能，可以先使用预期查询 QPS、目标响应时间或压测结果
+进行估算。QPS 和响应时间必须针对同一种查询操作：
 
 ```text
-并发中的请求数 = 到达速率（QPS）x 响应时间（秒）
+同时处理的批次数 = λ_batch x RT
 L = λ x W
 ```
 
-假设一次 Handler 调用发起一次下游批量操作，并一直占用名额到该操作完成；如果监控得到的是“下游批量调用 QPS”和“批量调用响应时间”，可以先估算整个集群需要的批次并发数：
+其中，`L` 表示正在处理的 Handler 批次数，`λ` 表示批量查询 QPS（每秒批量查询次数），`W` 表示平均响应时间。
+
+如果已经有批量查询 QPS 和响应时间，可以直接估算整个集群正在处理的批次数：
 
 ```text
-单 Pod MaxConcurrency ≈ ceil(批量 QPS x 批量响应时间（秒） / Pod 数量 x 安全系数)
+单 Pod MaxConcurrency ≈ ceil(λ_batch x RT / Pod 数量 x 安全系数)
 ```
 
-例如 6 个活跃 Pod 的下游批量调用为 480 QPS、平均响应时间 50 ms，则需要约 `480 x 0.050 = 24` 个在途批次；在流量均匀分配的前提下，每个 Pod
-设置 `MaxConcurrency = 4` 可提供总计 24 个名额。这是平均负载下的估算，不是延迟或吞吐保证。是否提高或降低它，还要结合队列等待、下游限流、CPU 和连接池上限
+使用预期值只能得到初始配置；功能上线后，应使用生产环境的 metrics 重新校准。
+
+例如 6 个活跃 Pod 的下游批量调用为 1,920 QPS、平均响应时间 50 ms，则需要约 `1,920 x 0.050 = 96` 个正在处理的批次；在流量均匀分配的前提下，每个 Pod
+设置 `MaxConcurrency = 16` 可提供总计 96 个名额。这是平均负载下的估算，不是延迟或吞吐保证。是否提高或降低它，还要结合队列等待、下游限流、CPU 和连接池上限
 重新测量。
 
-如果 QPS 是按单个 item 统计，而一次 Handler 调用平均处理 `B` 个 item，则整个集群所需的批次并发可以按
-`ceil(item QPS x 批量响应时间（秒） / B)` 估算，再除以 Pod 数量并向上取整。修改 `BatchSize` 后要重新测量，因为实际批次大小
-和响应时间可能会一起变化。
+如果监控的是商品项或请求项 QPS，就要按每个 Partition 分别测量有效批次大小。对于 Partition `p`，设 `λ_item,p`
+为该 Partition 的请求项 QPS，`B_eff,p` 为实测的平均每批请求项数量，`RT_p` 为该批次 Handler 的平均响应时间：
+
+```text
+λ_batch,p ≈ λ_item,p / B_eff,p
+L_total ≈ Σ(λ_batch,p x RT_p)
+单 Pod MaxConcurrency ≈ ceil(L_total / Pod 数量 x 安全系数)
+```
+
+`BatchSize` 只是上限，因此流量稀疏时，`B_eff,p` 可能远小于 `BatchSize`。`partitionCount` 会改变每个 Partition
+接收的请求速率，进而改变 `B_eff,p`；它不是 Worker 数量，不能直接乘进公式。增加 Partition 数量可能让每批更小，
+增大 `BatchSize` 则可能同时提高批次大小和响应时间。Partition 数量过大还会降低机会式去重的命中率，因为每个
+Partition 在同一时间看到的请求更少。如果去重键与 Partition Key 相同，相同键仍会进入同一个 Partition，但仍可能
+因为分属不同 Handler 批次而无法相互合并；如果两个键不同，同一个去重目标还可能被路由到不同 Partition。应选择能够
+隔离热点键的最小 Partition 数量，并在调整任一配置后重新测量有效批次大小和去重命中率。
+
+如果已经能直接监控批次 QPS，应优先使用实测值，不要再用请求项 QPS 和批次大小反推。
 
 `MaxPendingRequests` 是排队积压上限，不是执行名额。可以按愿意吸收的排队量（`单个批处理服务的请求项 QPS x 可接受排队时间`）设置，
 再用突发流量验证接收延迟和内存占用。

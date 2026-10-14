@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1500" height="720" viewBox="0 0 1500 720" role="img" aria-labelledby="title description">
+<title id="title">机会式合并的消费循环</title><desc id="description">先取得执行名额，再尝试拉取。拉到数据就分发并继续循环；所有分区都没有数据才等待通知，收到通知后重试。</desc>
+<defs>
+<marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto" markerUnits="strokeWidth"><path d="M0 0 L9 4.5 L0 9 Z" fill="#596773"/></marker>
+<style>
+text { font-family: Arial, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill:#303b44; text-anchor:middle; font-size:24px; }
+.node { stroke-width:2; }
+.core { fill:#edf1f5; stroke:#596773; }
+.handler { fill:#f4edfb; stroke:#75529b; }
+.wait { fill:#eaf2ff; stroke:#3567a7; }
+.client { fill:#e9f6f1; stroke:#2f6f5e; }
+.edge { fill:none; stroke:#596773; stroke-width:2.5; marker-end:url(#arrow); stroke-linejoin:round; }
+.control { stroke-dasharray:8 6; }
+.label { font-size:22px; }
+.note { font-size:21px; fill:#596773; }
+</style></defs>
+<rect width="1500" height="720" fill="white"/>
+<path class="edge" d="M350 275 H470"/>
+<path class="edge" d="M870 275 H1040"/>
+<path class="edge" d="M1220 220 V90 H200 V220"/>
+<path class="edge" d="M670 380 V520"/>
+<path class="edge control" d="M500 575 H410 V275 H470"/>
+<path class="edge control" d="M1040 575 H840"/>
+<rect class="node core" x="50" y="220" width="300" height="110" rx="8"/>
+<path class="node core" d="M670 170 L870 275 L670 380 L470 275 Z"/>
+<rect class="node handler" x="1040" y="220" width="360" height="110" rx="8"/>
+<rect class="node wait" x="500" y="520" width="340" height="110" rx="8"/>
+<rect class="node client" x="1040" y="520" width="360" height="110" rx="8"/>
+
+<text x="200" y="266" class=""><tspan x="200" dy="0">等待并取得执行名额</tspan><tspan x="200" dy="34">受 MaxConcurrency 限制</tspan></text>
+<text x="670" y="266" class=""><tspan x="670" dy="0">尝试拉取下一批</tspan><tspan x="670" dy="34">拉到数据？</tspan></text>
+<text x="1220" y="266" class=""><tspan x="1220" dy="0">启动 Handler 批次</tspan><tspan x="1220" dy="34">处理完成后归还名额</tspan></text>
+<text x="670" y="566" class=""><tspan x="670" dy="0">等待 push 通知</tspan><tspan x="670" dy="34">没有新流量时保持等待</tspan></text>
+<text x="1220" y="566" class=""><tspan x="1220" dy="0">新请求写入队列</tspan><tspan x="1220" dy="34">BufferQueue 发出通知</tspan></text>
+<text x="710" y="65" class="label"><tspan x="710" dy="0">继续调度：无需等刚分发的批次完成</tspan></text>
+<text x="955" y="253" class="label"><tspan x="955" dy="0">有数据</tspan></text>
+<text x="770" y="434" class="label"><tspan x="770" dy="0">所有 Partition</tspan><tspan x="770" dy="30">均无数据</tspan></text>
+<text x="310" y="430" class="label"><tspan x="310" dy="0">收到通知</tspan><tspan x="310" dy="30">重新尝试拉取</tspan></text>
+<text x="940" y="550" class="label"><tspan x="940" dy="0">push 通知</tspan></text>
+<text x="750" y="690" class="note"><tspan x="750" dy="0">每次最多拉取同一 Partition 中的 BatchSize 个请求；不等待凑满，也没有固定收集窗口。</tspan></text>
+</svg>
