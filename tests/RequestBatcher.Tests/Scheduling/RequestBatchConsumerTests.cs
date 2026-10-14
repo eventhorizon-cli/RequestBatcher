@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using RequestBatcher.PendingRequests;
 using RequestBatcher.Scheduling;
 
@@ -165,6 +166,73 @@ public sealed class RequestBatchConsumerTests
         Assert.Equal(new[] { 1, 1, 1 }, finishedCounts);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_EnumerationFailsAfterStartedRequests_FaultsOnlyStartedRequests(
+        bool includeCanceledRequest)
+    {
+        using var cancellation = new CancellationTokenSource();
+        var expected = new EnumerationTestException();
+        var finishedCounts = new int[3];
+        var first = CreatePendingRequest(1, CancellationToken.None, finishedCounts);
+        var unvisited = CreatePendingRequest(3, CancellationToken.None, finishedCounts);
+        PendingBatchRequest<int>? canceled = null;
+        PendingBatchRequest<int>[] bufferedRequests;
+        if (includeCanceledRequest)
+        {
+            var canceledRequest = CreatePendingRequest(2, cancellation.Token, finishedCounts);
+            canceled = canceledRequest;
+            bufferedRequests = [first, canceledRequest, unvisited];
+        }
+        else
+        {
+            bufferedRequests = [first, unvisited];
+        }
+
+        var batch = CreateThrowingBatch(
+            bufferedRequests,
+            includeCanceledRequest ? 2 : 1,
+            expected);
+        var handlerInvocationCount = 0;
+        var subject = new RequestBatchConsumer<int>(
+            (_, _) =>
+            {
+                Interlocked.Increment(ref handlerInvocationCount);
+                return ValueTask.CompletedTask;
+            },
+            NullLogger.Instance,
+            typeof(int).FullName!);
+
+        if (includeCanceledRequest)
+        {
+            cancellation.Cancel();
+        }
+
+        var actual = await Assert.ThrowsAsync<EnumerationTestException>(
+            () => subject.ExecuteAsync(batch.Object, CancellationToken.None).AsTask());
+
+        Assert.Same(expected, actual);
+        Assert.Equal(0, Volatile.Read(ref handlerInvocationCount));
+        Assert.Same(expected, await Assert.ThrowsAsync<EnumerationTestException>(
+            () => first.Completion));
+        Assert.Equal(1, Volatile.Read(ref finishedCounts[0]));
+
+        if (includeCanceledRequest)
+        {
+            Assert.True(canceled!.Completion.IsCanceled);
+            Assert.Equal(1, Volatile.Read(ref finishedCounts[1]));
+        }
+
+        Assert.False(unvisited.Completion.IsCompleted);
+        Assert.Equal(0, Volatile.Read(ref finishedCounts[2]));
+
+        Assert.True(unvisited.TryStartProcessing());
+        unvisited.CompleteSuccessfully();
+        Assert.True(unvisited.Completion.IsCompletedSuccessfully);
+        Assert.Equal(1, Volatile.Read(ref finishedCounts[2]));
+    }
+
     [Fact]
     public async Task ExecuteAsync_OverlappingBatchesCompletedInReverse_KeepResultsAndRequestArraysIsolated()
     {
@@ -253,8 +321,40 @@ public sealed class RequestBatchConsumerTests
             cancellationToken,
             pendingRequest => Interlocked.Increment(ref finishedCounts[pendingRequest.Request - 1]));
 
+    private static Mock<IReadOnlyList<PendingBatchRequest<int>>> CreateThrowingBatch(
+        IReadOnlyList<PendingBatchRequest<int>> requests,
+        int throwAtIndex,
+        Exception exception)
+    {
+        var batch = new Mock<IReadOnlyList<PendingBatchRequest<int>>>(MockBehavior.Strict);
+        batch.Setup(candidate => candidate.Count).Returns(requests.Count);
+        batch.Setup(candidate => candidate[It.IsAny<int>()])
+            .Returns((int index) => requests[index]);
+        batch.Setup(candidate => candidate.GetEnumerator())
+            .Returns(() => EnumerateUntilFailure(requests, throwAtIndex, exception).GetEnumerator());
+        return batch;
+    }
+
     private static TaskCompletionSource NewSource() =>
         new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+    private static IEnumerable<PendingBatchRequest<int>> EnumerateUntilFailure(
+        IReadOnlyList<PendingBatchRequest<int>> requests,
+        int throwAtIndex,
+        Exception exception)
+    {
+        for (var index = 0; index < requests.Count; index++)
+        {
+            if (index == throwAtIndex)
+            {
+                throw exception;
+            }
+
+            yield return requests[index];
+        }
+    }
+
     private sealed class TestHandlerException : Exception;
+
+    private sealed class EnumerationTestException : Exception;
 }
