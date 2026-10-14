@@ -457,9 +457,9 @@ values produce a starting configuration; replace them with production metrics af
 MaxConcurrency_per_pod ≈ ceil(QPS_batch × RT_batch_seconds / pod_count × headroom)
 ```
 
-For example, six active pods handling 480 downstream batch calls/second at a 50 ms mean response time need about
-`480 × 0.050 = 24` in-flight batch calls. With evenly distributed traffic, `MaxConcurrency = 4` gives four slots per pod
-and 24 slots across six pods. This estimates average load; it does not guarantee latency or throughput. Adjust the limit
+For example, six active pods handling 1,920 downstream batch calls/second at a 50 ms mean response time need about
+`1,920 × 0.050 = 96` in-flight batch calls. With evenly distributed traffic, `MaxConcurrency = 16` gives 16 slots per pod
+and 96 slots across six pods. This estimates average load; it does not guarantee latency or throughput. Adjust the limit
 using measured queue wait, downstream throttling, CPU, and connection limits.
 
 When QPS is measured per item, estimate the effective batch size separately for each partition. For partition `p`, let
