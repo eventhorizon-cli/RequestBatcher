@@ -421,14 +421,15 @@ builder.Services.AddRequestBatcher<ProductQueryItem, ProductBatchHandler>(
 
 ### 用利特尔法则（Little’s Law）估算 `MaxConcurrency`
 
-用下游批量调用的 QPS 和平均响应时间估算所需并发数。两个指标必须针对同一种操作，响应时间换算为秒：
+利特尔法则应该应用在 Handler 批次流量上，而不是直接应用在请求项流量上。先测量同一种下游批量操作的批次 QPS
+和平均响应时间，并将响应时间换算为秒：
 
 ```text
 并发中的请求数 = 到达速率（QPS）x 响应时间（秒）
 L = λ x W
 ```
 
-假设一次 Handler 调用发起一次下游批量操作，并一直占用名额到该操作完成；如果监控得到的是“下游批量调用 QPS”和“批量调用响应时间”，可以先估算整个集群需要的批次并发数：
+如果监控已经提供“下游批量调用 QPS”和“批量调用响应时间”，可以直接估算整个集群的在途批次数：
 
 ```text
 单 Pod MaxConcurrency ≈ ceil(批量 QPS x 批量响应时间（秒） / Pod 数量 x 安全系数)
@@ -438,9 +439,20 @@ L = λ x W
 设置 `MaxConcurrency = 4` 可提供总计 24 个名额。这是平均负载下的估算，不是延迟或吞吐保证。是否提高或降低它，还要结合队列等待、下游限流、CPU 和连接池上限
 重新测量。
 
-如果 QPS 是按单个 item 统计，而一次 Handler 调用平均处理 `B` 个 item，则整个集群所需的批次并发可以按
-`ceil(item QPS x 批量响应时间（秒） / B)` 估算，再除以 Pod 数量并向上取整。修改 `BatchSize` 后要重新测量，因为实际批次大小
-和响应时间可能会一起变化。
+如果监控的是请求项 QPS，就要按每个 Partition 分别测量有效批次大小。对于 Partition `p`，设 `λ_item,p` 为该
+Partition 的请求项 QPS，`B_eff,p` 为实测的平均每批请求项数量，`RT_p` 为该批次 Handler 的平均响应时间：
+
+```text
+λ_batch,p ≈ λ_item,p / B_eff,p
+L_total ≈ Σ(λ_batch,p x RT_p)
+单 Pod MaxConcurrency ≈ ceil(L_total / Pod 数量 x 安全系数)
+```
+
+`BatchSize` 只是上限，因此流量稀疏时，`B_eff,p` 可能远小于 `BatchSize`。`partitionCount` 会改变每个 Partition
+接收的请求速率，进而改变 `B_eff,p`；它不是 Worker 数量，不能直接乘进公式。增加 Partition 数量可能让每批更小，
+增大 `BatchSize` 则可能同时提高批次大小和响应时间。修改任一配置后都需要重新测量。
+
+如果已经能直接监控批次 QPS，应优先使用实测值，不要再用请求项 QPS 和批次大小反推。
 
 `MaxPendingRequests` 是排队积压上限，不是执行名额。可以按愿意吸收的排队量（`单个批处理服务的请求项 QPS x 可接受排队时间`）设置，
 再用突发流量验证接收延迟和内存占用。

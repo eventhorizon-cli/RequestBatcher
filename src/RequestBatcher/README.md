@@ -387,17 +387,16 @@ A single partition can also supply several concurrent batches.
 
 ### Sizing `MaxConcurrency` with Little's Law
 
-Estimate concurrency from downstream batch-call QPS and mean response time. Measure both for the same operation and
-express response time in seconds:
+Use Little's Law on handler-batch traffic, not directly on item traffic. Measure the batch-call QPS and mean response
+time for the same operation, with response time expressed in seconds:
 
 ```text
 Concurrency (in flight) = arrival rate (QPS) x response time (seconds)
 L = λ x W
 ```
 
-Assuming one handler invocation issues one downstream batch operation and holds its slot until that operation completes,
-if the downstream metrics are batch-call QPS and batch response time, estimate the cluster-wide in-flight batch count
-with `L = QPS_batch × RT_batch`. Divide by the number of active pods and round up, then add a small safety margin:
+If the downstream metrics are already batch-call QPS and batch response time, estimate the cluster-wide in-flight batch
+count with `L = QPS_batch × RT_batch`. Divide by the number of active pods and round up, then add a small safety margin:
 
 ```text
 MaxConcurrency_per_pod ≈ ceil(QPS_batch × RT_batch_seconds / pod_count × headroom)
@@ -408,12 +407,24 @@ For example, six active pods handling 480 downstream batch calls/second at a 50 
 and 24 slots across six pods. This estimates average load; it does not guarantee latency or throughput. Adjust the limit
 using measured queue wait, downstream throttling, CPU, and connection limits.
 
-When QPS is measured per item but one handler call sends an effective average of `B` items, estimate cluster-wide batch slots as
-`ceil(QPS_item × RT_batch_seconds / B)` then divide by the pod count and round up.
-Re-measure after changing `BatchSize`, because the effective batch size and response time can change together.
+When QPS is measured per item, estimate the effective batch size separately for each partition. For partition `p`, let
+`λ_item,p` be its item QPS, `B_eff,p` its measured average items per handler call, and `RT_p` its mean handler response time:
 
-`MaxPendingRequests` is a backlog limit, not another execution slot count. Choose it from the amount of queueing you are
-willing to absorb (`request-item QPS per batcher × acceptable queue time`), then verify admission latency and memory use under bursts.
+```text
+λ_batch,p ≈ λ_item,p / B_eff,p
+L_total ≈ Σ(λ_batch,p × RT_p)
+MaxConcurrency_per_pod ≈ ceil(L_total / pod_count × headroom)
+```
+
+`BatchSize` is only an upper bound, so `B_eff,p` can be much smaller when traffic is sparse. `partitionCount` changes the
+item rate seen by each partition and therefore can change `B_eff,p`; it is not a worker count and must not be multiplied
+directly into the formula. Increasing the partition count can reduce batch sizes, while increasing `BatchSize` can increase
+batch size and response time together. Re-measure after changing either setting.
+
+If batch-call QPS is available, use the measured value directly instead of estimating it from item QPS and batch size.
+
+`MaxPendingRequests` is a backlog limit, not another execution slot count. Choose it from the queueing you are willing to
+absorb (`item QPS per batcher × acceptable queue time`), then verify admission latency and memory use under bursts.
 
 ## Batch Size and Capacity
 
