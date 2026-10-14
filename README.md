@@ -440,16 +440,18 @@ A single partition can also supply several concurrent batches.
 
 ### Sizing `MaxConcurrency` with Little's Law
 
-Use Little's Law on handler-batch traffic, not directly on item traffic. Measure the batch-call QPS and mean response
-time for the same operation, with response time expressed in seconds:
+Use Little's Law on handler-batch traffic, not directly on item traffic. For an existing operation, obtain the batch-call
+QPS and mean response time from monitoring metrics. For a new operation, use its expected QPS and target response time
+or a load-test result as the initial estimate. Use the same operation for both values and express response time in seconds:
 
 ```text
 Concurrency (in flight) = arrival rate (QPS) x response time (seconds)
 L = λ x W
 ```
 
-If the downstream metrics are already batch-call QPS and batch response time, estimate the cluster-wide in-flight batch
-count with `L = QPS_batch × RT_batch`. Divide by the number of active pods and round up, then add a small safety margin:
+If batch-call QPS and batch response time are available, estimate the cluster-wide in-flight batch count with
+`L = QPS_batch × RT_batch`. Divide by the number of active pods and round up, then add a small safety margin. Expected
+values produce a starting configuration; replace them with production metrics after the feature is running.
 
 ```text
 MaxConcurrency_per_pod ≈ ceil(QPS_batch × RT_batch_seconds / pod_count × headroom)
@@ -472,7 +474,11 @@ MaxConcurrency_per_pod ≈ ceil(L_total / pod_count × headroom)
 `BatchSize` is only an upper bound, so `B_eff,p` can be much smaller when traffic is sparse. `partitionCount` changes the
 item rate seen by each partition and therefore can change `B_eff,p`; it is not a worker count and must not be multiplied
 directly into the formula. Increasing the partition count can reduce batch sizes, while increasing `BatchSize` can increase
-batch size and response time together. Re-measure after changing either setting.
+batch size and response time together. A larger partition count can also reduce opportunistic deduplication because each
+partition sees fewer requests at a time. If the deduplication key is the same as the partition key, equal keys still route
+to one partition, but separate handler batches can still miss each other. If the keys differ, requests for one deduplication
+target can be routed to different partitions. Choose the smallest partition count that isolates hot keys, then verify the
+effective batch size and deduplication hit rate after changing either setting.
 
 If batch-call QPS is available, use the measured value directly instead of estimating it from item QPS and batch size.
 
