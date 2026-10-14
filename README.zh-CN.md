@@ -7,12 +7,79 @@
 
 [English](README.md) | **简体中文**
 
+## 批量模型：机会式合并（Opportunistic Merging）
+
+RequestBatcher 构建在 [BufferQueue](https://github.com/eventhorizon-cli/BufferQueue) 之上，当前固定依赖
+[BufferQueue 2.0.3](https://www.nuget.org/packages/BufferQueue/2.0.3)。BufferQueue 提供进程内的分区缓冲队列；
+RequestBatcher 负责 Handler 生命周期、容量控制、路由投影和请求完成语义。应用只需要在现有 DI 容器中注册
+RequestBatcher，不需要直接配置 BufferQueue。BufferQueue 是进程内实现依赖，不是持久化外部队列。
+
+这里的批量模型是 **机会式合并（Opportunistic Merging）**。生产者将请求 push 到 BufferQueue 后，可用数据通知会唤醒
+消费路径；当有执行名额时，RequestBatcher 会立即拉取当前已经排队的数据。这个路径没有定时器或固定收集窗口，因此触发到 Handler 的延迟主要来自唤醒和调度，而不是人为等待凑批。`BatchSize` 是上限，不是目标：低流量
+可能只调用一个请求，突发流量则可能把同一 Partition 中已经排队的请求合并成更大的批次。内部 API 虽然在通知后使用
+pull consumer 取得批次，但它不是定时轮询。
+
+下面这组配置能直接看清两个独立限制：
+
+```csharp
+builder.Services.AddRequestBatcher<ProductQueryItem, ProductBatchHandler>(
+    ServiceLifetime.Scoped,
+    options =>
+    {
+        // 单 Pod 的下游并发上限。6 个 Pod x 4 个名额 = 集群最多 24 个 Handler 批次并发。
+        options.MaxConcurrency = 4;
+        options.BatchSize = 100;
+        options.MaxPendingRequests = 5_000;
+
+        // 只负责路由和局部性。8 个队列 Partition 与 4 个执行名额相互独立。
+        options.UsePartitionKey(item => item.ProductId, partitionCount: 8);
+    });
+```
+
+`partitionCount` 决定请求在哪里排队，以及相同 key 是否保持在同一 Partition；`MaxConcurrency` 决定一个进程中所有
+Partition 合计最多同时执行多少个 Handler 批次。八个 Partition 不会自动创建四个 Worker，四个 Worker 也不要求
+必须配置八个 Partition。
+
+### 用 Little 定律配置 `MaxConcurrency`
+
+先量化下游服务，再决定并发数，并确保两个指标使用相同的单位：
+
+```text
+并发中的请求数 = 到达速率（QPS）x 响应时间（秒）
+L = λ x W
+```
+
+假设一次 Handler 调用发起一次下游批量操作，并一直占用名额到该操作完成；如果监控得到的是“下游批量调用 QPS”和“批量调用响应时间”，可以先估算整个集群需要的批次并发数：
+
+```text
+单 Pod MaxConcurrency ≈ ceil(批量 QPS x 批量响应时间（秒） / Pod 数量 x 安全系数)
+```
+
+例如 6 个活跃 Pod 的下游批量调用为 480 QPS、响应时间 50 ms，则需要约 `480 x 0.050 = 24` 个在途批次；每个 Pod
+设置 `MaxConcurrency = 4` 正好提供 24 个名额。是否提高或降低它，还要结合队列等待、下游限流、CPU 和连接池上限
+重新测量。
+
+如果 QPS 是按单个 item 统计，而一次 Handler 调用平均处理 `B` 个 item，则批次并发可以按
+`ceil(item QPS x 批量响应时间（秒） / B)` 估算。修改 `BatchSize` 后要重新测量，因为有效批次大小和响应时间可能会
+一起变化。
+
+`MaxPendingRequests` 是排队积压上限，不是执行名额。可以按愿意吸收的排队量（`到达速率 x 可接受排队时间`）设置，
+再用突发流量验证接收延迟和内存占用。
+
 **请从依赖注入开始：启动时使用 `AddRequestBatcher` 注册，然后从应用程序的 DI 容器获取
 `IRequestBatcher<TRequest>` 来提交请求。**
 
 ```csharp
 // At startup: register with the application's IServiceCollection.
-services.AddRequestBatcher<OrderWriteRequest, OrderWriteBatchHandler>(ServiceLifetime.Scoped);
+services.AddRequestBatcher<OrderWriteRequest, OrderWriteBatchHandler>(
+    ServiceLifetime.Scoped,
+    options =>
+    {
+        options.MaxConcurrency = 4;
+        options.BatchSize = 100;
+        options.MaxPendingRequests = 5_000;
+        options.UsePartitionKey(request => request.OrderId, partitionCount: 8);
+    });
 
 // At the call site: resolve from that application's service provider.
 var batcher = serviceProvider.GetRequiredService<IRequestBatcher<OrderWriteRequest>>();
@@ -160,7 +227,10 @@ services.AddRequestBatcher<OrderWriteRequest, OrderWriteBatchHandler>(
     ServiceLifetime.Scoped,
     options =>
     {
+        options.MaxConcurrency = 4;
         options.BatchSize = 256;
+        options.MaxPendingRequests = 5_000;
+        options.UsePartitionKey(request => request.OrderId, partitionCount: 8);
     });
 ```
 
@@ -266,7 +336,13 @@ using RequestBatcher;
 services.AddScoped<IPriceStore, PriceStore>();
 services.AddRequestBatcher<PriceQuery, PriceQuote?, PriceQueryHandler>(
     ServiceLifetime.Scoped,
-    options => options.BatchSize = 256);
+    options =>
+    {
+        options.MaxConcurrency = 4;
+        options.BatchSize = 100;
+        options.MaxPendingRequests = 5_000;
+        options.UsePartitionKey(query => query.ProductId, partitionCount: 8);
+    });
 ```
 
 Handler 返回前，必须为每个请求设置一次返回值，不能遗漏或重复设置。示例使用标准 LINQ `Distinct`，只为当前
@@ -397,7 +473,7 @@ Partition Key 是一项可选的路由规则，用于将相关请求路由到同
 
 ```csharp
 options.MaxConcurrency = 4;
-options.UsePartitionKey(request => request.OrderId, partitionCount: 4);
+options.UsePartitionKey(request => request.OrderId, partitionCount: 8);
 ```
 
 值相同的有限整数数值键，或值相同的非 `null` 字符串键，会进入指定数量中的同一 Partition。不同键值仍可能落入

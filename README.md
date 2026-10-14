@@ -7,12 +7,84 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
+## Batching Model: Opportunistic Merging
+
+RequestBatcher is built on [BufferQueue](https://github.com/eventhorizon-cli/BufferQueue), pinned here to
+[BufferQueue 2.0.3](https://www.nuget.org/packages/BufferQueue/2.0.3). BufferQueue provides the internal in-process
+partitioned buffer; RequestBatcher owns the handler lifecycle, admission control, routing projection, and completion
+semantics. Applications register only RequestBatcher through their existing DI container and do not configure
+BufferQueue directly. BufferQueue is an implementation dependency, not a durable external queue.
+
+The batching model is **opportunistic merging**. A producer pushes a request into BufferQueue and the available-data
+signal wakes the consumer path; RequestBatcher then pulls the currently available items when an execution slot is free.
+There is no timer or fixed collection window in this path, so trigger-to-handler delay is limited to wake-up and scheduling
+overhead rather than an intentional batching delay. `BatchSize` is a maximum, not a target: a quiet
+stream can invoke the handler with one request, while a burst already waiting in the same partition can be merged into
+a larger batch. The internal API uses a pull consumer after the push notification; it is not a periodic polling loop.
+
+Start with a configuration that makes the two independent limits visible:
+
+```csharp
+builder.Services.AddRequestBatcher<ProductQueryItem, ProductBatchHandler>(
+    ServiceLifetime.Scoped,
+    options =>
+    {
+        // Per-pod downstream limit. Six pods x four slots = at most 24 handler batches cluster-wide.
+        options.MaxConcurrency = 4;
+        options.BatchSize = 100;
+        options.MaxPendingRequests = 5_000;
+
+        // Routing/locality only. Eight queue partitions are independent of the four execution slots.
+        options.UsePartitionKey(item => item.ProductId, partitionCount: 8);
+    });
+```
+
+`partitionCount` controls where requests wait and which equal keys can be merged. `MaxConcurrency` controls how many
+handler batches can execute concurrently across all partitions in one process. They are deliberately different knobs:
+eight partitions do not create four workers, and four workers do not require eight partitions.
+
+### Size `MaxConcurrency` with Little's Law
+
+Measure the downstream operation before choosing the number. Use the same unit for both measurements:
+
+```text
+Concurrency (in flight) = arrival rate (QPS) x response time (seconds)
+L = λ x W
+```
+
+Assuming one handler invocation issues one downstream batch operation and holds its slot until that operation completes,
+if the downstream metrics are batch-call QPS and batch response time, estimate the cluster-wide in-flight batch count
+with `L = QPS_batch × RT_batch`. Divide by the number of active pods and round up, then add a small safety margin:
+
+```text
+MaxConcurrency_per_pod ≈ ceil(QPS_batch × RT_batch_seconds / pod_count × headroom)
+```
+
+For example, six active pods handling 480 downstream batch calls/second at a 50 ms response time need about
+`480 × 0.050 = 24` in-flight batch calls. `MaxConcurrency = 4` gives four slots per pod and 24 slots across six pods;
+choose a higher or lower value only after measuring queue wait, downstream throttling, CPU, and connection limits.
+
+When QPS is measured per item but one handler call sends an effective average of `B` items, estimate batch slots as
+`ceil(QPS_item × RT_batch_seconds / B)` instead. Do not blindly multiply a per-item QPS by a batch-call latency.
+Re-measure after changing `BatchSize`, because the effective batch size and response time can change together.
+
+`MaxPendingRequests` is a backlog limit, not another execution slot count. Choose it from the amount of queueing you are
+willing to absorb (`arrival rate × acceptable queue time`), then verify admission latency and memory use under bursts.
+
 **Start with dependency injection: register with `AddRequestBatcher`, then obtain
 `IRequestBatcher<TRequest>` from your application's DI container to submit requests.**
 
 ```csharp
 // At startup: register with the application's IServiceCollection.
-services.AddRequestBatcher<OrderWriteRequest, OrderWriteBatchHandler>(ServiceLifetime.Scoped);
+services.AddRequestBatcher<OrderWriteRequest, OrderWriteBatchHandler>(
+    ServiceLifetime.Scoped,
+    options =>
+    {
+        options.MaxConcurrency = 4;
+        options.BatchSize = 100;
+        options.MaxPendingRequests = 5_000;
+        options.UsePartitionKey(request => request.OrderId, partitionCount: 8);
+    });
 
 // At the call site: resolve from that application's service provider.
 var batcher = serviceProvider.GetRequiredService<IRequestBatcher<OrderWriteRequest>>();
@@ -173,7 +245,10 @@ services.AddRequestBatcher<OrderWriteRequest, OrderWriteBatchHandler>(
     ServiceLifetime.Scoped,
     options =>
     {
+        options.MaxConcurrency = 4;
         options.BatchSize = 256;
+        options.MaxPendingRequests = 5_000;
+        options.UsePartitionKey(request => request.OrderId, partitionCount: 8);
     });
 ```
 
@@ -279,7 +354,13 @@ using RequestBatcher;
 services.AddScoped<IPriceStore, PriceStore>();
 services.AddRequestBatcher<PriceQuery, PriceQuote?, PriceQueryHandler>(
     ServiceLifetime.Scoped,
-    options => options.BatchSize = 256);
+    options =>
+    {
+        options.MaxConcurrency = 4;
+        options.BatchSize = 100;
+        options.MaxPendingRequests = 5_000;
+        options.UsePartitionKey(query => query.ProductId, partitionCount: 8);
+    });
 ```
 
 The handler must set exactly one response for every item before it returns. The example uses standard LINQ `Distinct`
@@ -424,7 +505,7 @@ A partition key is an optional routing rule for related requests:
 
 ```csharp
 options.MaxConcurrency = 4;
-options.UsePartitionKey(request => request.OrderId, partitionCount: 4);
+options.UsePartitionKey(request => request.OrderId, partitionCount: 8);
 ```
 
 Equal finite, integer-valued numeric keys or equal non-null string keys are routed to the same queue partition among the

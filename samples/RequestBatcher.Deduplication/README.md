@@ -1,5 +1,10 @@
 # PostgreSQL Web API Sample
 
+This sample uses [BufferQueue](https://github.com/eventhorizon-cli/BufferQueue) through RequestBatcher. Requests are
+merged opportunistically after a push wakes the consumer path; there is no fixed collection window. `BatchSize` is only
+a maximum, while `MaxConcurrency` limits concurrent handler batches per process and `partitionCount` controls keyed
+routing.
+
 This is a small RequestBatcher example. Concurrent `POST /prices` calls are collected into handler batches. The write
 handler keeps the highest version for each product and writes its batch with one Dapper PostgreSQL upsert.
 
@@ -17,7 +22,7 @@ shows two commented assignment alternatives: `entry.SetResponse(response)` for i
 The ordered-sequence overload requires exactly one response per original entry in input order, including duplicates
 and missing products; do not pass the database rows directly to it.
 
-`UsePartitionKey(update => update.ProductId, partitionCount: 4)` keeps equal product IDs in one of four keyed processing
+`UsePartitionKey(update => update.ProductId, partitionCount: 8)` keeps equal product IDs in one of eight keyed processing
 partitions while allowing
 different keys to progress independently. Without a partition key, RequestBatcher uses one shared partition. The database
 only updates a row when its incoming version is newer, so stale updates are also rejected across handler batches; equal-key
