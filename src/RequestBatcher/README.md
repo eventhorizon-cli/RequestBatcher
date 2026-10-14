@@ -5,7 +5,7 @@ submit one request at a time and await their own result, while RequestBatcher co
 limits handler-batch concurrency and queue capacity, and invokes the application handler with a batch. It is intended for
 database, cache, and API operations that support processing multiple items together.
 
-## How Batches Are Formed: Opportunistic Merging
+## How Requests Are Batched: Opportunistic Merging
 
 RequestBatcher uses [BufferQueue](https://github.com/eventhorizon-cli/BufferQueue) to combine queued requests within a
 .NET process and pass them to an application handler. Callers obtain `IRequestBatcher<TRequest>` or
@@ -362,7 +362,7 @@ key. `MaxConcurrency = 1` limits handler concurrency but does not merge keyed pa
 
 No ordering is guaranteed for handler execution, including when `MaxConcurrency = 1`.
 
-### Partitions and Concurrency
+### Partition Count and Concurrency
 
 This configuration uses eight queue partitions sharing four handler execution slots:
 
@@ -385,7 +385,7 @@ builder.Services.AddRequestBatcher<ProductQueryItem, ProductBatchHandler>(
 `MaxConcurrency` limits concurrent handler batches for one registered batcher, with all partitions sharing those slots.
 A single partition can also supply several concurrent batches.
 
-### Size `MaxConcurrency` with Little's Law
+### Sizing `MaxConcurrency` with Little's Law
 
 Estimate concurrency from downstream batch-call QPS and mean response time. Measure both for the same operation and
 express response time in seconds:
@@ -415,7 +415,7 @@ Re-measure after changing `BatchSize`, because the effective batch size and resp
 `MaxPendingRequests` is a backlog limit, not another execution slot count. Choose it from the amount of queueing you are
 willing to absorb (`request-item QPS per batcher × acceptable queue time`), then verify admission latency and memory use under bursts.
 
-## Batching and Capacity
+## Batch Size and Capacity
 
 - A handler batch contains at most `BatchSize` requests that are already queued.
 - RequestBatcher does not add a fixed delay or wait for a minimum batch size.
@@ -431,7 +431,7 @@ willing to absorb (`request-item QPS per batcher × acceptable queue time`), the
   coordinator-owned resources. Concurrent and repeated calls share one operation; the application container owns
   async disposal. Requests still cannot be recovered after a process failure.
 
-## Routing and Dispatch
+## Routing Rules and Dispatch
 
 The queue rotates pull opportunities among readable partitions. This does not promise equal handler execution time
 or fairness between individual keys. String routing considers the complete key, so a shared prefix alone does not

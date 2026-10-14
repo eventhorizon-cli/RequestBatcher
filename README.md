@@ -12,7 +12,7 @@ submit one request at a time and await their own result, while RequestBatcher co
 limits handler-batch concurrency and queue capacity, and invokes the application handler with a batch. It is intended for
 database, cache, and API operations that support processing multiple items together.
 
-## How Batches Are Formed: Opportunistic Merging
+## How Requests Are Batched: Opportunistic Merging
 
 RequestBatcher uses [BufferQueue](https://github.com/eventhorizon-cli/BufferQueue) to combine queued requests within a
 .NET process and pass them to an application handler. Callers obtain `IRequestBatcher<TRequest>` or
@@ -347,7 +347,7 @@ request from the submission. This does not force the sequence into one handler c
 > partition key is configured or when every item produces the same partition key. `MaxConcurrency = 1` limits handler
 > concurrency but does not merge keyed partitions.
 
-## Single and Group Submission
+## Single vs. Group Submission
 
 In this documentation, a **submission** is one caller invocation of `ProcessAsync`. A **handler batch** is the
 `IReadOnlyList<TRequest>` or `IReadOnlyList<RequestBatchItem<TRequest, TResponse>>` passed to one `HandleAsync`
@@ -363,7 +363,7 @@ invocation. They are not the same boundary.
 | Failure | A handler failure fails every request in that handler batch. | Some items may succeed before another handler batch fails. The group `Task` faults, but successful work is not rolled back. |
 | Cancellation | Cancellation removes the request only before dispatch. | The same token applies to every item; undispatched items can be canceled while dispatched items continue to their actual outcome. |
 
-## How It Works
+## Request Processing Flow
 
 The internal queue's partition count is not the handler concurrency level. Partitions organize queueing and routing;
 the global `MaxConcurrency` setting limits the number of handler batches that can execute at once. Multiple batches
@@ -390,7 +390,7 @@ window, so low traffic may produce single-request batches while concurrent traff
 The architecture diagram shows the coordinator, the in-memory partition queue, and the separate `Task` completion
 path for each accepted request.
 
-### Internal Dispatch Scheduling
+### Dispatch Scheduling
 
 Here, `H = MaxConcurrency` is the maximum number of handler batches running at once. Without a partition key there is
 one internal queue partition; with a numeric or string partition key, `P` is the explicit count supplied to
@@ -415,7 +415,7 @@ the next batch while the other handlers keep running. It does not wait for all c
 
 No ordering is guaranteed for handler execution, including when `MaxConcurrency = 1`.
 
-### Partitions and Concurrency
+### Partition Count and Concurrency
 
 This configuration uses eight queue partitions sharing four handler execution slots:
 
@@ -438,7 +438,7 @@ builder.Services.AddRequestBatcher<ProductQueryItem, ProductBatchHandler>(
 `MaxConcurrency` limits concurrent handler batches for one registered batcher, with all partitions sharing those slots.
 A single partition can also supply several concurrent batches.
 
-### Size `MaxConcurrency` with Little's Law
+### Sizing `MaxConcurrency` with Little's Law
 
 Estimate concurrency from downstream batch-call QPS and mean response time. Measure both for the same operation and
 express response time in seconds:
@@ -468,7 +468,7 @@ Re-measure after changing `BatchSize`, because the effective batch size and resp
 `MaxPendingRequests` is a backlog limit, not another execution slot count. Choose it from the amount of queueing you are
 willing to absorb (`request-item QPS per batcher × acceptable queue time`), then verify admission latency and memory use under bursts.
 
-## Partition Keys
+## Partition-Key Routing
 
 A partition key is an optional routing rule for related requests:
 
@@ -484,7 +484,7 @@ Different keys can still share a partition, so keys and partitions are not one-t
 Partition routing does not force all requests for one key into the same handler batch, and it does not deduplicate
 requests. It does not provide an execution-order or mutual-exclusion boundary.
 
-### Example: Merge Repeated Updates
+### Example: Merging Repeated Updates
 
 Suppose several `PriceUpdate` requests have the same `ProductId`. A handler can group its current batch by product and
 write only the highest version. Routing by `ProductId` improves locality, but separate handler calls can still process
@@ -498,7 +498,7 @@ does not place every update for one product into the same batch. The runnable
 - the upsert condition ignores older versions that arrive in later batches;
 - the query handler deduplicates product IDs before issuing one SQL query for the batch.
 
-## Routing and Dispatch
+## Routing Rules and Dispatch
 
 `MaxConcurrency` is the global maximum number of concurrent handler batches. Without a partition key, the queue has one
 internal partition. With a numeric or string partition key, it has the explicit number of partitions supplied to
@@ -566,7 +566,7 @@ on the number of callers waiting for capacity:
 - `FullMode = Fail` requires the whole submission to fit immediately. Otherwise, including when a group is larger than
   the capacity, it returns a faulted `Task` with `RequestBatchQueueFullException` without admitting any item.
 
-### Shutdown
+### Shutdown and Disposal
 
 `DisposeAsync` stops accepting new requests, drains every accepted submission (including submissions waiting for
 capacity), then releases coordinator-owned resources. Concurrent and repeated disposal calls share the same operation.
@@ -585,7 +585,7 @@ Logs use the application's `Microsoft.Extensions.Logging` pipeline under the cat
 `RequestBatchCoordinator<TRequest>`. Handler failures are logged with their original exception, and request payloads
 are not logged.
 
-## Sample
+## Sample Application
 
 - [PostgreSQL Web API sample](samples/RequestBatcher.Deduplication)
 

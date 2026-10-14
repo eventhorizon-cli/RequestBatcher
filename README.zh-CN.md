@@ -11,7 +11,7 @@ RequestBatcher 是一个运行在进程内的 .NET 批处理库，用于将单�
 并等待各自的结果；RequestBatcher 会合并已经排队的请求，限制 Handler 批次并发数和队列容量，再将批次交给应用的
 Handler 处理。它适用于支持一次处理多个数据项的数据库、缓存和下游 API。
 
-## 批次形成方式：机会式合并
+## 请求如何合并：机会式合并
 
 RequestBatcher 基于 [BufferQueue](https://github.com/eventhorizon-cli/BufferQueue)，将 .NET 进程内已经排队的并发请求
 合并为批次，交给应用的 Handler 处理。调用方通过 DI 获取 `IRequestBatcher<TRequest>` 或
@@ -334,7 +334,7 @@ RequestBatcher 会先为请求序列创建快照，再统一提交给内部队�
 > 强制放入同一 Partition。未配置 Partition Key，或每项请求计算出相同的 Partition Key 时，整组请求才会落在同一个
 > Partition。`MaxConcurrency = 1` 只限制 Handler 并发数，不会合并带有不同 Key 的 Partition。
 
-## 单次提交与批量提交
+## 单次提交与显式批量提交
 
 本文中的**提交**是指调用方执行一次 `ProcessAsync`；**处理批次**是指一次 `HandleAsync` 收到的
 `IReadOnlyList<TRequest>` 或 `IReadOnlyList<RequestBatchItem<TRequest, TResponse>>`。两者不是同一个边界。
@@ -349,7 +349,7 @@ RequestBatcher 会先为请求序列创建快照，再统一提交给内部队�
 | 失败 | 这次 Handler 调用失败时，该处理批次中的所有请求都会失败。 | 部分请求可能已经成功，其他处理批次仍可能失败；整组 `Task` 会失败，但不会回滚已经成功的操作。 |
 | 取消 | 只能取消尚未交给 Handler 的请求。 | 同一个 `CancellationToken` 用于整组中的每个请求；尚未分发的请求可以取消，已分发的请求继续返回实际结果。 |
 
-## 工作方式
+## 请求处理流程
 
 内部队列的 Partition 数量不代表 Handler 并发数。Partition 只用于组织请求的排队和路由；同时执行的 Handler
 批次数由全局 `MaxConcurrency` 限制。同一 Partition 中的多个批次可以并发执行，所有 Partition 共享同一组执行名额。
@@ -373,7 +373,7 @@ RequestBatcher 会先为请求序列创建快照，再统一提交给内部队�
 
 架构图展示协调器、内存队列中的各个 Partition，以及每个已接收请求独立完成 `Task` 的详细路径。
 
-### 内部调度设计
+### 调度方式
 
 `H = MaxConcurrency` 是全局同时执行的 Handler 批次数上限。未配置 Partition Key 时，内部只有一个 Partition；配置
 数值或字符串 Partition Key 时，`P` 是传给 `UsePartitionKey` 的显式 Partition 数量。
@@ -397,7 +397,7 @@ RequestBatcher 会先为请求序列创建快照，再统一提交给内部队�
 
 Handler 执行不保证顺序，包括 `MaxConcurrency = 1` 的情况。
 
-### 分区数与并发数
+### Partition 数量与并发数
 
 下面配置使用 8 个队列 Partition，共享 4 个 Handler 执行名额：
 
@@ -419,7 +419,7 @@ builder.Services.AddRequestBatcher<ProductQueryItem, ProductBatchHandler>(
 `partitionCount` 决定请求分布在哪些队列中，相同键值始终路由到同一 Partition。`MaxConcurrency` 限制同一个
 批处理服务中同时执行的 Handler 批次数，所有 Partition 共享这些名额。同一 Partition 也可以同时执行多个批次。
 
-### 用 Little 定律配置 `MaxConcurrency`
+### 用利特尔法则（Little’s Law）估算 `MaxConcurrency`
 
 用下游批量调用的 QPS 和平均响应时间估算所需并发数。两个指标必须针对同一种操作，响应时间换算为秒：
 
@@ -445,7 +445,7 @@ L = λ x W
 `MaxPendingRequests` 是排队积压上限，不是执行名额。可以按愿意吸收的排队量（`单个批处理服务的请求项 QPS x 可接受排队时间`）设置，
 再用突发流量验证接收延迟和内存占用。
 
-## Partition Key
+## Partition Key 路由
 
 Partition Key 是一项可选的路由规则，用于将相关请求路由到同一 Partition：
 
@@ -460,7 +460,7 @@ options.UsePartitionKey(request => request.OrderId, partitionCount: 8);
 Partition 路由只决定请求进入哪个 Partition：它不会强制同一键值的全部请求进入同一个处理批次，也不会自动去重。
 它提供了一个路由边界，不提供执行顺序或互斥保证。
 
-### 示例：合并重复更新
+### 示例：合并重复更新请求
 
 假设多个 `PriceUpdate` 的 `ProductId` 相同。Handler 可以在当前批次中按商品分组，只写入版本最高的更新。按
 `ProductId` 路由能改善局部性，但不同 Handler 调用仍可能同时处理同一个商品。
@@ -472,7 +472,7 @@ Partition Key 无法让同一商品的所有更新都进入同一批，因此存
 - upsert 条件会忽略后续批次中的旧版本；
 - 查询 Handler 会先对商品 ID 去重，再为当前批次执行一次 SQL 查询。
 
-## 路由与调度
+## 路由规则与调度
 
 `MaxConcurrency` 是全局并发 Handler 批次数上限。未配置 Partition Key 时，内部队列固定使用一个 Partition；配置
 数值或字符串 Partition Key 时，Partition 数量由 `UsePartitionKey` 的 `partitionCount` 指定，由一个
@@ -496,7 +496,7 @@ Handler 会在分发调用链上执行，直到完成或遇到尚未完成的异
 
 ## 处理语义
 
-### 成功与失败
+### 完成与失败
 
 - Handler 正常完成时，该处理批次中所有调用方的 `Task` 都会成功完成。
 - Handler 抛出异常时，这些调用方会收到原始异常。
@@ -532,7 +532,7 @@ Handler 会在分发调用链上执行，直到完成或遇到尚未完成的异
   `MaxPendingRequests` 的情况。此时返回的 `Task` 会失败，异常为 `RequestBatchQueueFullException`，本次提交的请求
   均不会入队。
 
-### 停止
+### 停止与释放
 
 `DisposeAsync` 会停止接收新请求，处理完已经接收的所有提交（包括仍在等待容量的提交），然后释放协调器持有的资源。
 并发或重复调用共享同一次释放操作。通过 `AddRequestBatcher` 注册时，由应用容器负责异步释放。
@@ -548,10 +548,10 @@ Handler 会在分发调用链上执行，直到完成或遇到尚未完成的异
 日志会通过应用现有的 `Microsoft.Extensions.Logging` 管道写入，类别为
 `RequestBatchCoordinator<TRequest>`。Handler 异常会连同原始 `Exception` 一起记录，日志不会包含请求内容。
 
-## 示例
+## 示例应用
 
 - [PostgreSQL Web API 示例](samples/RequestBatcher.Deduplication)
 
-## License
+## 许可证
 
 RequestBatcher 采用 [MIT License](LICENSE)。
