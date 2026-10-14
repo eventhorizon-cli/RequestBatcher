@@ -7,21 +7,25 @@
 
 [English](README.md) | **简体中文**
 
+RequestBatcher 是一个运行在进程内的 .NET 批处理库，用于将单个请求合并后交给下游批量处理。调用方可以逐个提交请求
+并等待各自的结果；RequestBatcher 会合并已经排队的请求，限制 Handler 批次并发数和队列容量，再将批次交给应用的
+Handler 处理。它适用于支持一次处理多个数据项的数据库、缓存和下游 API。
+
 ## 批次形成方式：机会式合并
 
-RequestBatcher 基于 [BufferQueue](https://github.com/eventhorizon-cli/BufferQueue)，将 .NET 进程内已排队的并发请求
+RequestBatcher 基于 [BufferQueue](https://github.com/eventhorizon-cli/BufferQueue)，将 .NET 进程内已经排队的并发请求
 合并为批次，交给应用的 Handler 处理。调用方通过 DI 获取 `IRequestBatcher<TRequest>` 或
 `IRequestBatcher<TRequest, TResponse>`，提交请求并等待各自的结果。当前依赖
 [BufferQueue 2.0.3](https://www.nuget.org/packages/BufferQueue/2.0.3)，应用无需单独注册或配置它。
 
 RequestBatcher 采用 **机会式合并（Opportunistic Merging）**：请求写入 BufferQueue 后会发出可用数据通知，唤醒消费
-流程；只要有空闲执行名额，就会拉取当前已排队的请求。消费由 push 通知触发，通知后通过 pull API 取得批次，不依赖
+流程；只要有空闲执行名额，就会拉取当前已排队的请求。消费流程由 push 通知唤醒，再通过 pull API 取得批次，不依赖
 定时轮询，也没有固定的收集窗口。有空闲名额时，等待主要来自唤醒和调度；名额占满时，请求仍需排队。
 `BatchSize` 只限制每批的最大数量：低流量时一批可能只有一个请求，突发流量时则可能合并同一 Partition 中的多个请求。
 
 请求仅保存在进程内，进程故障后无法恢复尚未完成的请求。
 
-> **调用方无需先将请求收集成一个集合，仍然可以获得批量处理。** 多个调用方可以并发地各自提交一个
+> **调用方无需先收集请求，也能获得批量处理。** 多个调用方可以并发地各自提交一个
 > `TRequest`；RequestBatcher 会将同一 Partition 中已排队的零散请求合并为最多 `BatchSize` 项的处理批次。
 > `ProcessAsync(IEnumerable<TRequest>)` 只是额外的提交方式，并不是产生批量处理的前提。
 
@@ -42,25 +46,25 @@ dotnet add package RequestBatcher
 `IRequestBatcher<TRequest>`，或在应用服务的构造函数中注入它。
 
 ```csharp
-// At startup: register with the application's IServiceCollection.
+// 应用启动时，在应用的 IServiceCollection 中注册。
 services.AddRequestBatcher<OrderWriteRequest, OrderWriteBatchHandler>(
     ServiceLifetime.Scoped,
     options =>
     {
-        // Four concurrent handler batches, shared by all eight queue partitions.
+        // 4 个 Handler 批次并发执行名额，由 8 个队列 Partition 共享。
         options.MaxConcurrency = 4;
         options.BatchSize = 100;
         options.MaxPendingRequests = 5_000;
-        // Equal order IDs route to the same partition; separate batches can still run concurrently.
+        // 相同的订单 ID 路由到同一 Partition；不同批次仍可能并发执行。
         options.UsePartitionKey(request => request.OrderId, partitionCount: 8);
     });
 
-// At the call site: resolve from that application's service provider.
+// 调用处从应用自己的 Service Provider 获取服务。
 var batcher = serviceProvider.GetRequiredService<IRequestBatcher<OrderWriteRequest>>();
 await batcher.ProcessAsync(new OrderWriteRequest(OrderId: 1, Amount: 100m));
 ```
 
-示例需要引入 `Microsoft.Extensions.DependencyInjection` 和 `RequestBatcher` 命名空间。应用服务中推荐通过
+代码示例需要引入 `Microsoft.Extensions.DependencyInjection` 和 `RequestBatcher` 命名空间。应用服务中推荐通过
 构造函数注入 `IRequestBatcher<TRequest>`。若需要强类型返回值，请使用
 `AddRequestBatcher<TRequest, TResponse, THandler>` 注册，并注入 `IRequestBatcher<TRequest, TResponse>`。
 请求和 Handler 的定义见下方[无返回值批处理](#无返回值批处理)示例；Handler 所需的依赖
@@ -95,23 +99,55 @@ RequestBatcher 既不是持久化后台队列，也不是事务协调器：
 
 ### 无返回值 API
 
-调用方只需要知道 Handler 是否成功完成时，使用 `IRequestBatcher<TRequest>`：
+当调用方只需要知道 Handler 是否成功完成时，使用 `IRequestBatcher<TRequest>`：
 
-| 使用方 | API | 含义 |
-| --- | --- | --- |
-| 调用方 | `Task ProcessAsync(TRequest)` | 提交一个请求，返回反映该请求实际处理结果的 `Task`。 |
-| 调用方 | `Task ProcessAsync(IEnumerable<TRequest>)` | 提交调用方已持有的一组请求，返回等待整次提交完成的 `Task`。 |
-| Handler | `ValueTask IRequestBatchHandler<TRequest>.HandleAsync(IReadOnlyList<TRequest>)` | 处理一批请求，无需为每个请求设置返回值。 |
+```csharp
+public interface IRequestBatcher<in TRequest>
+{
+    // 提交一个请求，等待它实际的 Handler 处理结果。
+    Task ProcessAsync(TRequest request, CancellationToken cancellationToken = default);
+
+    // 提交调用方已有的一组请求；返回的 Task 等待整次提交完成。
+    Task ProcessAsync(
+        IEnumerable<TRequest> requests,
+        CancellationToken cancellationToken = default);
+}
+
+public interface IRequestBatchHandler<TRequest>
+{
+    // 处理一个批次；成功返回后，该批次中的所有请求都会完成。
+    ValueTask HandleAsync(
+        IReadOnlyList<TRequest> requests,
+        CancellationToken cancellationToken = default);
+}
+```
 
 ### 带返回值 API
 
-每个已接收请求都需要一个强类型返回值时，使用 `IRequestBatcher<TRequest, TResponse>`：
+当每个请求都需要一个强类型返回值时，使用 `IRequestBatcher<TRequest, TResponse>`：
 
-| 使用方 | API | 含义 |
-| --- | --- | --- |
-| 调用方 | `Task<TResponse> ProcessAsync(TRequest)` | 提交一个请求，返回其 `Task<TResponse>`。 |
-| 调用方 | `Task<IReadOnlyList<TResponse>> ProcessAsync(IEnumerable<TRequest>)` | 提交调用方已持有的一组请求，按输入顺序返回结果。 |
-| Handler | `ValueTask IRequestBatchHandler<TRequest, TResponse>.HandleAsync(IReadOnlyList<RequestBatchItem<TRequest, TResponse>>)` | 处理一批请求，并为每个请求设置一次返回值。 |
+```csharp
+public interface IRequestBatcher<in TRequest, TResponse>
+{
+    // 提交一个请求，返回它的强类型结果。
+    Task<TResponse> ProcessAsync(
+        TRequest request,
+        CancellationToken cancellationToken = default);
+
+    // 提交一组请求，返回结果的顺序与输入序列保持一致。
+    Task<IReadOnlyList<TResponse>> ProcessAsync(
+        IEnumerable<TRequest> requests,
+        CancellationToken cancellationToken = default);
+}
+
+public interface IRequestBatchHandler<TRequest, TResponse>
+{
+    // 处理一个批次，并为每个条目设置且仅设置一个结果。
+    ValueTask HandleAsync(
+        IReadOnlyList<RequestBatchItem<TRequest, TResponse>> entries,
+        CancellationToken cancellationToken = default);
+}
+```
 
 RequestBatcher 只会在内部等待每次 Handler 调用返回的 `ValueTask` 一次，不会将它返回给调用方。同步完成的 Handler
 可以因此避免分配 `Task`；普通异步 I/O 仍可直接使用 `async ValueTask` 实现。
@@ -142,7 +178,7 @@ public sealed class OrderWriteBatchHandler(IOrderStore store)
 }
 ```
 
-注册时同时指定 Handler 及其生命周期；最小配置只需要设置批次上限：
+注册时同时指定 Handler 和生命周期；最小配置只需设置批次上限：
 
 ```csharp
 services.AddRequestBatcher<OrderWriteRequest, OrderWriteBatchHandler>(
@@ -173,8 +209,9 @@ public sealed class OrderService(IRequestBatcher<OrderWriteRequest> batcher)
 
 ## 带返回值批处理
 
-如果每个请求都需要返回一个值，请使用带返回值的 API。Handler 接收一组包装原始请求和返回值槽位的
-`RequestBatchItem<TRequest, TResponse>`，其中 `entry.Request` 是原始的 `TRequest`。下面的示例使用标准 LINQ
+如果每个请求都需要返回一个值，请使用带返回值的 API。Handler 接收由
+`RequestBatchItem<TRequest, TResponse>` 包装的条目列表；每个条目都包含原始请求和返回值槽位，其中 `entry.Request`
+是原始的 `TRequest`。下面的示例使用标准 LINQ
 `Distinct`，先在当前处理批次内合并重复的商品 ID，再查询存储层：
 
 ```csharp
@@ -189,7 +226,7 @@ public sealed record PriceQuote(long ProductId, decimal Price);
 
 public interface IPriceStore
 {
-    // The store returns at most one found quote per requested ID, in any order.
+    // 存储层对每个请求的 ID 最多返回一条结果，返回顺序不固定。
     Task<IReadOnlyList<PriceQuote>> FindAsync(
         IEnumerable<long> productIds,
         CancellationToken cancellationToken);
@@ -213,23 +250,23 @@ public sealed class PriceQueryHandler(IPriceStore store)
 
         entries.SetResponses(request => pricesByProductId.GetValueOrDefault(request.ProductId));
 
-        // If query deduplication is unnecessary, remove Distinct() and keep the response factory.
-        // Alternatively, replace the query and assignment above with ONE of these styles:
-        // 1. Query all requested IDs, then assign each entry directly:
+        // 如果不需要查询去重，可以删除 Distinct()，保留同一个响应工厂。
+        // 也可以将上面的查询和赋值替换为下面两种方式之一：
+        // 1. 查询所有请求 ID，再逐个为条目设置结果：
         // var prices = await store.FindAsync(entries.Select(entry => entry.Request.ProductId), cancellationToken);
         // var pricesByProductId = prices.ToDictionary(price => price.ProductId);
         // foreach (var entry in entries)
         // {
         //     entry.SetResponse(pricesByProductId.GetValueOrDefault(entry.Request.ProductId));
         // }
-        // 2. If an already aligned response sequence is available, use the ordered overload:
+        // 2. 已经得到与输入顺序对齐的结果序列时，使用按输入顺序赋值的重载：
         // var prices = await store.FindAsync(entries.Select(entry => entry.Request.ProductId), cancellationToken);
         // var pricesByProductId = prices.ToDictionary(price => price.ProductId);
         // var orderedResponses = entries
         //     .Select(entry => pricesByProductId.GetValueOrDefault(entry.Request.ProductId))
         //     .ToArray();
         // entries.SetResponses(orderedResponses);
-        // Never pass raw backend results to the ordered overload: they may be unordered or omit missing keys.
+        // 不要将原始后端结果直接传给按顺序赋值的重载：结果可能无序，也可能缺少某些请求的 ID。
     }
 }
 
@@ -269,11 +306,11 @@ services.AddRequestBatcher<PriceQuery, PriceQuote?, PriceQueryHandler>(
 
 Handler 返回前，必须为每个请求设置一次返回值，不能遗漏或重复设置。示例使用标准 LINQ `Distinct`，只为当前
 Handler 调用中的每个不同商品 ID 查询一次存储层。`Distinct` 也支持匿名组合键、值元组和自定义相等比较器。存储层未
-返回的商品 ID 会映射为 `null`；它不会合并不同处理批次或不同队列 Partition 中的 entry。selector 重载会在后端无序
-结果按 key 建立字典后，为每个 entry 的原始 request 执行一次，因此重复 entry 会得到相同返回值。所有返回值计算
+返回的商品 ID 会映射为 `null`；它不会合并不同处理批次或不同队列 Partition 中的条目。selector 重载会先按 key 为后端无序
+结果建立字典，再为每个条目的原始 request 计算一次结果，因此重复条目会得到相同返回值。所有返回值计算
 成功后才会统一赋值；factory 抛出异常不会留下部分赋值。引用类型结果会被共享，不会复制。
 
-如果不需要去重，移除 `Distinct()` 并保留相同的 response factory 即可。还可以选择逐个调用
+如果不需要去重，移除 `Distinct()` 并保留相同的 response factory 即可。还可以逐个调用
 `entry.SetResponse(response)`，或先生成严格按原始输入顺序排列、包含重复和缺失请求位置的结果，再调用
 `entries.SetResponses(responses)`。面向 key 的 selector 重载适合
 后端无序结果；有序重载不能直接接收后端原始行。显式批量重载即使将请求拆到多个处理批次或队列 Partition，仍会按输入顺序返回结果。
@@ -402,7 +439,7 @@ L = λ x W
 重新测量。
 
 如果 QPS 是按单个 item 统计，而一次 Handler 调用平均处理 `B` 个 item，则整个集群所需的批次并发可以按
-`ceil(item QPS x 批量响应时间（秒） / B)` 估算，再除以 Pod 数量并向上取整。修改 `BatchSize` 后要重新测量，因为有效批次大小
+`ceil(item QPS x 批量响应时间（秒） / B)` 估算，再除以 Pod 数量并向上取整。修改 `BatchSize` 后要重新测量，因为实际批次大小
 和响应时间可能会一起变化。
 
 `MaxPendingRequests` 是排队积压上限，不是执行名额。可以按愿意吸收的排队量（`单个批处理服务的请求项 QPS x 可接受排队时间`）设置，
@@ -451,7 +488,7 @@ RequestBatcher 不提供全局、Partition 内或 Partition Key 级别的 Handle
 
 启用按键路由时，队列会在有数据的 Partition 之间轮转拉取机会，但不保证 Handler 执行时间相等，也不保证不同
 键值之间公平。字符串路由使用完整键值，共同前缀本身不会强制不同键值进入同一 Partition。具体分区归属属于
-内部实现，可能随版本变化；同一个 Batcher 实例中的相同键值仍会路由到同一 Partition。这类变化可能影响处理批次
+内部实现，可能随版本变化；同一个 Batcher 实例中的相同键值仍会路由到同一 Partition。这些变化可能影响处理批次
 的组成，以及 Handler 在单个批次内能够合并的重复工作量。
 
 Handler 会在分发调用链上执行，直到完成或遇到尚未完成的异步等待。在此之前的 CPU 密集计算或同步阻塞会
@@ -497,7 +534,7 @@ Handler 会在分发调用链上执行，直到完成或遇到尚未完成的异
 
 ### 停止
 
-`DisposeAsync` 会停止接收新请求，排空已经接收的所有提交（包括仍在等待容量的提交），然后释放协调器持有的资源。
+`DisposeAsync` 会停止接收新请求，处理完已经接收的所有提交（包括仍在等待容量的提交），然后释放协调器持有的资源。
 并发或重复调用共享同一次释放操作。通过 `AddRequestBatcher` 注册时，由应用容器负责异步释放。
 
 ## 依赖注入与日志
