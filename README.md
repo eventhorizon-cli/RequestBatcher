@@ -12,6 +12,11 @@ submit one request at a time and await their own result, while RequestBatcher co
 limits handler-batch concurrency and queue capacity, and invokes the application handler with a batch. It is intended for
 database, cache, and API operations that support processing multiple items together.
 
+![Request coalescing illustration](docs/assets/request-batcher-request-coalescing.png)
+
+Separate concurrent requests can be combined into one batch before a downstream batch operation. The illustration is
+an example: only requests already queued in the same partition can be combined into one handler batch.
+
 ## How Requests Are Batched: Opportunistic Merging
 
 RequestBatcher uses [BufferQueue](https://github.com/eventhorizon-cli/BufferQueue) to combine queued requests within a
@@ -21,11 +26,21 @@ dependency is [BufferQueue 2.0.3](https://www.nuget.org/packages/BufferQueue/2.0
 configure it separately.
 
 RequestBatcher uses **Opportunistic Merging**. Writing a request to BufferQueue signals that data is available and wakes
-the consumer path. When an execution slot is free, RequestBatcher pulls the requests already queued. Consumption is
-triggered by a push notification and uses a pull API to retrieve the batch; there is no periodic polling or fixed
-collection window. With a free slot, waiting mainly comes from wake-up and scheduling; when all slots are occupied,
-requests must wait for capacity to execute. `BatchSize` limits the number of requests per handler call: a batch may
-contain just one request at low traffic or several requests already queued in the same partition during a burst.
+an idle consumer. The dispatch loop acquires a free execution slot, then uses the pull API to retrieve requests already
+queued. After dispatching a batch, it continues the loop: if another slot is available, it can pull and dispatch again
+without waiting for the previous batch to finish. It waits for the next push notification only when none of the assigned
+partitions has data.
+
+There is no periodic polling or fixed collection window. With a free slot, waiting mainly comes from wake-up and
+scheduling; when all slots are occupied, requests must wait for capacity to execute. `BatchSize` limits the number of
+requests per handler call: a batch may contain just one request at low traffic or several requests already queued in the
+same partition during a burst.
+
+![Opportunistic merging flow](docs/assets/request-batcher-opportunistic-merging.png)
+
+The diagram shows normal consumption and omits cancellation and shutdown. [BufferQueue's consumer loop](https://github.com/eventhorizon-cli/BufferQueue/blob/90c6208f940592f797ab8cf78ad4af88d1163649/src/BufferQueue/BufferPullConsumer.cs#L59)
+checks the notification version before waiting. If new data was signaled during the scan, it retries the pull to avoid a
+missed wake-up.
 
 Requests are held in memory and cannot be recovered after a process failure.
 
@@ -33,11 +48,6 @@ Requests are held in memory and cannot be recovered after a process failure.
 > concurrently. RequestBatcher coalesces requests already queued for the same partition into handler batches of up to
 > `BatchSize`. `ProcessAsync(IEnumerable<TRequest>)` is an additional submission option, not a prerequisite for
 > batching.
-
-![Request coalescing illustration](docs/assets/request-batcher-request-coalescing.png)
-
-Separate concurrent requests can be combined into one batch before a downstream batch operation. The illustration is
-an example: only requests already queued in the same partition can be combined into one handler batch.
 
 ## Installation and DI Registration
 
@@ -47,12 +57,17 @@ dotnet add package RequestBatcher
 
 The package supports .NET 8 and .NET 10 applications through `net8.0` and `net10.0` assets.
 
-Register the handler and batcher with `AddRequestBatcher` at startup. At the call site, resolve
-`IRequestBatcher<TRequest>` from the same DI container or inject it into an application service's constructor.
+Register the response-enabled handler and batcher with `AddRequestBatcher` at startup. The handler depends on your
+application's `IPriceStore` implementation. At the call site, resolve `IRequestBatcher<PriceQuery, PriceQuote?>` from
+the same DI container or inject it into an application service's constructor.
 
 ```csharp
-// At startup: register with the application's IServiceCollection.
-services.AddRequestBatcher<OrderWriteRequest, OrderWriteBatchHandler>(
+using Microsoft.Extensions.DependencyInjection;
+using RequestBatcher;
+
+// At startup: register the store and response-enabled batcher.
+services.AddScoped<IPriceStore, PriceStore>();
+services.AddRequestBatcher<PriceQuery, PriceQuote?, PriceQueryHandler>(
     ServiceLifetime.Scoped,
     options =>
     {
@@ -60,20 +75,18 @@ services.AddRequestBatcher<OrderWriteRequest, OrderWriteBatchHandler>(
         options.MaxConcurrency = 4;
         options.BatchSize = 100;
         options.MaxPendingRequests = 5_000;
-        // Equal order IDs route to the same partition; separate batches can still run concurrently.
-        options.UsePartitionKey(request => request.OrderId, partitionCount: 8);
+        // Equal product IDs route to the same partition; separate batches can still run concurrently.
+        options.UsePartitionKey(query => query.ProductId, partitionCount: 8);
     });
 
-// At the call site: resolve from that application's service provider.
-var batcher = serviceProvider.GetRequiredService<IRequestBatcher<OrderWriteRequest>>();
-await batcher.ProcessAsync(new OrderWriteRequest(OrderId: 1, Amount: 100m));
+// At the call site: resolve the typed response interface from the application's service provider.
+var batcher = serviceProvider.GetRequiredService<IRequestBatcher<PriceQuery, PriceQuote?>>();
+var quote = await batcher.ProcessAsync(new PriceQuery(ProductId: 101));
 ```
 
-Use `Microsoft.Extensions.DependencyInjection` and `RequestBatcher`. In application services, constructor-inject
-`IRequestBatcher<TRequest>` instead of resolving it manually. For typed results, register with
-`AddRequestBatcher<TRequest, TResponse, THandler>` and inject `IRequestBatcher<TRequest, TResponse>`.
-See the [request and handler definitions](#request-only-batching) below, and register the handler's dependencies
-(such as your `IOrderStore` implementation) in the same container.
+Use `Microsoft.Extensions.DependencyInjection` and `RequestBatcher`. The [Request/Response Batching](#requestresponse-batching)
+section below defines `PriceQuery`, `PriceQuote`, `PriceQueryHandler`, and the `IPriceStore` dependency. In application
+services, constructor-inject `IRequestBatcher<PriceQuery, PriceQuote?>` instead of resolving it manually.
 
 ## When to Use It
 

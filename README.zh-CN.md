@@ -11,6 +11,11 @@ RequestBatcher 是一个运行在进程内的 .NET 批处理库，用于将单�
 并等待各自的结果；RequestBatcher 会合并已经排队的请求，限制 Handler 批次并发数和队列容量，再将批次交给应用的
 Handler 处理。它适用于支持一次处理多个数据项的数据库、缓存和下游 API。
 
+![请求合并示意图](docs/assets/request-batcher-request-coalescing.zh-CN.png)
+
+多个独立的并发请求可以先合并为一个批次，再执行一次下游批量操作。图示仅用于说明：只有已经在同一 Partition 中排队的请求
+才可能合并为同一批。
+
 ## 请求如何合并：机会式合并
 
 RequestBatcher 基于 [BufferQueue](https://github.com/eventhorizon-cli/BufferQueue)，将 .NET 进程内已经排队的并发请求
@@ -18,21 +23,23 @@ RequestBatcher 基于 [BufferQueue](https://github.com/eventhorizon-cli/BufferQu
 `IRequestBatcher<TRequest, TResponse>`，提交请求并等待各自的结果。当前依赖
 [BufferQueue 2.0.3](https://www.nuget.org/packages/BufferQueue/2.0.3)，应用无需单独注册或配置它。
 
-RequestBatcher 采用 **机会式合并（Opportunistic Merging）**：请求写入 BufferQueue 后会发出可用数据通知，唤醒消费
-流程；只要有空闲执行名额，就会拉取当前已排队的请求。消费流程由 push 通知唤醒，再通过 pull API 取得批次，不依赖
-定时轮询，也没有固定的收集窗口。有空闲名额时，等待主要来自唤醒和调度；名额占满时，请求仍需排队。
+RequestBatcher 采用 **机会式合并（Opportunistic Merging）**：请求写入 BufferQueue 后会发出数据可用通知，唤醒等待中的
+消费流程。调度循环先取得空闲执行名额，再通过 pull API 拉取当前已排队的请求；分发批次后便继续循环，只要还有名额，
+就可以继续拉取和分发，无需等待刚分发的批次完成。只有扫描所有分配的 Partition 都没有数据时，才等待下一次 push 通知。
+
+这个过程不依赖定时轮询，也没有固定的收集窗口。有空闲名额时，等待主要来自唤醒和调度；名额占满时，请求仍需排队。
 `BatchSize` 只限制每批的最大数量：低流量时一批可能只有一个请求，突发流量时则可能合并同一 Partition 中的多个请求。
+
+![机会式合并流程图](docs/assets/request-batcher-opportunistic-merging.zh-CN.png)
+
+图中展示正常消费流程，省略了取消与停止分支。[BufferQueue 的消费循环](https://github.com/eventhorizon-cli/BufferQueue/blob/90c6208f940592f797ab8cf78ad4af88d1163649/src/BufferQueue/BufferPullConsumer.cs#L59)
+会在进入等待前检查通知版本；如果这期间有新数据通知到达，就重新尝试拉取，避免漏掉唤醒。
 
 请求仅保存在进程内，进程故障后无法恢复尚未完成的请求。
 
 > **调用方无需先收集请求，也能获得批量处理。** 多个调用方可以并发地各自提交一个
 > `TRequest`；RequestBatcher 会将同一 Partition 中已排队的零散请求合并为最多 `BatchSize` 项的处理批次。
 > `ProcessAsync(IEnumerable<TRequest>)` 只是额外的提交方式，并不是产生批量处理的前提。
-
-![请求合并示意图](docs/assets/request-batcher-request-coalescing.zh-CN.png)
-
-多个独立的并发请求可以先合并为一个批次，再执行一次下游批量操作。图示仅用于说明：只有已经在同一 Partition 中排队的请求
-才可能合并为同一批。
 
 ## 安装与 DI 注册
 
@@ -42,12 +49,16 @@ dotnet add package RequestBatcher
 
 包提供 `net8.0` 和 `net10.0` 资产，支持 .NET 8 和 .NET 10 应用。
 
-启动时通过 `AddRequestBatcher` 注册 Handler 和批处理服务；调用时从同一个 DI 容器获取
-`IRequestBatcher<TRequest>`，或在应用服务的构造函数中注入它。
+启动时通过 `AddRequestBatcher` 注册带返回值的 Handler 和批处理服务。Handler 依赖应用自己的 `IPriceStore` 实现；调用时从
+同一个 DI 容器获取 `IRequestBatcher<PriceQuery, PriceQuote?>`，或在应用服务的构造函数中注入它。
 
 ```csharp
-// 应用启动时，在应用的 IServiceCollection 中注册。
-services.AddRequestBatcher<OrderWriteRequest, OrderWriteBatchHandler>(
+using Microsoft.Extensions.DependencyInjection;
+using RequestBatcher;
+
+// 应用启动时，注册存储服务和带返回值的批处理服务。
+services.AddScoped<IPriceStore, PriceStore>();
+services.AddRequestBatcher<PriceQuery, PriceQuote?, PriceQueryHandler>(
     ServiceLifetime.Scoped,
     options =>
     {
@@ -55,20 +66,18 @@ services.AddRequestBatcher<OrderWriteRequest, OrderWriteBatchHandler>(
         options.MaxConcurrency = 4;
         options.BatchSize = 100;
         options.MaxPendingRequests = 5_000;
-        // 相同的订单 ID 路由到同一 Partition；不同批次仍可能并发执行。
-        options.UsePartitionKey(request => request.OrderId, partitionCount: 8);
+        // 相同的商品 ID 路由到同一 Partition；不同批次仍可能并发执行。
+        options.UsePartitionKey(query => query.ProductId, partitionCount: 8);
     });
 
-// 调用处从应用自己的 Service Provider 获取服务。
-var batcher = serviceProvider.GetRequiredService<IRequestBatcher<OrderWriteRequest>>();
-await batcher.ProcessAsync(new OrderWriteRequest(OrderId: 1, Amount: 100m));
+// 调用处从应用自己的 Service Provider 获取带返回值的泛型接口。
+var batcher = serviceProvider.GetRequiredService<IRequestBatcher<PriceQuery, PriceQuote?>>();
+var quote = await batcher.ProcessAsync(new PriceQuery(ProductId: 101));
 ```
 
-代码示例需要引入 `Microsoft.Extensions.DependencyInjection` 和 `RequestBatcher` 命名空间。应用服务中推荐通过
-构造函数注入 `IRequestBatcher<TRequest>`。若需要强类型返回值，请使用
-`AddRequestBatcher<TRequest, TResponse, THandler>` 注册，并注入 `IRequestBatcher<TRequest, TResponse>`。
-请求和 Handler 的定义见下方[无返回值批处理](#无返回值批处理)示例；Handler 所需的依赖
-（例如你自己的 `IOrderStore` 实现）也应注册在同一个容器中。
+代码示例需要引入 `Microsoft.Extensions.DependencyInjection` 和 `RequestBatcher` 命名空间。下方[带返回值批处理](#带返回值批处理)定义了
+`PriceQuery`、`PriceQuote`、`PriceQueryHandler` 以及 `IPriceStore` 依赖。应用服务中推荐通过构造函数注入
+`IRequestBatcher<PriceQuery, PriceQuote?>`。
 
 ## 适用场景
 
@@ -431,7 +440,7 @@ builder.Services.AddRequestBatcher<ProductQueryItem, ProductBatchHandler>(
 L = λ x W
 ```
 
-其中，`L` 表示正在处理的 Handler 批次数，`λ` 表示批次到达速率（QPS），`W` 表示平均响应时间。
+其中，`L` 表示正在处理的 Handler 批次数，`λ` 表示批量查询 QPS（每秒批量查询次数），`W` 表示平均响应时间。
 
 如果已经有批量查询 QPS 和响应时间，可以直接估算整个集群正在处理的批次数：
 
