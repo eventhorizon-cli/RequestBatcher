@@ -7,72 +7,43 @@
 
 **English** | [简体中文](README.zh-CN.md)
 
-## Batching Model: Opportunistic Merging
+## How Batches Are Formed: Opportunistic Merging
 
-RequestBatcher is built on [BufferQueue](https://github.com/eventhorizon-cli/BufferQueue), pinned here to
-[BufferQueue 2.0.3](https://www.nuget.org/packages/BufferQueue/2.0.3). BufferQueue provides the internal in-process
-partitioned buffer; RequestBatcher owns the handler lifecycle, admission control, routing projection, and completion
-semantics. Applications register only RequestBatcher through their existing DI container and do not configure
-BufferQueue directly. BufferQueue is an implementation dependency, not a durable external queue.
+RequestBatcher uses [BufferQueue](https://github.com/eventhorizon-cli/BufferQueue) to combine queued requests within a
+.NET process and pass them to an application handler. Callers obtain `IRequestBatcher<TRequest>` or
+`IRequestBatcher<TRequest, TResponse>` through DI, submit requests, and await their individual results. The current
+dependency is [BufferQueue 2.0.3](https://www.nuget.org/packages/BufferQueue/2.0.3); applications do not register or
+configure it separately.
 
-The batching model is **opportunistic merging**. A producer pushes a request into BufferQueue and the available-data
-signal wakes the consumer path; RequestBatcher then pulls the currently available items when an execution slot is free.
-There is no timer or fixed collection window in this path, so trigger-to-handler delay is limited to wake-up and scheduling
-overhead rather than an intentional batching delay. `BatchSize` is a maximum, not a target: a quiet
-stream can invoke the handler with one request, while a burst already waiting in the same partition can be merged into
-a larger batch. The internal API uses a pull consumer after the push notification; it is not a periodic polling loop.
+RequestBatcher uses **Opportunistic Merging**. Writing a request to BufferQueue signals that data is available and wakes
+the consumer path. When an execution slot is free, RequestBatcher pulls the requests already queued. Consumption is
+triggered by a push notification and uses a pull API to retrieve the batch; there is no periodic polling or fixed
+collection window. With a free slot, waiting mainly comes from wake-up and scheduling; when all slots are occupied,
+requests must wait for capacity to execute. `BatchSize` limits the number of requests per handler call: a batch may
+contain just one request at low traffic or several requests already queued in the same partition during a burst.
 
-Start with a configuration that makes the two independent limits visible:
+Requests are held in memory and cannot be recovered after a process failure.
 
-```csharp
-builder.Services.AddRequestBatcher<ProductQueryItem, ProductBatchHandler>(
-    ServiceLifetime.Scoped,
-    options =>
-    {
-        // Per-pod downstream limit. Six pods x four slots = at most 24 handler batches cluster-wide.
-        options.MaxConcurrency = 4;
-        options.BatchSize = 100;
-        options.MaxPendingRequests = 5_000;
+> **Batching does not require callers to assemble a collection.** Separate callers can each submit one `TRequest`
+> concurrently. RequestBatcher coalesces requests already queued for the same partition into handler batches of up to
+> `BatchSize`. `ProcessAsync(IEnumerable<TRequest>)` is an additional submission option, not a prerequisite for
+> batching.
 
-        // Routing/locality only. Eight queue partitions are independent of the four execution slots.
-        options.UsePartitionKey(item => item.ProductId, partitionCount: 8);
-    });
+![Request coalescing illustration](docs/assets/request-batcher-request-coalescing.png)
+
+Separate concurrent requests can be combined into one batch before a downstream batch operation. The illustration is
+an example: only requests already queued in the same partition can be combined into one handler batch.
+
+## Installation and DI Registration
+
+```bash
+dotnet add package RequestBatcher
 ```
 
-`partitionCount` controls where requests wait and which equal keys can be merged. `MaxConcurrency` controls how many
-handler batches can execute concurrently across all partitions in one process. They are deliberately different knobs:
-eight partitions do not create four workers, and four workers do not require eight partitions.
+The package supports .NET 8 and .NET 10 applications through `net8.0` and `net10.0` assets.
 
-### Size `MaxConcurrency` with Little's Law
-
-Measure the downstream operation before choosing the number. Use the same unit for both measurements:
-
-```text
-Concurrency (in flight) = arrival rate (QPS) x response time (seconds)
-L = λ x W
-```
-
-Assuming one handler invocation issues one downstream batch operation and holds its slot until that operation completes,
-if the downstream metrics are batch-call QPS and batch response time, estimate the cluster-wide in-flight batch count
-with `L = QPS_batch × RT_batch`. Divide by the number of active pods and round up, then add a small safety margin:
-
-```text
-MaxConcurrency_per_pod ≈ ceil(QPS_batch × RT_batch_seconds / pod_count × headroom)
-```
-
-For example, six active pods handling 480 downstream batch calls/second at a 50 ms response time need about
-`480 × 0.050 = 24` in-flight batch calls. `MaxConcurrency = 4` gives four slots per pod and 24 slots across six pods;
-choose a higher or lower value only after measuring queue wait, downstream throttling, CPU, and connection limits.
-
-When QPS is measured per item but one handler call sends an effective average of `B` items, estimate batch slots as
-`ceil(QPS_item × RT_batch_seconds / B)` instead. Do not blindly multiply a per-item QPS by a batch-call latency.
-Re-measure after changing `BatchSize`, because the effective batch size and response time can change together.
-
-`MaxPendingRequests` is a backlog limit, not another execution slot count. Choose it from the amount of queueing you are
-willing to absorb (`arrival rate × acceptable queue time`), then verify admission latency and memory use under bursts.
-
-**Start with dependency injection: register with `AddRequestBatcher`, then obtain
-`IRequestBatcher<TRequest>` from your application's DI container to submit requests.**
+Register the handler and batcher with `AddRequestBatcher` at startup. At the call site, resolve
+`IRequestBatcher<TRequest>` from the same DI container or inject it into an application service's constructor.
 
 ```csharp
 // At startup: register with the application's IServiceCollection.
@@ -80,9 +51,11 @@ services.AddRequestBatcher<OrderWriteRequest, OrderWriteBatchHandler>(
     ServiceLifetime.Scoped,
     options =>
     {
+        // Four concurrent handler batches, shared by all eight queue partitions.
         options.MaxConcurrency = 4;
         options.BatchSize = 100;
         options.MaxPendingRequests = 5_000;
+        // Equal order IDs route to the same partition; separate batches can still run concurrently.
         options.UsePartitionKey(request => request.OrderId, partitionCount: 8);
     });
 
@@ -96,20 +69,6 @@ Use `Microsoft.Extensions.DependencyInjection` and `RequestBatcher`. In applicat
 `AddRequestBatcher<TRequest, TResponse, THandler>` and inject `IRequestBatcher<TRequest, TResponse>`.
 See the [request and handler definitions](#request-only-batching) below, and register the handler's dependencies
 (such as your `IOrderStore` implementation) in the same container.
-
-RequestBatcher lets application code submit one request and await one `Task` or `Task<TResponse>`, while an
-application handler receives multiple queued requests at a time. It is an in-process way to use a downstream batch
-operation without exposing batch coordination to every caller.
-
-> **Batching does not require callers to assemble a collection.** Separate callers can each submit one `TRequest`
-> concurrently. RequestBatcher coalesces requests already queued for the same partition into handler batches of up to
-> `BatchSize`. `ProcessAsync(IEnumerable<TRequest>)` is an additional submission option, not a prerequisite for
-> batching.
-
-![Request coalescing illustration](docs/assets/request-batcher-request-coalescing.png)
-
-Separate concurrent requests can be combined into one batch before a downstream batch operation. The illustration is
-an example: only requests already queued in the same partition can be combined into one handler batch.
 
 ## When to Use It
 
@@ -140,45 +99,7 @@ RequestBatcher is not a durable background queue or a transaction coordinator:
   One handler batch can contain requests from several callers, so caller cancellation tokens are not forwarded to the
   handler and cannot cancel the shared handler call.
 
-## How It Works
-
-The internal queue's partition count is not the handler concurrency level. Partitions organize queueing and routing;
-the global `MaxConcurrency` setting limits the number of handler batches that can execute at once. Multiple batches
-from one partition can execute concurrently, and all partitions share the same execution slots.
-
-Without `UsePartitionKey`, RequestBatcher uses one internal queue partition. This avoids fragmenting unrelated requests
-across queues and leaves them together for natural batching. When `UsePartitionKey` is configured with a finite integer
-numeric key or a non-null string key and an explicit partition count, the queue uses that many partitions so equal keys
-retain locality while different keys can progress independently. `P` is a routing detail; `H = MaxConcurrency` remains
-the global handler-batch concurrency limit. A single partition can continuously produce
-multiple asynchronous handler batches, so partitions do not impose a one-batch-at-a-time limit.
-
-1. A caller submits one request through `ProcessAsync`.
-2. RequestBatcher admits the request according to the configured capacity and routes it to an in-memory partition.
-3. The internal `BatchDispatchLoop` acquires a free handler slot, then pulls and auto-commits up to `BatchSize`
-   requests that are already queued.
-4. The handler outcome completes the `Task` returned to every caller represented in that handler batch.
-
-`BatchSize` is an upper bound, not a minimum. RequestBatcher does not hold the first request for a fixed batching
-window, so low traffic may produce single-request batches while concurrent traffic naturally produces larger batches.
-
-![RequestBatcher architecture](docs/assets/request-batcher-architecture.png)
-
-The architecture diagram shows the coordinator, the in-memory partition queue, and the separate `Task` completion
-path for each accepted request.
-
-### Internal Dispatch Scheduling
-
-Here, `H = MaxConcurrency` is the maximum number of handler batches running at once. Without a partition key there is
-one internal queue partition; with a numeric or string partition key, `P` is the explicit count supplied to
-`UsePartitionKey`.
-
-![Internal dispatch scheduling](docs/assets/request-batcher-dispatch-scheduling.png)
-
-One `BatchDispatchLoop` owns all `P` partitions and shares `H` global execution slots. It waits for a free slot before
-pulling a queue batch, then starts its handler and returns to waiting for another slot. When all slots are occupied,
-requests remain in BufferQueue. As soon as any one handler batch completes, its slot becomes free and the loop can pull
-the next batch while the other handlers keep running. It does not wait for all currently running batches to finish.
+## APIs
 
 ### Request-Only API
 
@@ -202,14 +123,6 @@ Use `IRequestBatcher<TRequest, TResponse>` when every accepted request must yiel
 
 RequestBatcher awaits each handler's `ValueTask` once and never returns it to a caller. Synchronously completing
 handlers can therefore avoid a `Task` allocation, while asynchronous I/O can use `async ValueTask`.
-
-## Installation
-
-```bash
-dotnet add package RequestBatcher
-```
-
-The package supports .NET 8 and .NET 10 applications through `net8.0` and `net10.0` assets.
 
 ## Request-Only Batching
 
@@ -413,6 +326,141 @@ invocation. They are not the same boundary.
 | Failure | A handler failure fails every request in that handler batch. | Some items may succeed before another handler batch fails. The group `Task` faults, but successful work is not rolled back. |
 | Cancellation | Cancellation removes the request only before dispatch. | The same token applies to every item; undispatched items can be canceled while dispatched items continue to their actual outcome. |
 
+## How It Works
+
+The internal queue's partition count is not the handler concurrency level. Partitions organize queueing and routing;
+the global `MaxConcurrency` setting limits the number of handler batches that can execute at once. Multiple batches
+from one partition can execute concurrently, and all partitions share the same execution slots.
+
+Without `UsePartitionKey`, RequestBatcher uses one internal queue partition. This avoids fragmenting unrelated requests
+across queues and leaves them together for natural batching. When `UsePartitionKey` is configured with a finite integer
+numeric key or a non-null string key and an explicit partition count, the queue uses that many partitions so equal keys
+retain locality while different keys can progress independently. `P` is a routing detail; `H = MaxConcurrency` remains
+the global handler-batch concurrency limit. A single partition can continuously produce
+multiple asynchronous handler batches, so partitions do not impose a one-batch-at-a-time limit.
+
+1. A caller submits one request through `ProcessAsync`.
+2. RequestBatcher admits the request according to the configured capacity and routes it to an in-memory partition.
+3. The internal `BatchDispatchLoop` acquires a free handler slot, then pulls and auto-commits up to `BatchSize`
+   requests that are already queued.
+4. The handler outcome completes the `Task` returned to every caller represented in that handler batch.
+
+`BatchSize` is an upper bound, not a minimum. RequestBatcher does not hold the first request for a fixed batching
+window, so low traffic may produce single-request batches while concurrent traffic naturally produces larger batches.
+
+![RequestBatcher architecture](docs/assets/request-batcher-architecture.png)
+
+The architecture diagram shows the coordinator, the in-memory partition queue, and the separate `Task` completion
+path for each accepted request.
+
+### Internal Dispatch Scheduling
+
+Here, `H = MaxConcurrency` is the maximum number of handler batches running at once. Without a partition key there is
+one internal queue partition; with a numeric or string partition key, `P` is the explicit count supplied to
+`UsePartitionKey`.
+
+![Internal dispatch scheduling](docs/assets/request-batcher-dispatch-scheduling.png)
+
+One `BatchDispatchLoop` owns all `P` partitions and shares `H` global execution slots. It waits for a free slot before
+pulling a queue batch, then starts its handler and returns to waiting for another slot. When all slots are occupied,
+requests remain in BufferQueue. As soon as any one handler batch completes, its slot becomes free and the loop can pull
+the next batch while the other handlers keep running. It does not wait for all currently running batches to finish.
+
+## Configuration
+
+| Option | Default | Behavior |
+| --- | ---: | --- |
+| `BatchSize` | `128` | Maximum requests passed to one handler call. |
+| `MaxConcurrency` | `1` | Maximum concurrent handler batches. It is independent of the keyed partition count. |
+| `MaxPendingRequests` | `8192` | Internal BufferQueue capacity for requests that have not yet been pulled for execution. |
+| `FullMode` | `Wait` | Waits for capacity; `Fail` rejects immediately when capacity is unavailable. |
+| `UsePartitionKey(selector, partitionCount)` | Not set | Enables keyed routing with the explicitly configured partition count; `partitionCount` must be greater than one and equal keys use one partition. |
+
+No ordering is guaranteed for handler execution, including when `MaxConcurrency = 1`.
+
+### Partitions and Concurrency
+
+This configuration uses eight queue partitions sharing four handler execution slots:
+
+```csharp
+builder.Services.AddRequestBatcher<ProductQueryItem, ProductBatchHandler>(
+    ServiceLifetime.Scoped,
+    options =>
+    {
+        // Per-pod downstream limit. Six pods x four slots = at most 24 handler batches cluster-wide.
+        options.MaxConcurrency = 4;
+        options.BatchSize = 100;
+        options.MaxPendingRequests = 5_000;
+
+        // Routing/locality only. Eight queue partitions are independent of the four execution slots.
+        options.UsePartitionKey(item => item.ProductId, partitionCount: 8);
+    });
+```
+
+`partitionCount` controls how requests are distributed across queues; equal keys always route to the same partition.
+`MaxConcurrency` limits concurrent handler batches for one registered batcher, with all partitions sharing those slots.
+A single partition can also supply several concurrent batches.
+
+### Size `MaxConcurrency` with Little's Law
+
+Estimate concurrency from downstream batch-call QPS and mean response time. Measure both for the same operation and
+express response time in seconds:
+
+```text
+Concurrency (in flight) = arrival rate (QPS) x response time (seconds)
+L = λ x W
+```
+
+Assuming one handler invocation issues one downstream batch operation and holds its slot until that operation completes,
+if the downstream metrics are batch-call QPS and batch response time, estimate the cluster-wide in-flight batch count
+with `L = QPS_batch × RT_batch`. Divide by the number of active pods and round up, then add a small safety margin:
+
+```text
+MaxConcurrency_per_pod ≈ ceil(QPS_batch × RT_batch_seconds / pod_count × headroom)
+```
+
+For example, six active pods handling 480 downstream batch calls/second at a 50 ms mean response time need about
+`480 × 0.050 = 24` in-flight batch calls. With evenly distributed traffic, `MaxConcurrency = 4` gives four slots per pod
+and 24 slots across six pods. This estimates average load; it does not guarantee latency or throughput. Adjust the limit
+using measured queue wait, downstream throttling, CPU, and connection limits.
+
+When QPS is measured per item but one handler call sends an effective average of `B` items, estimate cluster-wide batch
+slots as `ceil(QPS_item × RT_batch_seconds / B)`. Divide that result by the pod count and round up.
+Re-measure after changing `BatchSize`, because the effective batch size and response time can change together.
+
+`MaxPendingRequests` is a backlog limit, not another execution slot count. Choose it from the amount of queueing you are
+willing to absorb (`request-item QPS per batcher × acceptable queue time`), then verify admission latency and memory use under bursts.
+
+## Partition Keys
+
+A partition key is an optional routing rule for related requests:
+
+```csharp
+options.MaxConcurrency = 4;
+options.UsePartitionKey(request => request.OrderId, partitionCount: 8);
+```
+
+Equal finite, integer-valued numeric keys or equal non-null string keys are routed to the same queue partition among the
+configured partition count. The count must be greater than one.
+Different keys can still share a partition, so keys and partitions are not one-to-one.
+
+Partition routing does not force all requests for one key into the same handler batch, and it does not deduplicate
+requests. It does not provide an execution-order or mutual-exclusion boundary.
+
+### Example: Merge Repeated Updates
+
+Suppose several `PriceUpdate` requests have the same `ProductId`. A handler can group its current batch by product and
+write only the highest version. Routing by `ProductId` improves locality, but separate handler calls can still process
+that product concurrently.
+
+The storage layer must still prevent stale versions from overwriting newer state across batches because a partition key
+does not place every update for one product into the same batch. The runnable
+[PostgreSQL Web API sample](samples/RequestBatcher.Deduplication) demonstrates both safeguards:
+
+- the write handler merges repeated product updates within one batch, then performs one bulk upsert;
+- the upsert condition ignores older versions that arrive in later batches;
+- the query handler deduplicates product IDs before issuing one SQL query for the batch.
+
 ## Routing and Dispatch
 
 `MaxConcurrency` is the global maximum number of concurrent handler batches. Without a partition key, the queue has one
@@ -486,48 +534,6 @@ on the number of callers waiting for capacity:
 `DisposeAsync` stops accepting new requests, drains every accepted submission (including submissions waiting for
 capacity), then releases coordinator-owned resources. Concurrent and repeated disposal calls share the same operation.
 When registered through `AddRequestBatcher`, the application container owns async disposal.
-
-## Configuration
-
-| Option | Default | Behavior |
-| --- | ---: | --- |
-| `BatchSize` | `128` | Maximum requests passed to one handler call. |
-| `MaxConcurrency` | `1` | Maximum concurrent handler batches. It is independent of the keyed partition count. |
-| `MaxPendingRequests` | `8192` | Internal BufferQueue capacity for requests that have not yet been pulled for execution. |
-| `FullMode` | `Wait` | Waits for capacity; `Fail` rejects immediately when capacity is unavailable. |
-| `UsePartitionKey(selector, partitionCount)` | Not set | Enables keyed routing with the explicitly configured partition count; `partitionCount` must be greater than one and equal keys use one partition. |
-
-No ordering is guaranteed for handler execution, including when `MaxConcurrency = 1`.
-
-## Partition Keys
-
-A partition key is an optional routing rule for related requests:
-
-```csharp
-options.MaxConcurrency = 4;
-options.UsePartitionKey(request => request.OrderId, partitionCount: 8);
-```
-
-Equal finite, integer-valued numeric keys or equal non-null string keys are routed to the same queue partition among the
-configured partition count. The count must be greater than one.
-Different keys can still share a partition, so keys and partitions are not one-to-one.
-
-Partition routing does not force all requests for one key into the same handler batch, and it does not deduplicate
-requests. It does not provide an execution-order or mutual-exclusion boundary.
-
-### Example: Merge Repeated Updates
-
-Suppose several `PriceUpdate` requests have the same `ProductId`. A handler can group its current batch by product and
-write only the highest version. Routing by `ProductId` improves locality, but separate handler calls can still process
-that product concurrently.
-
-The storage layer must still prevent stale versions from overwriting newer state across batches because a partition key
-does not place every update for one product into the same batch. The runnable
-[PostgreSQL Web API sample](samples/RequestBatcher.Deduplication) demonstrates both safeguards:
-
-- the write handler merges repeated product updates within one batch, then performs one bulk upsert;
-- the upsert condition ignores older versions that arrive in later batches;
-- the query handler deduplicates product IDs before issuing one SQL query for the batch.
 
 ## Dependency Injection and Logging
 

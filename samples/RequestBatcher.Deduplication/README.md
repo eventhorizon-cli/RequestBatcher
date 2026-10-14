@@ -1,9 +1,9 @@
 # PostgreSQL Web API Sample
 
-This sample uses [BufferQueue](https://github.com/eventhorizon-cli/BufferQueue) through RequestBatcher. Requests are
-merged opportunistically after a push wakes the consumer path; there is no fixed collection window. `BatchSize` is only
-a maximum, while `MaxConcurrency` limits concurrent handler batches per process and `partitionCount` controls keyed
-routing.
+This sample uses [BufferQueue](https://github.com/eventhorizon-cli/BufferQueue) through RequestBatcher. A push wakes the
+consumer path, which pulls currently queued requests when an execution slot is available; there is no fixed collection
+window. `BatchSize` is only a maximum, while `MaxConcurrency` limits concurrent handler batches per process and
+`partitionCount` controls keyed routing.
 
 This is a small RequestBatcher example. Concurrent `POST /prices` calls are collected into handler batches. The write
 handler keeps the highest version for each product and writes its batch with one Dapper PostgreSQL upsert.
