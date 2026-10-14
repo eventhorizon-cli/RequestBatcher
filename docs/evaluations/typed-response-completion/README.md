@@ -1,60 +1,19 @@
 # Typed response completion
 
-Single response submissions use a typed result box, derived from
-`TaskCompletionSource<TResponse>`, as the pending request's completion target.
-When enqueueing completes synchronously, the public facade returns that task
-directly. This removes the untyped completion task and the response-conversion
-async state machine from that path. Capacity waits retain the producer's
-observation path. Tasks are not pooled, and completion still uses
-`RunContinuationsAsynchronously`.
+A typed result box lets single response submissions return their completion task directly,
+removing the untyped completion task and response-conversion state machine from the fast path.
+Tasks are not pooled; results still wait for handler completion and async scope disposal.
 
-Success is published only after the handler, validation of every response in its
-handler batch, and async scope disposal succeed. Ordinary failures retain their
-exception identity. A handler cancellation retains its token and canceled task
-status, but a single response now throws the standard `TaskCanceledException`
-rather than the handler's original cancellation exception instance.
+Baseline `282c254` versus `05fb75e`, identical benchmark source, Arm64 macOS,
+SDK 10.0.100, .NET 8.0.25, workstation GC, BenchmarkDotNet 0.15.8.
+Two launches, eight warmups, 20 measurements, 500 ms iteration target.
 
-## Method
+## Results
 
-`ResponseCompletionBenchmarks` exercises public DI registration, enqueueing,
-dispatch, and awaiting callers. One operation submits and validates 256 requests,
-with batch size 32, maximum concurrency 8, and queue capacity 512. No partition
-key is configured. Handlers are singletons. Setup and provider disposal are
-outside the measurements.
-
-For success and failure waves, a handler gate is released only after caller
-waiters have been attached. Each failing handler batch throws its own exception;
-all 256 returned tasks are awaited and their failures inspected. Cancellation
-uses concurrency 1, a separate blocked request to prevent target dispatch, and
-a drain sentinel before the next wave. Its measurements include token sources,
-registrations, blocker/sentinel requests, and observing all canceled tasks.
-Explicit response batches and request-only singles are controls.
-
-Before and after use the same benchmark source, run sequentially on the same
-host. The baseline is commit `282c254d291641901faa3659bd1a606ddf393b6f`, with only
-the new benchmark file copied into a clean archive. The candidate is commit
-`05fb75e3777d3f9ede86facdd451abfa00965dc9`. The benchmark source SHA-256 is
-`cea1504c8cdac7fe6700c1ae03dc3ed96a7e86894a523fd5dfa1fd5be8cb46ca`
-for both runs. The job uses two processes,
-eight warmup iterations, and twenty measurement iterations per process, with
-500 ms target iteration time. The environment is .NET SDK 10.0.100, runtime
-8.0.25, ARM64 macOS, workstation GC, and BenchmarkDotNet 0.15.8. High process
-priority and processor-model discovery were unavailable in the sandbox.
-
-Reproduce each version with:
-
-```bash
-NuGetAudit=false dotnet run \
-  --project tests/RequestBatcher.Benchmarks/RequestBatcher.Benchmarks.csproj \
-  --configuration Release -- \
-  --filter '*ResponseCompletionBenchmarks*' --artifacts /tmp/response-completion-results
-```
-
-## Measured comparison
-
-Each row is one 256-request wave. Time change is `(after / before - 1)`;
-negative values are reductions. KB denotes 1,024 bytes. These are the full-suite
-results, with the controls retained rather than omitted.
+Each wave uses 256 requests, batch size 32, concurrency 8, capacity 512, no key and singleton
+handlers. Cancellation uses concurrency 1, a blocker and a drain sentinel. Setup/disposal
+are excluded; queueing, scheduling, caller task arrays, validation and exception observation
+are included. KB means 1,024 bytes; negative changes are reductions.
 
 | Scenario | Before mean | After mean | Time change | Before allocation | After allocation | Allocation change |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -64,38 +23,19 @@ results, with the controls retained rather than omitted.
 | Request-only single success control | 190.82 us | 199.73 us | +4.67% | 93.91 KB | 93.85 KB | -0.06% |
 | Explicit response batch success control | 72.81 us | 73.44 us | +0.87% | 76.38 KB | 76.38 KB | +0.00% |
 
-The supported primary benefit is reduced allocation for single responses.
-Success is 2.96% faster in this full-suite comparison, but request-only control
-means vary between runs. This does not establish a robust success-path throughput
-improvement. Failure and cancellation also avoid the removed wrapper's exception
-propagation work; their measured savings depend on this benchmark's observation
-pattern. Full confidence intervals and GC counts are in the linked reports.
+**Reduced allocation is the supported primary benefit.** Request-only control times vary,
+so the small success-path timing gain is not a robust throughput conclusion. Failure and
+cancellation savings depend on the benchmark's exception observation pattern.
+The explicit control overlaps the baseline timing interval and keeps allocation unchanged.
 
-The implementation retains direct calls for shared batch completion. The
-explicit-batch control's 73.44 us mean overlaps the baseline confidence interval
-and keeps allocation at 76.38 KB.
+These are gated in-process waves with cheap handlers, not network operations or per-item
+latency. Batch formation can vary. Results do not establish benefits under capacity pressure,
+other response types, keyed routing or scoped/transient async disposal.
 
-Full results and raw iterations: [before](before.md), [after](after.md),
-[before CSV](before.csv), [after CSV](after.csv),
-[before process output](before-output.txt), [after process output](after-output.txt).
+## Reproduce
 
-## Interpretation limits
-
-These are in-process waves with cheap handlers, not Redis or database round
-trips. The reported means describe whole waves, not individual request latency
-or p99. Allocation includes queueing, scheduling, task arrays, and validation;
-it is not an isolated object-size measurement. Concurrent scheduling can change
-the number and shape of handler batches. Failure and cancellation times include
-throwing and observing exceptions. Results do not establish a benefit for
-capacity-saturated queues, other response types, remote I/O, partition-key
-workloads, or scoped/transient handlers with async disposal. Deterministic tests
-cover the disposal boundary; these benchmarks do not measure its cost.
-
-## Correctness validation
-
-All 116 unit tests pass, including 13 added tests for publication after handler
-and async scope disposal, disposal/handler failure identity, missing-response
-fan-out, cancellation before and after dispatch, capacity waits and rejection,
-early lifecycle rejection, and repeated awaits. Formatting, Release solution
-build, and package creation pass. No asynchronous task is pooled, and explicit
-submissions still wait for all of their items through one shared completion.
+```bash
+dotnet run --project tests/RequestBatcher.Benchmarks/RequestBatcher.Benchmarks.csproj \
+  --configuration Release -- \
+  --filter '*ResponseCompletionBenchmarks*' --artifacts /private/tmp/response-completion-results
+```
