@@ -14,7 +14,7 @@ python3 scripts/scheduling-evaluation/run_io.py --smoke --output artifacts/http-
 
 This reuses the isolated source preparation in `run.py` and replaces only the temporary
 probe. It does not change the checkout's production code. The experimental offload
-switch schedules the `_batchConsumer.ProcessAsync` invocation through `Task.Run`
+switch schedules the `_batchConsumer.ExecuteAsync` invocation through `Task.Run`
 after acquiring an execution slot, then uses the existing
 `ProcessBatchAsync(ValueTask)` cleanup path. As in the original experiment, this is
 a performance probe with an unresolved cancellation boundary, not a production
@@ -73,7 +73,9 @@ not an open-loop saturation test; its p99 is not a production latency estimate. 
 HTTP omits TLS, remote network variability, real database pools/locks, large payloads,
 retries, cache hits and rate limits. The two processes share the host's CPU resources.
 
-The generated `environment.json` records SDK, source commit, dirty library diff and
+Generated files stay in the local output directory and should not be committed. Keep
+only concise result summaries in `docs/evaluations`. The generated `environment.json`
+records SDK, source commit, dirty library diff and
 experimental parameters. `measurements.jsonl` contains all measurements; `server.log`
 contains server failures, if any. The original experiment's README documents the
 in-flight/cancellation limitations of the temporary offload patch.

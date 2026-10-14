@@ -120,7 +120,7 @@ public class RedisWriteBenchmarks
         {
             for (var index = 0; index < _requests.Length; index++)
             {
-                writes[index] = RequestBatcher.ProcessAsync(_requests[index]);
+                writes[index] = RequestBatcher.ExecuteAsync(_requests[index]);
             }
         }
         finally
@@ -139,7 +139,7 @@ public class RedisWriteBenchmarks
         Task processing;
         try
         {
-            processing = RequestBatcher.ProcessAsync(_requests);
+            processing = RequestBatcher.ExecuteAsync(_requests);
         }
         finally
         {

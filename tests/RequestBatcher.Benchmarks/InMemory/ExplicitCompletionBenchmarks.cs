@@ -69,7 +69,7 @@ public class ExplicitCompletionBenchmarks
     public async Task ExplicitGroupSuccessAsync()
     {
         Success.Handler.BeginWave();
-        var operation = Success.Batcher.ProcessAsync(_requests);
+        var operation = Success.Batcher.ExecuteAsync(_requests);
         var waiter = ObserveSuccessAsync(operation);
         Success.Handler.ReleaseWave();
         await waiter.ConfigureAwait(false);
@@ -80,7 +80,7 @@ public class ExplicitCompletionBenchmarks
     public async Task ExplicitGroupFailureAsync()
     {
         Failure.Handler.BeginWave();
-        var operation = Failure.Batcher.ProcessAsync(_requests);
+        var operation = Failure.Batcher.ExecuteAsync(_requests);
         var waiter = ObserveExpectedFailureAsync(operation, Failure.Handler.Failure);
         Failure.Handler.ReleaseWave();
         await waiter.ConfigureAwait(false);
@@ -92,7 +92,7 @@ public class ExplicitCompletionBenchmarks
     {
         PartialCancellation.Handler.BeginWave();
         using var cancellation = new CancellationTokenSource();
-        var operation = PartialCancellation.Batcher.ProcessAsync(_requests, cancellation.Token);
+        var operation = PartialCancellation.Batcher.ExecuteAsync(_requests, cancellation.Token);
 
         await PartialCancellation.Handler.FirstHandlerStarted.ConfigureAwait(false);
         var canceled = ObserveExpectedCancellationAsync(operation, cancellation.Token);
@@ -101,7 +101,7 @@ public class ExplicitCompletionBenchmarks
 
         await canceled.ConfigureAwait(false);
 
-        var drain = PartialCancellation.Batcher.ProcessAsync(BlockerRequestId);
+        var drain = PartialCancellation.Batcher.ExecuteAsync(BlockerRequestId);
         var drainWaiter = ObserveSuccessAsync(drain);
         await drainWaiter.ConfigureAwait(false);
         PartialCancellation.Handler.ValidatePartialProcessing(GroupSize);
@@ -111,11 +111,11 @@ public class ExplicitCompletionBenchmarks
     public async Task ExplicitGroupsCapacityWaitAsync()
     {
         Capacity.Handler.BeginWave();
-        var blocker = Capacity.Batcher.ProcessAsync(BlockerRequestId);
+        var blocker = Capacity.Batcher.ExecuteAsync(BlockerRequestId);
         await Capacity.Handler.BlockerStarted.ConfigureAwait(false);
 
-        var firstGroup = Capacity.Batcher.ProcessAsync(_requests);
-        var secondGroup = Capacity.Batcher.ProcessAsync(_requests);
+        var firstGroup = Capacity.Batcher.ExecuteAsync(_requests);
+        var secondGroup = Capacity.Batcher.ExecuteAsync(_requests);
         if (secondGroup.IsCompleted)
         {
             throw new InvalidOperationException("The second group did not wait for queue capacity.");
@@ -135,10 +135,10 @@ public class ExplicitCompletionBenchmarks
         var submissions = new Task[GroupSize + 1];
         for (var index = 0; index < GroupSize; index++)
         {
-            submissions[index] = Mixed.Batcher.ProcessAsync(_requests[index]);
+            submissions[index] = Mixed.Batcher.ExecuteAsync(_requests[index]);
         }
 
-        submissions[GroupSize] = Mixed.Batcher.ProcessAsync(_requests);
+        submissions[GroupSize] = Mixed.Batcher.ExecuteAsync(_requests);
         var all = Task.WhenAll(submissions);
         var waiter = ObserveSuccessAsync(all);
         Mixed.Handler.ReleaseWave();

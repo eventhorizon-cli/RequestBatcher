@@ -30,7 +30,7 @@ builder.Services.AddRequestBatcher<PriceQuery, PriceUpdate?, PriceQueryHandler>(
 var app = builder.Build();
 await InitializeDatabaseAsync(app.Services.GetRequiredService<NpgsqlDataSource>());
 
-app.MapPost("/prices", ProcessAsync);
+app.MapPost("/prices", ExecuteAsync);
 app.MapGet("/prices/{productId:long}", FindAsync);
 
 await app.RunAsync();
@@ -44,7 +44,7 @@ static void ConfigureBatching<TRequest>(RequestBatchOptions<TRequest> options)
     options.FullMode = RequestBatchFullMode.Wait;
 }
 
-static async Task<IResult> ProcessAsync(
+static async Task<IResult> ExecuteAsync(
     PriceUpdate update,
     IRequestBatcher<PriceUpdate> batcher,
     CancellationToken cancellationToken)
@@ -54,7 +54,7 @@ static async Task<IResult> ProcessAsync(
         return Results.BadRequest("ProductId and Version must be positive; Price cannot be negative.");
     }
 
-    await batcher.ProcessAsync(update, cancellationToken).ConfigureAwait(false);
+    await batcher.ExecuteAsync(update, cancellationToken).ConfigureAwait(false);
     return Results.NoContent();
 }
 
@@ -68,7 +68,7 @@ static async Task<IResult> FindAsync(
         return Results.BadRequest("ProductId must be positive.");
     }
 
-    var result = await batcher.ProcessAsync(new PriceQuery(productId), cancellationToken).ConfigureAwait(false);
+    var result = await batcher.ExecuteAsync(new PriceQuery(productId), cancellationToken).ConfigureAwait(false);
     return result is null ? Results.NotFound() : Results.Ok(result);
 }
 

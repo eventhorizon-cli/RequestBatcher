@@ -8,7 +8,7 @@ namespace RequestBatcher.Tests;
 public sealed class RequestResponseBatcherTests
 {
     [Fact]
-    public async Task ProcessAsync_HandlerSetsResponse_ReturnsResponse()
+    public async Task ExecuteAsync_HandlerSetsResponse_ReturnsResponse()
     {
         var handler = new Mock<IRequestBatchHandler<ResponseRequest, string>>(MockBehavior.Strict);
         handler
@@ -29,7 +29,7 @@ public sealed class RequestResponseBatcherTests
             new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
         var batcher = provider.GetRequiredService<IRequestBatcher<ResponseRequest, string>>();
 
-        var actual = await batcher.ProcessAsync(new ResponseRequest(42)).WaitAsync(TimeSpan.FromSeconds(5));
+        var actual = await batcher.ExecuteAsync(new ResponseRequest(42)).WaitAsync(TimeSpan.FromSeconds(5));
 
         Assert.Equal("answer", actual);
         handler.Verify();
@@ -37,7 +37,7 @@ public sealed class RequestResponseBatcherTests
     }
 
     [Fact]
-    public async Task ProcessAsync_ExplicitBatch_ReturnsResponsesInInputOrder()
+    public async Task ExecuteAsync_ExplicitBatch_ReturnsResponsesInInputOrder()
     {
         await using var provider = CreateProvider<int, string>(
             (entries, _) =>
@@ -54,14 +54,14 @@ public sealed class RequestResponseBatcherTests
         var batcher = provider.GetRequiredService<IRequestBatcher<int, string>>();
 
         var actual = await batcher
-            .ProcessAsync([3, 1, 2], CancellationToken.None)
+            .ExecuteAsync([3, 1, 2], CancellationToken.None)
             .WaitAsync(TimeSpan.FromSeconds(5));
 
         Assert.Equal(new[] { "response-3", "response-1", "response-2" }, actual);
     }
 
     [Fact]
-    public async Task ProcessAsync_StringPartitionKey_PreservesConfiguredPartitionCount()
+    public async Task ExecuteAsync_StringPartitionKey_PreservesConfiguredPartitionCount()
     {
         await using var provider = CreateProvider<ResponseRequest, string>(
             (entries, _) =>
@@ -74,13 +74,13 @@ public sealed class RequestResponseBatcherTests
                 partitionCount: 2));
         var batcher = provider.GetRequiredService<IRequestBatcher<ResponseRequest, string>>();
 
-        var actual = await batcher.ProcessAsync(new ResponseRequest(7));
+        var actual = await batcher.ExecuteAsync(new ResponseRequest(7));
 
         Assert.Equal("7", actual);
     }
 
     [Fact]
-    public async Task ProcessAsync_ResponseHandlerFails_PropagatesOriginalException()
+    public async Task ExecuteAsync_ResponseHandlerFails_PropagatesOriginalException()
     {
         var expected = new TestBatchException();
 
@@ -89,13 +89,13 @@ public sealed class RequestResponseBatcherTests
             options => options.BatchSize = 2);
         var batcher = provider.GetRequiredService<IRequestBatcher<int, string>>();
 
-        var actual = await Assert.ThrowsAsync<TestBatchException>(() => batcher.ProcessAsync([1, 2]));
+        var actual = await Assert.ThrowsAsync<TestBatchException>(() => batcher.ExecuteAsync([1, 2]));
 
         Assert.Same(expected, actual);
     }
 
     [Fact]
-    public async Task ProcessAsync_HandlerLeavesResponseUnset_FailsHandlerBatch()
+    public async Task ExecuteAsync_HandlerLeavesResponseUnset_FailsHandlerBatch()
     {
         await using var provider = CreateProvider<int, string>(
             (entries, _) =>
@@ -107,13 +107,13 @@ public sealed class RequestResponseBatcherTests
         var batcher = provider.GetRequiredService<IRequestBatcher<int, string>>();
 
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => batcher.ProcessAsync([1, 2]));
+            () => batcher.ExecuteAsync([1, 2]));
 
         Assert.Contains("without assigning a response", exception.Message, StringComparison.Ordinal);
     }
 
     [Fact]
-    public async Task ProcessAsync_HandlerSetsResponseTwice_FailsHandlerBatch()
+    public async Task ExecuteAsync_HandlerSetsResponseTwice_FailsHandlerBatch()
     {
         await using var provider = CreateProvider<int, string>(
             (entries, _) =>
@@ -126,7 +126,7 @@ public sealed class RequestResponseBatcherTests
         var batcher = provider.GetRequiredService<IRequestBatcher<int, string>>();
 
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(
-            () => batcher.ProcessAsync([1, 2]));
+            () => batcher.ExecuteAsync([1, 2]));
 
         Assert.Contains("already been assigned", exception.Message, StringComparison.Ordinal);
     }
@@ -227,7 +227,7 @@ public sealed class RequestResponseBatcherTests
                 partitionCount: 2));
         var batcher = provider.GetRequiredService<IRequestBatcher<int, string>>();
 
-        var actual = await Assert.ThrowsAsync<TestBatchException>(() => batcher.ProcessAsync(-1));
+        var actual = await Assert.ThrowsAsync<TestBatchException>(() => batcher.ExecuteAsync(-1));
 
         Assert.Same(expected, actual);
         Assert.Equal(0, Volatile.Read(ref invocationCount));
@@ -255,7 +255,7 @@ public sealed class RequestResponseBatcherTests
             });
         var batcher = provider.GetRequiredService<IRequestBatcher<KeyedResponseRequest, string>>();
 
-        var actual = await batcher.ProcessAsync(
+        var actual = await batcher.ExecuteAsync(
             [new KeyedResponseRequest(2, 20), new KeyedResponseRequest(1, 10), new KeyedResponseRequest(2, 21)]);
 
         Assert.Equal(new[] { "20", "10", "21" }, actual);
@@ -339,8 +339,8 @@ public sealed class RequestResponseBatcherTests
         {
             var batcher = provider.GetRequiredService<IRequestBatcher<int, string>>();
 
-            Assert.Equal("1", await batcher.ProcessAsync(1).WaitAsync(TimeSpan.FromSeconds(5)));
-            Assert.Equal("2", await batcher.ProcessAsync(2).WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.Equal("1", await batcher.ExecuteAsync(1).WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.Equal("2", await batcher.ExecuteAsync(2).WaitAsync(TimeSpan.FromSeconds(5)));
         }
 
         Assert.Equal(2, probe.HandlerIds.Distinct().Count());
@@ -381,7 +381,7 @@ public sealed class RequestResponseBatcherTests
     }
 
     [Fact]
-    public async Task ProcessAsync_RequestCanceledBeforeDispatch_SkipsResponseHandler()
+    public async Task ExecuteAsync_RequestCanceledBeforeDispatch_SkipsResponseHandler()
     {
         var firstHandlerStarted = NewSource();
         var releaseFirstHandler = NewSource();
@@ -407,10 +407,10 @@ public sealed class RequestResponseBatcherTests
             });
         var batcher = provider.GetRequiredService<IRequestBatcher<int, string>>();
 
-        var first = batcher.ProcessAsync(1);
+        var first = batcher.ExecuteAsync(1);
         await firstHandlerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
         using var cancellation = new CancellationTokenSource();
-        var canceled = batcher.ProcessAsync(2, cancellation.Token);
+        var canceled = batcher.ExecuteAsync(2, cancellation.Token);
         cancellation.Cancel();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => canceled);
@@ -441,12 +441,12 @@ public sealed class RequestResponseBatcherTests
             options => options.BatchSize = 1);
         var batcher = provider.GetRequiredService<IRequestBatcher<int, string>>();
 
-        var first = batcher.ProcessAsync(1);
+        var first = batcher.ExecuteAsync(1);
         await firstHandlerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        var second = batcher.ProcessAsync(2);
+        var second = batcher.ExecuteAsync(2);
         var stopping = provider.DisposeAsync().AsTask();
 
-        await Assert.ThrowsAsync<ObjectDisposedException>(() => batcher.ProcessAsync(3));
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => batcher.ExecuteAsync(3));
         releaseFirstHandler.SetResult();
 
         Assert.Equal(new[] { "1", "2" }, await Task.WhenAll(first, second).WaitAsync(TimeSpan.FromSeconds(5)));

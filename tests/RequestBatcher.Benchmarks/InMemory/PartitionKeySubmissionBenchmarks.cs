@@ -79,7 +79,7 @@ public class PartitionKeySubmissionBenchmarks
         var tasks = new Task[RequestCount];
         for (var index = 0; index < RequestCount; index++)
         {
-            tasks[index] = RequestBatcher.ProcessAsync(_requests[index]);
+            tasks[index] = RequestBatcher.ExecuteAsync(_requests[index]);
         }
 
         await Task.WhenAll(tasks).ConfigureAwait(false);
@@ -90,7 +90,7 @@ public class PartitionKeySubmissionBenchmarks
     public async Task ExplicitSubmissionAsync()
     {
         Handler.BeginWave(RequestCount);
-        await RequestBatcher.ProcessAsync(_requests).ConfigureAwait(false);
+        await RequestBatcher.ExecuteAsync(_requests).ConfigureAwait(false);
         Handler.ValidateProcessed(RequestCount);
     }
 

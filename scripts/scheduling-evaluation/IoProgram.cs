@@ -75,7 +75,7 @@ internal static class Program
                 {
                     item.Submitted = submitted;
                 }
-                await batcher.ProcessAsync(window).WaitAsync(TimeSpan.FromSeconds(60)).ConfigureAwait(false);
+                await batcher.ExecuteAsync(window).WaitAsync(TimeSpan.FromSeconds(60)).ConfigureAwait(false);
                 var completed = Stopwatch.GetTimestamp();
                 foreach (var item in window)
                 {
@@ -136,7 +136,7 @@ internal static class Program
 
     private static async Task SubmitAsync(IRequestBatcher<Work> batcher, Work work)
     {
-        await batcher.ProcessAsync(work).ConfigureAwait(false);
+        await batcher.ExecuteAsync(work).ConfigureAwait(false);
         work.Completed = Stopwatch.GetTimestamp();
     }
 

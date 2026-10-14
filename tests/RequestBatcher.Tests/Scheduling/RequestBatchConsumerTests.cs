@@ -7,7 +7,7 @@ namespace RequestBatcher.Tests.Scheduling;
 public sealed class RequestBatchConsumerTests
 {
     [Fact]
-    public async Task ProcessAsync_HandlerIsRunning_CompletesRequestsAfterHandler()
+    public async Task ExecuteAsync_HandlerIsRunning_CompletesRequestsAfterHandler()
     {
         var handlerStarted = NewSource();
         var releaseHandler = NewSource();
@@ -22,7 +22,7 @@ public sealed class RequestBatchConsumerTests
             NullLogger.Instance,
             typeof(int).FullName!);
 
-        var processing = subject.ProcessAsync([pendingRequest], CancellationToken.None).AsTask();
+        var processing = subject.ExecuteAsync([pendingRequest], CancellationToken.None).AsTask();
         await handlerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         Assert.False(pendingRequest.Completion.IsCompleted);
@@ -33,7 +33,7 @@ public sealed class RequestBatchConsumerTests
     }
 
     [Fact]
-    public async Task ProcessAsync_HandlerFails_CompletesRequestWithOriginalException()
+    public async Task ExecuteAsync_HandlerFails_CompletesRequestWithOriginalException()
     {
         var expected = new TestHandlerException();
         var handlerInvocationCount = 0;
@@ -47,7 +47,7 @@ public sealed class RequestBatchConsumerTests
             NullLogger.Instance,
             typeof(int).FullName!);
 
-        await subject.ProcessAsync([pendingRequest], CancellationToken.None).AsTask();
+        await subject.ExecuteAsync([pendingRequest], CancellationToken.None).AsTask();
 
         var actual = await Assert.ThrowsAsync<TestHandlerException>(
             () => pendingRequest.Completion.WaitAsync(TimeSpan.FromSeconds(5)));
@@ -56,7 +56,7 @@ public sealed class RequestBatchConsumerTests
     }
 
     [Fact]
-    public async Task ProcessAsync_RequestCanceledBeforeDispatch_SkipsHandler()
+    public async Task ExecuteAsync_RequestCanceledBeforeDispatch_SkipsHandler()
     {
         using var cancellation = new CancellationTokenSource();
         var handlerInvocationCount = 0;
@@ -75,7 +75,7 @@ public sealed class RequestBatchConsumerTests
 
         cancellation.Cancel();
 
-        await subject.ProcessAsync([pendingRequest], CancellationToken.None).AsTask();
+        await subject.ExecuteAsync([pendingRequest], CancellationToken.None).AsTask();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => pendingRequest.Completion.WaitAsync(TimeSpan.FromSeconds(5)));

@@ -39,7 +39,7 @@ def main():
                  "    internal static TaskCompletionSource? EvaluationOffloadEntered;\n"
                  "    private readonly RequestBatchConsumer<TRequest> _batchConsumer;")
     replace_once(scratch / "src/RequestBatcher/Scheduling/BatchDispatchLoop.cs",
-                 "        var processing = _batchConsumer.ProcessAsync(pendingRequests, cancellationToken);\n"
+                 "        var processing = _batchConsumer.ExecuteAsync(pendingRequests, cancellationToken);\n"
                  "        if (processing.IsCompletedSuccessfully)\n"
                  "        {\n"
                  "            CompleteExecution();\n"
@@ -52,7 +52,7 @@ def main():
                  "            _ = Task.Run(() => ProcessOffloadedBatchAsync(pendingRequests, cancellationToken));\n"
                  "            return;\n"
                  "        }\n\n"
-                 "        var processing = _batchConsumer.ProcessAsync(pendingRequests, cancellationToken);\n"
+                 "        var processing = _batchConsumer.ExecuteAsync(pendingRequests, cancellationToken);\n"
                  "        if (processing.IsCompletedSuccessfully)\n"
                  "        {\n"
                  "            CompleteExecution();\n"
@@ -74,7 +74,7 @@ def main():
                  "        ValueTask processing;\n"
                  "        try\n"
                  "        {\n"
-                 "            processing = _batchConsumer.ProcessAsync(pendingRequests, cancellationToken);\n"
+                 "            processing = _batchConsumer.ExecuteAsync(pendingRequests, cancellationToken);\n"
                  "        }\n"
                  "        catch (Exception exception)\n"
                  "        {\n"

@@ -91,10 +91,10 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
     }
 
     /// <inheritdoc />
-    public Task ProcessAsync(TRequest request, CancellationToken cancellationToken = default) =>
-        ProcessAsync(request, null, cancellationToken);
+    public Task ExecuteAsync(TRequest request, CancellationToken cancellationToken = default) =>
+        ExecuteAsync(request, null, cancellationToken);
 
-    internal Task ProcessAsync(
+    internal Task ExecuteAsync(
         TRequest request,
         IRequestCompletion? completion,
         CancellationToken cancellationToken)
@@ -113,7 +113,7 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
     }
 
     /// <inheritdoc />
-    public Task ProcessAsync(
+    public Task ExecuteAsync(
         IEnumerable<TRequest> requests,
         CancellationToken cancellationToken = default)
     {

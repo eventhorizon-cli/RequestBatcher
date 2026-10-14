@@ -9,7 +9,7 @@ namespace RequestBatcher.Tests;
 public sealed class RequestBatchCoordinatorTests
 {
     [Fact]
-    public async Task ProcessAsync_ConcurrentRequests_MergesUpToBatchSize()
+    public async Task ExecuteAsync_ConcurrentRequests_MergesUpToBatchSize()
     {
         var firstBatchStarted = NewSource();
         var releaseFirstBatch = NewSource();
@@ -27,11 +27,11 @@ public sealed class RequestBatchCoordinatorTests
         }, options => options.BatchSize = 10);
         var coordinator = provider.GetRequiredService<RequestBatchCoordinator<int>>();
 
-        var first = coordinator.ProcessAsync(0);
+        var first = coordinator.ExecuteAsync(0);
         await firstBatchStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         var followers = Enumerable.Range(1, 25)
-            .Select(request => coordinator.ProcessAsync(request))
+            .Select(request => coordinator.ExecuteAsync(request))
             .ToArray();
 
         releaseFirstBatch.SetResult();
@@ -43,7 +43,7 @@ public sealed class RequestBatchCoordinatorTests
     }
 
     [Fact]
-    public async Task ProcessAsync_HandlerFails_PropagatesSameExceptionToWholeBatch()
+    public async Task ExecuteAsync_HandlerFails_PropagatesSameExceptionToWholeBatch()
     {
         var firstBatchStarted = NewSource();
         var releaseFirstBatch = NewSource();
@@ -63,11 +63,11 @@ public sealed class RequestBatchCoordinatorTests
         }, options => options.BatchSize = 32);
         var coordinator = provider.GetRequiredService<RequestBatchCoordinator<int>>();
 
-        var leader = coordinator.ProcessAsync(0);
+        var leader = coordinator.ExecuteAsync(0);
         await firstBatchStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         var followers = Enumerable.Range(1, 16)
-            .Select(request => coordinator.ProcessAsync(request))
+            .Select(request => coordinator.ExecuteAsync(request))
             .ToArray();
 
         releaseFirstBatch.SetResult();
@@ -81,7 +81,7 @@ public sealed class RequestBatchCoordinatorTests
     }
 
     [Fact]
-    public async Task ProcessAsync_MaxConcurrency_LimitsParallelHandlerInvocations()
+    public async Task ExecuteAsync_MaxConcurrency_LimitsParallelHandlerInvocations()
     {
         const int concurrency = 3;
         var enteredHandlers = Enumerable.Range(0, concurrency)
@@ -112,7 +112,7 @@ public sealed class RequestBatchCoordinatorTests
         {
             for (var request = 0; request < concurrency; request++)
             {
-                requests.Add(coordinator.ProcessAsync(request));
+                requests.Add(coordinator.ExecuteAsync(request));
                 await enteredHandlers[request].Task.WaitAsync(TimeSpan.FromSeconds(5));
             }
 
@@ -127,7 +127,7 @@ public sealed class RequestBatchCoordinatorTests
     }
 
     [Fact]
-    public async Task ProcessAsync_PartitionKey_EqualKeysCanExecuteConcurrently()
+    public async Task ExecuteAsync_PartitionKey_EqualKeysCanExecuteConcurrently()
     {
         var firstKeyStarted = NewSource();
         var secondKeyStarted = NewSource();
@@ -153,10 +153,10 @@ public sealed class RequestBatchCoordinatorTests
         });
         var coordinator = provider.GetRequiredService<RequestBatchCoordinator<KeyedRequest>>();
 
-        var first = coordinator.ProcessAsync(new KeyedRequest(1, 1));
+        var first = coordinator.ExecuteAsync(new KeyedRequest(1, 1));
         await firstKeyStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
-        var secondForSameKey = coordinator.ProcessAsync(new KeyedRequest(1, 2));
+        var secondForSameKey = coordinator.ExecuteAsync(new KeyedRequest(1, 2));
 
         try
         {
@@ -172,7 +172,7 @@ public sealed class RequestBatchCoordinatorTests
     }
 
     [Fact]
-    public async Task ProcessAsync_PartitionKeySelectorFails_PropagatesAndReleasesCapacity()
+    public async Task ExecuteAsync_PartitionKeySelectorFails_PropagatesAndReleasesCapacity()
     {
         var expected = new TestBatchException();
 
@@ -188,14 +188,14 @@ public sealed class RequestBatchCoordinatorTests
         var coordinator = provider.GetRequiredService<RequestBatchCoordinator<int>>();
 
         var actual = await Assert.ThrowsAsync<TestBatchException>(
-            () => coordinator.ProcessAsync(-1));
+            () => coordinator.ExecuteAsync(-1));
 
         Assert.Same(expected, actual);
-        await coordinator.ProcessAsync(1).WaitAsync(TimeSpan.FromSeconds(5));
+        await coordinator.ExecuteAsync(1).WaitAsync(TimeSpan.FromSeconds(5));
     }
 
     [Fact]
-    public async Task ProcessAsync_EmptyStringPartitionKey_ProcessesRequest()
+    public async Task ExecuteAsync_EmptyStringPartitionKey_ProcessesRequest()
     {
         var handled = new ConcurrentQueue<string>();
 
@@ -216,13 +216,13 @@ public sealed class RequestBatchCoordinatorTests
             });
         var coordinator = provider.GetRequiredService<RequestBatchCoordinator<string>>();
 
-        await coordinator.ProcessAsync(string.Empty).WaitAsync(TimeSpan.FromSeconds(5));
+        await coordinator.ExecuteAsync(string.Empty).WaitAsync(TimeSpan.FromSeconds(5));
 
         Assert.Equal(string.Empty, Assert.Single(handled));
     }
 
     [Fact]
-    public async Task ProcessAsync_RequestCanceledBeforeDispatch_SkipsRequest()
+    public async Task ExecuteAsync_RequestCanceledBeforeDispatch_SkipsRequest()
     {
         var firstBatchStarted = NewSource();
         var releaseFirstBatch = NewSource();
@@ -243,12 +243,12 @@ public sealed class RequestBatchCoordinatorTests
         });
         var coordinator = provider.GetRequiredService<RequestBatchCoordinator<int>>();
 
-        var first = coordinator.ProcessAsync(1);
+        var first = coordinator.ExecuteAsync(1);
         await firstBatchStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         using var cancellation = new CancellationTokenSource();
-        var canceled = coordinator.ProcessAsync(2, cancellation.Token);
-        var unaffected = coordinator.ProcessAsync(3);
+        var canceled = coordinator.ExecuteAsync(2, cancellation.Token);
+        var unaffected = coordinator.ExecuteAsync(3);
         cancellation.Cancel();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => canceled);
@@ -262,7 +262,7 @@ public sealed class RequestBatchCoordinatorTests
     }
 
     [Fact]
-    public async Task ProcessAsync_RequestCanceledAfterDispatch_WaitsForActualOutcome()
+    public async Task ExecuteAsync_RequestCanceledAfterDispatch_WaitsForActualOutcome()
     {
         var handlerStarted = NewSource();
         var releaseHandler = NewSource();
@@ -275,7 +275,7 @@ public sealed class RequestBatchCoordinatorTests
         var coordinator = provider.GetRequiredService<RequestBatchCoordinator<int>>();
         using var cancellation = new CancellationTokenSource();
 
-        var processing = coordinator.ProcessAsync(1, cancellation.Token);
+        var processing = coordinator.ExecuteAsync(1, cancellation.Token);
         await handlerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
         cancellation.Cancel();
 
@@ -285,7 +285,7 @@ public sealed class RequestBatchCoordinatorTests
     }
 
     [Fact]
-    public async Task ProcessAsync_HandlerReceivesConsumerToken_NotCallerToken()
+    public async Task ExecuteAsync_HandlerReceivesConsumerToken_NotCallerToken()
     {
         var handlerStarted = new TaskCompletionSource<CancellationToken>(
             TaskCreationOptions.RunContinuationsAsynchronously);
@@ -299,7 +299,7 @@ public sealed class RequestBatchCoordinatorTests
         var coordinator = provider.GetRequiredService<RequestBatchCoordinator<int>>();
         using var callerCancellation = new CancellationTokenSource();
 
-        var processing = coordinator.ProcessAsync(1, callerCancellation.Token);
+        var processing = coordinator.ExecuteAsync(1, callerCancellation.Token);
         var handlerCancellation = await handlerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         Assert.NotEqual(callerCancellation.Token, handlerCancellation);
@@ -312,7 +312,7 @@ public sealed class RequestBatchCoordinatorTests
     }
 
     [Fact]
-    public async Task ProcessAsync_WaitModeAtCapacity_AppliesBackpressure()
+    public async Task ExecuteAsync_WaitModeAtCapacity_AppliesBackpressure()
     {
         var firstBatchStarted = NewSource();
         var releaseFirstBatch = NewSource();
@@ -327,10 +327,10 @@ public sealed class RequestBatchCoordinatorTests
         }, options => options.MaxPendingRequests = 1);
         var coordinator = provider.GetRequiredService<RequestBatchCoordinator<int>>();
 
-        var first = coordinator.ProcessAsync(1);
+        var first = coordinator.ExecuteAsync(1);
         await firstBatchStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        var queued = coordinator.ProcessAsync(2);
-        var waiting = coordinator.ProcessAsync(3);
+        var queued = coordinator.ExecuteAsync(2);
+        var waiting = coordinator.ExecuteAsync(3);
 
         Assert.False(waiting.IsCompleted);
 
@@ -339,7 +339,7 @@ public sealed class RequestBatchCoordinatorTests
     }
 
     [Fact]
-    public async Task ProcessAsync_WaitModeCanceledWhileWaiting_CancelsRequest()
+    public async Task ExecuteAsync_WaitModeCanceledWhileWaiting_CancelsRequest()
     {
         var firstBatchStarted = NewSource();
         var releaseFirstBatch = NewSource();
@@ -351,11 +351,11 @@ public sealed class RequestBatchCoordinatorTests
         }, options => options.MaxPendingRequests = 1);
         var coordinator = provider.GetRequiredService<RequestBatchCoordinator<int>>();
 
-        var first = coordinator.ProcessAsync(1);
+        var first = coordinator.ExecuteAsync(1);
         await firstBatchStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        var queued = coordinator.ProcessAsync(2);
+        var queued = coordinator.ExecuteAsync(2);
         using var cancellation = new CancellationTokenSource();
-        var canceled = coordinator.ProcessAsync(3, cancellation.Token);
+        var canceled = coordinator.ExecuteAsync(3, cancellation.Token);
         cancellation.Cancel();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => canceled);
@@ -365,7 +365,7 @@ public sealed class RequestBatchCoordinatorTests
     }
 
     [Fact]
-    public async Task ProcessAsync_FailModeQueueFull_RejectsImmediately()
+    public async Task ExecuteAsync_FailModeQueueFull_RejectsImmediately()
     {
         var firstBatchStarted = NewSource();
         var releaseFirstBatch = NewSource();
@@ -381,10 +381,10 @@ public sealed class RequestBatchCoordinatorTests
         });
         var coordinator = provider.GetRequiredService<RequestBatchCoordinator<int>>();
 
-        var first = coordinator.ProcessAsync(1);
+        var first = coordinator.ExecuteAsync(1);
         await firstBatchStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        var queued = coordinator.ProcessAsync(2);
-        var rejected = coordinator.ProcessAsync(3);
+        var queued = coordinator.ExecuteAsync(2);
+        var rejected = coordinator.ExecuteAsync(3);
 
         var exception = await Assert.ThrowsAsync<RequestBatchQueueFullException>(() => rejected);
         Assert.Equal(1, exception.Capacity);
@@ -412,14 +412,14 @@ public sealed class RequestBatchCoordinatorTests
         }, options => options.MaxPendingRequests = 1);
         var coordinator = provider.GetRequiredService<RequestBatchCoordinator<int>>();
 
-        var first = coordinator.ProcessAsync(1);
+        var first = coordinator.ExecuteAsync(1);
         await handlerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        var second = coordinator.ProcessAsync(2);
-        var third = coordinator.ProcessAsync(3);
+        var second = coordinator.ExecuteAsync(2);
+        var third = coordinator.ExecuteAsync(3);
         var stopping = coordinator.DisposeAsync().AsTask();
 
         await Assert.ThrowsAsync<ObjectDisposedException>(
-            () => coordinator.ProcessAsync(4));
+            () => coordinator.ExecuteAsync(4));
         Assert.False(second.IsCompleted);
         Assert.False(third.IsCompleted);
         Assert.False(stopping.IsCompleted);
@@ -440,7 +440,7 @@ public sealed class RequestBatchCoordinatorTests
             await releaseHandler.Task;
         });
         var coordinator = provider.GetRequiredService<RequestBatchCoordinator<int>>();
-        var processing = coordinator.ProcessAsync(1);
+        var processing = coordinator.ExecuteAsync(1);
         await handlerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         Task disposal;
@@ -451,8 +451,8 @@ public sealed class RequestBatchCoordinatorTests
             disposal = calls[0].AsTask();
             Assert.All(calls, call => Assert.Same(disposal, call.AsTask()));
             Assert.False(disposal.IsCompleted);
-            await Assert.ThrowsAsync<ObjectDisposedException>(() => coordinator.ProcessAsync(2));
-            await Assert.ThrowsAsync<ObjectDisposedException>(() => coordinator.ProcessAsync(new[] { 3, 4 }));
+            await Assert.ThrowsAsync<ObjectDisposedException>(() => coordinator.ExecuteAsync(2));
+            await Assert.ThrowsAsync<ObjectDisposedException>(() => coordinator.ExecuteAsync(new[] { 3, 4 }));
         }
         finally
         {
@@ -462,7 +462,7 @@ public sealed class RequestBatchCoordinatorTests
         await Task.WhenAll(processing, disposal).WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Same(disposal, coordinator.DisposeAsync().AsTask());
         await coordinator.DisposeAsync();
-        await Assert.ThrowsAsync<ObjectDisposedException>(() => coordinator.ProcessAsync(5));
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => coordinator.ExecuteAsync(5));
     }
 
     [Fact]
@@ -489,7 +489,7 @@ public sealed class RequestBatchCoordinatorTests
 
         Assert.Same(coordinator, batcher);
 
-        await batcher.ProcessAsync(42).WaitAsync(TimeSpan.FromSeconds(5));
+        await batcher.ExecuteAsync(42).WaitAsync(TimeSpan.FromSeconds(5));
         handler.Verify();
         handler.VerifyNoOtherCalls();
     }
@@ -522,8 +522,8 @@ public sealed class RequestBatchCoordinatorTests
             new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
         var batcher = provider.GetRequiredService<IRequestBatcher<int>>();
 
-        await batcher.ProcessAsync(1).WaitAsync(TimeSpan.FromSeconds(5));
-        await batcher.ProcessAsync(2).WaitAsync(TimeSpan.FromSeconds(5));
+        await batcher.ExecuteAsync(1).WaitAsync(TimeSpan.FromSeconds(5));
+        await batcher.ExecuteAsync(2).WaitAsync(TimeSpan.FromSeconds(5));
 
         Assert.Equal(2, probe.HandlerIds.Count);
         Assert.Equal(2, probe.HandlerIds.Distinct().Count());
@@ -672,8 +672,8 @@ public sealed class RequestBatchCoordinatorTests
             new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
 
         await Task.WhenAll(
-            provider.GetRequiredService<IRequestBatcher<int>>().ProcessAsync(42),
-            provider.GetRequiredService<IRequestBatcher<string>>().ProcessAsync("value"))
+            provider.GetRequiredService<IRequestBatcher<int>>().ExecuteAsync(42),
+            provider.GetRequiredService<IRequestBatcher<string>>().ExecuteAsync("value"))
             .WaitAsync(TimeSpan.FromSeconds(5));
 
         integerHandler.VerifyAll();
@@ -681,7 +681,7 @@ public sealed class RequestBatchCoordinatorTests
     }
 
     [Fact]
-    public async Task ProcessAsync_HandlerFails_LogsOnceAndPropagatesOriginalException()
+    public async Task ExecuteAsync_HandlerFails_LogsOnceAndPropagatesOriginalException()
     {
         var expected = new TestBatchException();
         var logger = new RecordingLogger<RequestBatchCoordinator<int>>(LogLevel.Error);
@@ -696,7 +696,7 @@ public sealed class RequestBatchCoordinatorTests
             new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
         var batcher = provider.GetRequiredService<IRequestBatcher<int>>();
 
-        var actual = await Assert.ThrowsAsync<TestBatchException>(() => batcher.ProcessAsync(42));
+        var actual = await Assert.ThrowsAsync<TestBatchException>(() => batcher.ExecuteAsync(42));
         await logger.Logged.WaitAsync(TimeSpan.FromSeconds(5));
 
         Assert.Same(expected, actual);

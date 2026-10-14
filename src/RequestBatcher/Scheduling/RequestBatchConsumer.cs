@@ -9,7 +9,7 @@ internal sealed class RequestBatchConsumer<TRequest>(
     ILogger logger,
     string requestTypeName)
 {
-    internal async ValueTask ProcessAsync(
+    internal async ValueTask ExecuteAsync(
         IReadOnlyList<PendingBatchRequest<TRequest>> bufferedRequests,
         CancellationToken cancellationToken)
     {

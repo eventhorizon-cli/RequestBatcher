@@ -148,7 +148,7 @@ public class PostgreSqlWriteBenchmarks
         {
             for (var index = 0; index < _requests.Length; index++)
             {
-                writes[index] = RequestBatcher.ProcessAsync(_requests[index]);
+                writes[index] = RequestBatcher.ExecuteAsync(_requests[index]);
             }
         }
         finally
@@ -167,7 +167,7 @@ public class PostgreSqlWriteBenchmarks
         Task processing;
         try
         {
-            processing = RequestBatcher.ProcessAsync(_requests);
+            processing = RequestBatcher.ExecuteAsync(_requests);
         }
         finally
         {

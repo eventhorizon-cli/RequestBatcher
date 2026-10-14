@@ -8,7 +8,7 @@ public sealed class UnkeyedPartitionTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task ProcessAsync_UnkeyedSubmission_CombinesAfterSlotsRelease(bool explicitBatch)
+    public async Task ExecuteAsync_UnkeyedSubmission_CombinesAfterSlotsRelease(bool explicitBatch)
     {
         const int concurrency = 2;
         var entered = Enumerable.Range(0, concurrency)
@@ -41,14 +41,14 @@ public sealed class UnkeyedPartitionTests
             var blockers = new List<Task>(concurrency);
             for (var index = 0; index < concurrency; index++)
             {
-                blockers.Add(batcher.ProcessAsync(-index - 1));
+                blockers.Add(batcher.ExecuteAsync(-index - 1));
                 await entered[index].Task.WaitAsync(TimeSpan.FromSeconds(5));
             }
 
             int[] targetRequests = explicitBatch ? [1, 2, 3, 4] : [];
             var target = explicitBatch
-                ? batcher.ProcessAsync(targetRequests)
-                : Task.WhenAll(Enumerable.Range(1, 4).Select(request => batcher.ProcessAsync(request)));
+                ? batcher.ExecuteAsync(targetRequests)
+                : Task.WhenAll(Enumerable.Range(1, 4).Select(request => batcher.ExecuteAsync(request)));
 
             release.SetResult();
             await Task.WhenAll(blockers.Append(target)).WaitAsync(TimeSpan.FromSeconds(5));
@@ -62,7 +62,7 @@ public sealed class UnkeyedPartitionTests
     }
 
     [Fact]
-    public async Task ProcessAsync_UnkeyedResponseBatch_CombinesAfterSlotsRelease()
+    public async Task ExecuteAsync_UnkeyedResponseBatch_CombinesAfterSlotsRelease()
     {
         const int concurrency = 2;
         var entered = Enumerable.Range(0, concurrency)
@@ -97,11 +97,11 @@ public sealed class UnkeyedPartitionTests
             var blockers = new List<Task<string>>(concurrency);
             for (var index = 0; index < concurrency; index++)
             {
-                blockers.Add(batcher.ProcessAsync(-index - 1));
+                blockers.Add(batcher.ExecuteAsync(-index - 1));
                 await entered[index].Task.WaitAsync(TimeSpan.FromSeconds(5));
             }
 
-            var target = batcher.ProcessAsync([1, 2, 3, 4]);
+            var target = batcher.ExecuteAsync([1, 2, 3, 4]);
 
             release.SetResult();
             var responses = await target.WaitAsync(TimeSpan.FromSeconds(5));

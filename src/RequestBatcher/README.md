@@ -1,28 +1,49 @@
 # RequestBatcher
 
-RequestBatcher is an in-process .NET library for turning individual requests into downstream batch operations. Callers
-submit one request at a time and await their own result, while RequestBatcher combines requests that are already queued,
-limits handler-batch concurrency and queue capacity, and invokes the application handler with a batch. It is intended for
-database, cache, and API operations that support processing multiple items together.
+RequestBatcher is an in-process .NET library with **native support for single and batch requests**. Callers submit
+one request with `ExecuteAsync(request)` or a batch with `ExecuteAsync(requests)` and await the corresponding results.
+
+RequestBatcher combines requests that are already queued, limits handler-batch concurrency and queue capacity, and
+invokes the application handler with a batch. It is intended for database, cache, and API operations that support
+processing multiple items together.
 
 ![Request coalescing illustration](https://raw.githubusercontent.com/eventhorizon-cli/RequestBatcher/main/docs/assets/request-batcher-request-coalescing.png)
 
 Separate concurrent requests can be combined into one batch before a downstream batch operation. The illustration is
 an example: only requests already queued in the same partition can be combined into one handler batch.
 
+**One batch API call does not imply one handler invocation.** Below, A and B each make one batch API call,
+submitting queries for products `[101, 102, 103]` and `[102, 103, 104]` respectively.
+
+![Explicit batch splitting and handler deduplication](https://raw.githubusercontent.com/eventhorizon-cli/RequestBatcher/main/docs/assets/request-batcher-explicit-batch-merging.png)
+
+Requests route individually by `ProductId`. In this example, 101 and 103 share one partition, while 102 and 104 share
+another. Each partition combines queued requests from both submissions into a handler batch.
+
+**Each handler deduplicates within its own batch.** The two handlers query `[101, 103]` and `[102, 104]` respectively,
+then assign responses by `ProductId` to their own requests: four products are queried, and all six requests get a result.
+
+This is one possible grouping. Actual batches depend on enqueue timing, `BatchSize`, and scheduling; equal keys are
+not guaranteed to arrive in one batch.
+
 ## How Requests Are Batched: Opportunistic Merging
 
 RequestBatcher uses [BufferQueue](https://github.com/eventhorizon-cli/BufferQueue) to combine queued requests within a
-.NET process and pass them to an application handler. Callers obtain `IRequestBatcher<TRequest>` or
+.NET process and pass them to an application handler.
+
+Callers obtain `IRequestBatcher<TRequest>` or
 `IRequestBatcher<TRequest, TResponse>` through DI, submit requests, and await their individual results. The current
 dependency is [BufferQueue 2.0.3](https://www.nuget.org/packages/BufferQueue/2.0.3); applications do not register or
 configure it separately.
 
 RequestBatcher uses **Opportunistic Merging**. Writing a request to BufferQueue signals that data is available and wakes
-an idle consumer. The dispatch loop acquires a free execution slot, then uses the pull API to retrieve requests already
+an idle consumer.
+
+The dispatch loop acquires a free execution slot, then uses the pull API to retrieve requests already
 queued. After dispatching a batch, it continues the loop: if another slot is available, it can pull and dispatch again
-without waiting for the previous batch to finish. It waits for the next push notification only when none of the assigned
-partitions has data.
+without waiting for the previous batch to finish.
+
+**It waits for the next push notification only when none of the assigned partitions has data.**
 
 There is no periodic polling or fixed collection window. With a free slot, waiting mainly comes from wake-up and
 scheduling; when all slots are occupied, requests must wait for capacity to execute. `BatchSize` limits the number of
@@ -39,7 +60,7 @@ Requests are held in memory and cannot be recovered after a process failure.
 
 > **Batching does not require callers to assemble a collection.** Separate callers can each submit one `TRequest`
 > concurrently. RequestBatcher coalesces requests already queued for the same partition into handler batches of up to
-> `BatchSize`. `ProcessAsync(IEnumerable<TRequest>)` is an additional submission option, not a prerequisite for
+> `BatchSize`. `ExecuteAsync(IEnumerable<TRequest>)` is an additional submission option, not a prerequisite for
 > batching.
 
 [Full documentation](https://github.com/eventhorizon-cli/RequestBatcher#readme) |
@@ -77,7 +98,7 @@ services.AddRequestBatcher<PriceQuery, PriceQuote?, PriceQueryHandler>(
 
 // At the call site: resolve the typed response interface from the application's service provider.
 var batcher = serviceProvider.GetRequiredService<IRequestBatcher<PriceQuery, PriceQuote?>>();
-var quote = await batcher.ProcessAsync(new PriceQuery(ProductId: 101));
+var quote = await batcher.ExecuteAsync(new PriceQuery(ProductId: 101));
 ```
 
 Use `Microsoft.Extensions.DependencyInjection` and `RequestBatcher`. The [Request/Response Batching](#requestresponse-batching)
@@ -114,10 +135,10 @@ request, or every request in an explicit group:
 public interface IRequestBatcher<in TRequest>
 {
     // Submit one request and wait for its actual handler outcome.
-    Task ProcessAsync(TRequest request, CancellationToken cancellationToken = default);
+    Task ExecuteAsync(TRequest request, CancellationToken cancellationToken = default);
 
     // Submit an existing group; the task waits for every request in that submission.
-    Task ProcessAsync(
+    Task ExecuteAsync(
         IEnumerable<TRequest> requests,
         CancellationToken cancellationToken = default);
 }
@@ -141,12 +162,12 @@ one response to each request item and returns `ValueTask`:
 public interface IRequestBatcher<in TRequest, TResponse>
 {
     // Submit one request and return its typed response.
-    Task<TResponse> ProcessAsync(
+    Task<TResponse> ExecuteAsync(
         TRequest request,
         CancellationToken cancellationToken = default);
 
     // Submit a group and return responses in the same order as the input sequence.
-    Task<IReadOnlyList<TResponse>> ProcessAsync(
+    Task<IReadOnlyList<TResponse>> ExecuteAsync(
         IEnumerable<TRequest> requests,
         CancellationToken cancellationToken = default);
 }
@@ -211,7 +232,7 @@ public sealed class OrderService(IRequestBatcher<OrderWriteRequest> batcher)
     public Task SaveAsync(
         OrderWriteRequest request,
         CancellationToken cancellationToken = default) =>
-        batcher.ProcessAsync(request, cancellationToken);
+        batcher.ExecuteAsync(request, cancellationToken);
 }
 ```
 
@@ -285,12 +306,12 @@ public sealed class PriceService(IRequestBatcher<PriceQuery, PriceQuote?> priceB
     public Task<PriceQuote?> FindAsync(
         long productId,
         CancellationToken cancellationToken = default) =>
-        priceBatcher.ProcessAsync(new PriceQuery(productId), cancellationToken);
+        priceBatcher.ExecuteAsync(new PriceQuery(productId), cancellationToken);
 
     public Task<IReadOnlyList<PriceQuote?>> FindManyAsync(
         IEnumerable<PriceQuery> requests,
         CancellationToken cancellationToken = default) =>
-        priceBatcher.ProcessAsync(requests, cancellationToken);
+        priceBatcher.ExecuteAsync(requests, cancellationToken);
 }
 ```
 
@@ -317,16 +338,21 @@ services.AddRequestBatcher<PriceQuery, PriceQuote?, PriceQueryHandler>(
 The handler must set exactly one response for every item before it returns. The example uses standard LINQ `Distinct`
 to query each product ID once within the current handler invocation. `Distinct` also supports anonymous composite keys,
 value tuples, and custom equality comparers. Missing product IDs are absent from the store result and map to `null`.
-It does not combine entries across handler batches or queue partitions. The selector overload evaluates the raw request
-for every entry after the unordered backend result has been indexed by key, so duplicate entries receive the same response.
+
+**Deduplication is limited to the current handler batch:** it does not combine entries across handler batches or queue
+partitions. The selector overload evaluates the raw request for every entry after the unordered backend result has been
+indexed by key, so duplicate entries receive the same response.
+
 All responses are computed before assignment; a factory failure leaves unset entries unchanged. Reference-type results
 are shared, not cloned.
 
 If deduplication is unnecessary, remove `Distinct()` and keep the same response factory. Alternatively, assign entries
 individually with `entry.SetResponse(response)`, or use the ordered `entries.SetResponses(responses)` overload after producing exactly one response per original entry in input order,
-including duplicates and missing requests. The keyed selector overload is recommended for unordered backend results;
-the ordered overload must receive the aligned sequence, never raw backend rows. The explicit-group overload returns
-responses in input order even when RequestBatcher splits the requests across handler batches or queue partitions.
+including duplicates and missing requests.
+
+The keyed selector overload is recommended for unordered backend results; the ordered overload must receive the aligned
+sequence, never raw backend rows. The explicit-group overload returns responses in input order even when RequestBatcher
+splits the requests across handler batches or queue partitions.
 The caller's `Task<TResponse>` completes only after the
 handler succeeds, its item's response has been set, and its handler scope has been disposed.
 
@@ -345,13 +371,14 @@ requests is recorded once.
 When requests already exist as a group, submit them together:
 
 ```csharp
-await batcher.ProcessAsync(orderWriteRequests, cancellationToken);
+await batcher.ExecuteAsync(orderWriteRequests, cancellationToken);
 ```
 
 This overload snapshots the group and submits it as one producer operation, then waits for every request. In `Wait`
 mode, an oversized group enters the queue as consecutive capacity-sized slices. In `Fail` mode, the whole group must
-fit immediately. The submission does not force one handler call; it may still be split by `BatchSize` or partition
-routing.
+fit immediately.
+
+**The submission does not force one handler call:** it may still be split by `BatchSize` or partition routing.
 
 **An explicit group is not a partition boundary.** With more than one partition, every item is routed independently;
 the group stays in one partition when no partition key is configured or when every item produces the same partition
@@ -376,13 +403,26 @@ key. `MaxConcurrency = 1` limits handler concurrency but does not merge keyed pa
 | `MaxConcurrency` | `1` | Maximum concurrent handler batches. It is independent of the keyed partition count. |
 | `MaxPendingRequests` | `8192` | Internal BufferQueue capacity for requests that have not yet been pulled for execution. |
 | `FullMode` | `Wait` | Waits for capacity; `Fail` rejects immediately when capacity is unavailable. |
-| `UsePartitionKey(selector, partitionCount)` | Not set | Enables keyed routing with the explicitly configured partition count; `partitionCount` must be greater than one and equal keys use one partition. |
+| `UsePartitionKey(selector, partitionCount)` | Not set (one partition) | Enables keyed routing with the explicitly configured partition count; `partitionCount` must be greater than one and equal keys use one partition. |
 
 No ordering is guaranteed for handler execution, including when `MaxConcurrency = 1`.
 
 ### Partition Count and Concurrency
 
-This configuration uses eight queue partitions sharing four handler execution slots:
+**Without `UsePartitionKey`, all requests use one partition**, regardless of CPU count or `MaxConcurrency`.
+A single partition can still supply several concurrent handler batches. Increase `MaxConcurrency` when you need more
+downstream concurrency.
+
+**One partition is the preferred default when keyed routing is not needed.** The existing [partition benchmark](https://github.com/eventhorizon-cli/RequestBatcher/blob/main/docs/evaluations/bufferqueue-2.0.3/README.md#issue-6-partitions)
+compared one and eight partitions at `BatchSize = 64` and `MaxConcurrency = 8`. In the unkeyed cases, eight partitions
+achieved 0.97–1.01 times the throughput of one partition, showing no consistent advantage.
+
+A preloaded burst of 64 unkeyed requests produced one batch with one partition, versus eight batches with eight
+partitions. Keeping one partition avoids this fragmentation and reduces partially filled handler calls while retaining
+asynchronous concurrency controlled by `MaxConcurrency`.
+
+When keyed routing is needed, set the partition count explicitly through `UsePartitionKey`. This configuration uses
+eight queue partitions sharing four handler execution slots:
 
 ```csharp
 builder.Services.AddRequestBatcher<ProductQueryItem, ProductBatchHandler>(
@@ -405,10 +445,12 @@ A single partition can also supply several concurrent batches.
 
 ### Sizing `MaxConcurrency` with Little's Law
 
-Use Little's Law on handler-batch traffic, not directly on item traffic. For example, if one handler batch issues one
+**Use Little's Law on handler-batch traffic, not directly on item traffic.** For example, if one handler batch issues one
 downstream batch query, use the batch-query QPS (`λ_batch`, queries per second) and its mean response time (`RT`, in
-seconds). For an existing operation, obtain them from monitoring metrics; for a new operation, use the expected query QPS
-and target response time or a load-test result as the initial estimate. Keep the QPS and response time for the same query
+seconds).
+
+For an existing operation, obtain them from monitoring metrics; for a new operation, use the expected query QPS and
+target response time or a load-test result as the initial estimate. Keep the QPS and response time for the same query
 operation:
 
 ```text
@@ -419,8 +461,9 @@ L = λ x W
 Here, `L` is the number of in-flight handler batches, `λ` is their arrival rate, and `W` is their mean response time.
 
 If the batch-query QPS and response time are available, estimate the cluster-wide in-flight batch count with
-`L = λ_batch × RT`. Divide by the number of active pods and round up, then add a small safety margin. Expected values
-produce a starting configuration; replace them with production metrics after the feature is running.
+`L = λ_batch × RT`. Divide by the number of active pods and round up, then add a small safety margin.
+
+Expected values produce a starting configuration; replace them with production metrics after the feature is running.
 
 ```text
 MaxConcurrency_per_pod ≈ ceil(λ_batch × RT / pod_count × headroom)
@@ -428,11 +471,14 @@ MaxConcurrency_per_pod ≈ ceil(λ_batch × RT / pod_count × headroom)
 
 For example, six active pods handling 1,920 downstream batch calls/second at a 50 ms mean response time need about
 `1,920 × 0.050 = 96` in-flight batch calls. With evenly distributed traffic, `MaxConcurrency = 16` gives 16 slots per pod
-and 96 slots across six pods. This estimates average load; it does not guarantee latency or throughput. Adjust the limit
-using measured queue wait, downstream throttling, CPU, and connection limits.
+and 96 slots across six pods.
+
+This estimates average load; it does not guarantee latency or throughput. Adjust the limit using measured queue wait,
+downstream throttling, CPU, and connection limits.
 
 When QPS is measured per item, estimate the effective batch size separately for each partition. For partition `p`, let
-`λ_item,p` be its item QPS, `B_eff,p` its measured average items per handler call, and `RT_p` its mean handler response time:
+`λ_item,p` be its item QPS, `B_eff,p` its measured average items per handler call, and `RT_p` its mean handler response
+time:
 
 ```text
 λ_batch,p ≈ λ_item,p / B_eff,p
@@ -441,13 +487,16 @@ MaxConcurrency_per_pod ≈ ceil(L_total / pod_count × headroom)
 ```
 
 `BatchSize` is only an upper bound, so `B_eff,p` can be much smaller when traffic is sparse. `partitionCount` changes the
-item rate seen by each partition and therefore can change `B_eff,p`; it is not a worker count and must not be multiplied
-directly into the formula. Increasing the partition count can reduce batch sizes, while increasing `BatchSize` can increase
-batch size and response time together. A larger partition count can also reduce opportunistic deduplication because each
-partition sees fewer requests at a time. If the deduplication key is the same as the partition key, equal keys still route
-to one partition, but separate handler batches can still miss each other. If the keys differ, requests for one deduplication
-target can be routed to different partitions. Choose the smallest partition count that isolates hot keys, then verify the
-effective batch size and deduplication hit rate after changing either setting.
+item rate seen by each partition and therefore can change `B_eff,p`.
+
+**`partitionCount` is not a worker count and must not be multiplied directly into the formula.** Increasing the partition
+count can reduce batch sizes, while increasing `BatchSize` can increase batch size and response time together. A larger
+partition count can also reduce opportunistic deduplication because each partition sees fewer requests at a time.
+
+If the deduplication key is the same as the partition key, equal keys still route to one partition, but separate handler
+batches can still miss each other. If the keys differ, requests for one deduplication target can be routed to different
+partitions. Choose the smallest partition count that isolates hot keys, then verify the effective batch size and
+deduplication hit rate after changing either setting.
 
 If batch-call QPS is available, use the measured value directly instead of estimating it from item QPS and batch size.
 
@@ -482,15 +531,18 @@ A handler runs on the dispatch call path until it completes or reaches an incomp
 or synchronously blocking work before that point can delay other batches even when execution slots remain free.
 `MaxConcurrency` is an upper bound; it does not automatically parallelize synchronous handler code.
 
-The queue partition count is not the handler concurrency level. Partitions organize queueing and routing, while
-`MaxConcurrency` sets the global maximum number of concurrent handler batches. Without a partition key, the queue uses
-one internal partition to avoid fragmenting unrelated requests. With a finite integer numeric key or a non-null string
-key, it uses the explicit count supplied to `UsePartitionKey`, so equal keys retain locality while different keys can
-progress independently. Multiple batches from one partition can execute concurrently, and all partitions share the same
-execution slots. One `BatchDispatchLoop` owns them all. It acquires an execution slot before pulling an auto-committed
-batch, so there is no application-owned handoff queue behind BufferQueue. Each handler batch releases its slot independently
-when it finishes, keeping at most `MaxConcurrency` handler batches in flight. The partition count is fixed at registration
-and independent of CPU count.
+**The queue partition count is not the handler concurrency level.** Partitions organize queueing and routing, while
+`MaxConcurrency` sets the global maximum number of concurrent handler batches.
+
+Without a partition key, the queue uses one internal partition to avoid fragmenting unrelated requests. With a finite
+integer numeric key or a non-null string key, it uses the explicit count supplied to `UsePartitionKey`, so equal keys
+retain locality while different keys can progress independently.
+
+Multiple batches from one partition can execute concurrently, and all partitions share the same execution slots. One
+`BatchDispatchLoop` owns them all. It acquires an execution slot before pulling an auto-committed batch, so there is no
+application-owned handoff queue behind BufferQueue. Each handler batch releases its slot independently when it finishes,
+keeping at most `MaxConcurrency` handler batches in flight. The partition count is fixed at registration and independent
+of CPU count.
 
 | Configuration | Routing and dispatch |
 | --- | --- |
