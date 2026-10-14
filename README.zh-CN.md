@@ -33,18 +33,18 @@ RequestBatcher 会合并已经排队的请求，限制 Handler 批次并发数�
 
 ## 请求如何合并：机会式合并
 
+上面的示意图展示了请求可能如何合并。本节说明这种批次是如何形成的。
+
 RequestBatcher 基于 [BufferQueue](https://github.com/eventhorizon-cli/BufferQueue)，将 .NET 进程内已经排队的并发请求
-合并为批次，交给应用的 Handler 处理。
+合并为批次，交给应用的 Handler 处理。当前依赖 [BufferQueue 2.0.3](https://www.nuget.org/packages/BufferQueue/2.0.3)，
+应用无需单独注册或配置它。
 
-调用方通过 DI 获取 `IRequestBatcher<TRequest>` 或
-`IRequestBatcher<TRequest, TResponse>`，提交请求并等待各自的结果。当前依赖
-[BufferQueue 2.0.3](https://www.nuget.org/packages/BufferQueue/2.0.3)，应用无需单独注册或配置它。
+这种批次处理可以理解为**机会式攒批（opportunistic batching）**：请求写入 BufferQueue 后会发出 push 通知，唤醒空闲的消费流程。
+消费流程取得空闲执行名额后，通过 pull API 拉取当时已经排队的请求；它不会为了凑满 `BatchSize` 而等待固定时间窗口。
 
-RequestBatcher 采用 **机会式合并（Opportunistic Merging）**：请求写入 BufferQueue 后会发出数据可用通知，唤醒等待中的
-消费流程。
+调用方通过 DI 获取 `IRequestBatcher<TRequest>` 或 `IRequestBatcher<TRequest, TResponse>`，提交请求并等待各自的结果。
 
-调度循环先取得空闲执行名额，再通过 pull API 拉取当前已排队的请求；分发批次后便继续循环，只要还有名额，
-就可以继续拉取和分发，无需等待刚分发的批次完成。
+调度循环分发一个批次后会继续运行。只要还有空闲名额，就可以继续拉取和分发下一批，无需等待刚分发的批次完成。
 
 **只有所有分配的 Partition 都没有数据时，才等待下一次 push 通知。**
 

@@ -28,19 +28,21 @@ not guaranteed to arrive in one batch.
 
 ## How Requests Are Batched: Opportunistic Merging
 
+The illustration above shows how requests may be combined. This section explains how those handler batches are formed.
+
 RequestBatcher uses [BufferQueue](https://github.com/eventhorizon-cli/BufferQueue) to combine queued requests within a
-.NET process and pass them to an application handler.
+.NET process and pass them to an application handler. The current dependency is
+[BufferQueue 2.0.3](https://www.nuget.org/packages/BufferQueue/2.0.3); applications do not register or configure it
+separately.
 
-Callers obtain `IRequestBatcher<TRequest>` or
-`IRequestBatcher<TRequest, TResponse>` through DI, submit requests, and await their individual results. The current
-dependency is [BufferQueue 2.0.3](https://www.nuget.org/packages/BufferQueue/2.0.3); applications do not register or
-configure it separately.
+This is **opportunistic batching**: writing a request to BufferQueue sends a push notification that wakes an idle
+consumer. Once it has an execution slot, the consumer pulls requests queued at that moment; it does not wait for a
+fixed time window to fill `BatchSize`.
 
-RequestBatcher uses **Opportunistic Merging**. Writing a request to BufferQueue signals that data is available and wakes
-an idle consumer.
+Callers obtain `IRequestBatcher<TRequest>` or `IRequestBatcher<TRequest, TResponse>` through DI, submit requests, and
+await their individual results.
 
-The dispatch loop acquires a free execution slot, then uses the pull API to retrieve requests already
-queued. After dispatching a batch, it continues the loop: if another slot is available, it can pull and dispatch again
+After dispatching a batch, the loop continues. If another slot is available, it can pull and dispatch the next batch
 without waiting for the previous batch to finish.
 
 **It waits for the next push notification only when none of the assigned partitions has data.**
