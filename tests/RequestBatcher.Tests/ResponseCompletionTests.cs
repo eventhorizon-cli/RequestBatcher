@@ -8,7 +8,7 @@ public sealed class ResponseCompletionTests
     private static readonly TimeSpan _timeout = TimeSpan.FromSeconds(5);
 
     [Fact]
-    public async Task ProcessAsync_ResponseSetBeforeHandlerCompletion_DelaysCallerUntilScopeDisposed()
+    public async Task ExecuteAsync_ResponseSetBeforeHandlerCompletion_DelaysCallerUntilScopeDisposed()
     {
         var probe = new ResponseHandlerProbe();
         var handlerStarted = NewSource();
@@ -23,7 +23,7 @@ public sealed class ResponseCompletionTests
                 await releaseHandler.Task;
             });
         var batcher = provider.GetRequiredService<IRequestBatcher<int, string>>();
-        var response = batcher.ProcessAsync(1);
+        var response = batcher.ExecuteAsync(1);
 
         try
         {
@@ -49,7 +49,7 @@ public sealed class ResponseCompletionTests
     }
 
     [Fact]
-    public async Task ProcessAsync_ResponseSetBeforeDisposalFailure_PropagatesDisposalException()
+    public async Task ExecuteAsync_ResponseSetBeforeDisposalFailure_PropagatesDisposalException()
     {
         var expected = new TestBatchException();
         var probe = new ResponseHandlerProbe { DisposalException = expected };
@@ -62,7 +62,7 @@ public sealed class ResponseCompletionTests
                 return ValueTask.CompletedTask;
             });
         var batcher = provider.GetRequiredService<IRequestBatcher<int, string>>();
-        var response = batcher.ProcessAsync(1);
+        var response = batcher.ExecuteAsync(1);
 
         try
         {
@@ -81,7 +81,7 @@ public sealed class ResponseCompletionTests
     }
 
     [Fact]
-    public async Task ProcessAsync_ResponseSetThenHandlerThrows_PropagatesOriginalException()
+    public async Task ExecuteAsync_ResponseSetThenHandlerThrows_PropagatesOriginalException()
     {
         var expected = new TestBatchException();
 
@@ -94,13 +94,13 @@ public sealed class ResponseCompletionTests
         var batcher = provider.GetRequiredService<IRequestBatcher<int, string>>();
 
         var actual = await Assert.ThrowsAsync<TestBatchException>(
-            () => batcher.ProcessAsync(1).WaitAsync(_timeout));
+            () => batcher.ExecuteAsync(1).WaitAsync(_timeout));
 
         Assert.Same(expected, actual);
     }
 
     [Fact]
-    public async Task ProcessAsync_MissingResponseInSharedHandlerBatch_FaultsEveryItem()
+    public async Task ExecuteAsync_MissingResponseInSharedHandlerBatch_FaultsEveryItem()
     {
         var blockerStarted = NewSource();
         var releaseBlocker = NewSource();
@@ -122,13 +122,13 @@ public sealed class ResponseCompletionTests
             },
             options => options.BatchSize = 2);
         var batcher = provider.GetRequiredService<IRequestBatcher<int, string>>();
-        var blocker = batcher.ProcessAsync(0);
+        var blocker = batcher.ExecuteAsync(0);
 
         try
         {
             await blockerStarted.Task.WaitAsync(_timeout);
-            var first = batcher.ProcessAsync(1);
-            var second = batcher.ProcessAsync(2);
+            var first = batcher.ExecuteAsync(1);
+            var second = batcher.ExecuteAsync(2);
             releaseBlocker.SetResult();
 
             Assert.Equal(2, await targetBatchSize.Task.WaitAsync(_timeout));
@@ -147,7 +147,7 @@ public sealed class ResponseCompletionTests
     }
 
     [Fact]
-    public async Task ProcessAsync_CallerCanceledAfterDispatchSuccess_ReturnsActualResponse()
+    public async Task ExecuteAsync_CallerCanceledAfterDispatchSuccess_ReturnsActualResponse()
     {
         var handlerStarted = NewSource();
         var releaseHandler = NewSource();
@@ -161,7 +161,7 @@ public sealed class ResponseCompletionTests
             });
         var batcher = provider.GetRequiredService<IRequestBatcher<int, string>>();
         using var cancellation = new CancellationTokenSource();
-        var response = batcher.ProcessAsync(1, cancellation.Token);
+        var response = batcher.ExecuteAsync(1, cancellation.Token);
 
         try
         {
@@ -178,7 +178,7 @@ public sealed class ResponseCompletionTests
     }
 
     [Fact]
-    public async Task ProcessAsync_CallerCanceledAfterDispatchFailure_PropagatesActualFailure()
+    public async Task ExecuteAsync_CallerCanceledAfterDispatchFailure_PropagatesActualFailure()
     {
         var expected = new TestBatchException();
         var handlerStarted = NewSource();
@@ -193,7 +193,7 @@ public sealed class ResponseCompletionTests
             });
         var batcher = provider.GetRequiredService<IRequestBatcher<int, string>>();
         using var cancellation = new CancellationTokenSource();
-        var response = batcher.ProcessAsync(1, cancellation.Token);
+        var response = batcher.ExecuteAsync(1, cancellation.Token);
 
         try
         {
@@ -212,7 +212,7 @@ public sealed class ResponseCompletionTests
     }
 
     [Fact]
-    public async Task ProcessAsync_CallerCanceledBeforeDispatch_CancelsResponseAndSkipsHandler()
+    public async Task ExecuteAsync_CallerCanceledBeforeDispatch_CancelsResponseAndSkipsHandler()
     {
         var handlerStarted = NewSource();
         var releaseHandler = NewSource();
@@ -232,14 +232,14 @@ public sealed class ResponseCompletionTests
             },
             options => options.BatchSize = 1);
         var batcher = provider.GetRequiredService<IRequestBatcher<int, string>>();
-        var first = batcher.ProcessAsync(1);
+        var first = batcher.ExecuteAsync(1);
 
         try
         {
             await handlerStarted.Task.WaitAsync(_timeout);
 
             using var cancellation = new CancellationTokenSource();
-            var canceled = batcher.ProcessAsync(2, cancellation.Token);
+            var canceled = batcher.ExecuteAsync(2, cancellation.Token);
             cancellation.Cancel();
             await Assert.ThrowsAnyAsync<OperationCanceledException>(
                 () => canceled.WaitAsync(_timeout));
@@ -255,7 +255,7 @@ public sealed class ResponseCompletionTests
     }
 
     [Fact]
-    public async Task ProcessAsync_CallerCanceledWhileWaitingCapacity_CancelsResponse()
+    public async Task ExecuteAsync_CallerCanceledWhileWaitingCapacity_CancelsResponse()
     {
         var handlerStarted = NewSource();
         var releaseHandler = NewSource();
@@ -273,14 +273,14 @@ public sealed class ResponseCompletionTests
             },
             options => options.MaxPendingRequests = 1);
         var batcher = provider.GetRequiredService<IRequestBatcher<int, string>>();
-        var first = batcher.ProcessAsync(1);
+        var first = batcher.ExecuteAsync(1);
 
         try
         {
             await handlerStarted.Task.WaitAsync(_timeout);
-            var queued = batcher.ProcessAsync(2);
+            var queued = batcher.ExecuteAsync(2);
             using var cancellation = new CancellationTokenSource();
-            var waiting = batcher.ProcessAsync(3, cancellation.Token);
+            var waiting = batcher.ExecuteAsync(3, cancellation.Token);
             Assert.False(waiting.IsCompleted);
             cancellation.Cancel();
             await Assert.ThrowsAnyAsync<OperationCanceledException>(
@@ -296,7 +296,7 @@ public sealed class ResponseCompletionTests
     }
 
     [Fact]
-    public async Task ProcessAsync_FailModeCapacityRejected_ReturnsQueueFullException()
+    public async Task ExecuteAsync_FailModeCapacityRejected_ReturnsQueueFullException()
     {
         var handlerStarted = NewSource();
         var releaseHandler = NewSource();
@@ -318,13 +318,13 @@ public sealed class ResponseCompletionTests
                 options.FullMode = RequestBatchFullMode.Fail;
             });
         var batcher = provider.GetRequiredService<IRequestBatcher<int, string>>();
-        var first = batcher.ProcessAsync(1);
+        var first = batcher.ExecuteAsync(1);
 
         try
         {
             await handlerStarted.Task.WaitAsync(_timeout);
-            var queued = batcher.ProcessAsync(2);
-            var rejected = batcher.ProcessAsync(3);
+            var queued = batcher.ExecuteAsync(2);
+            var rejected = batcher.ExecuteAsync(3);
             var exception = await Assert.ThrowsAsync<RequestBatchQueueFullException>(
                 () => rejected.WaitAsync(_timeout));
             Assert.Equal(1, exception.Capacity);
@@ -340,11 +340,11 @@ public sealed class ResponseCompletionTests
     }
 
     [Fact]
-    public async Task ProcessAsync_CompletedResponseTask_AwaitsSameResponse()
+    public async Task ExecuteAsync_CompletedResponseTask_AwaitsSameResponse()
     {
         await using var provider = CreateResponseValueProvider();
         var responseBatcher = provider.GetRequiredService<IRequestBatcher<int, ResponseValue>>();
-        var response = responseBatcher.ProcessAsync(7);
+        var response = responseBatcher.ExecuteAsync(7);
 
         var first = await response.WaitAsync(_timeout);
         var second = await response.WaitAsync(_timeout);
@@ -353,7 +353,7 @@ public sealed class ResponseCompletionTests
     }
 
     [Fact]
-    public async Task ProcessAsync_HandlerThrowsOperationCanceledException_ReturnsCanceledTask()
+    public async Task ExecuteAsync_HandlerThrowsOperationCanceledException_ReturnsCanceledTask()
     {
         using var handlerCancellation = new CancellationTokenSource();
         var expectedToken = handlerCancellation.Token;
@@ -362,7 +362,7 @@ public sealed class ResponseCompletionTests
             (_, _) => ValueTask.FromException(new OperationCanceledException(expectedToken)));
         var batcher = provider.GetRequiredService<IRequestBatcher<int, string>>();
 
-        var response = batcher.ProcessAsync(1);
+        var response = batcher.ExecuteAsync(1);
 
         var actual = await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => response.WaitAsync(_timeout));
@@ -372,7 +372,7 @@ public sealed class ResponseCompletionTests
     }
 
     [Fact]
-    public async Task ProcessAsync_PreCanceledSubmission_ReturnsCanceledResponseTask()
+    public async Task ExecuteAsync_PreCanceledSubmission_ReturnsCanceledResponseTask()
     {
         await using var provider = CreateProvider(
             (_, _) => throw new TestBatchException());
@@ -380,7 +380,7 @@ public sealed class ResponseCompletionTests
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
 
-        var response = batcher.ProcessAsync(1, cancellation.Token);
+        var response = batcher.ExecuteAsync(1, cancellation.Token);
 
         var actual = await Assert.ThrowsAnyAsync<OperationCanceledException>(
             () => response.WaitAsync(_timeout));
@@ -389,7 +389,7 @@ public sealed class ResponseCompletionTests
     }
 
     [Fact]
-    public async Task ProcessAsync_DisposedBatcher_ReturnsObjectDisposedTask()
+    public async Task ExecuteAsync_DisposedBatcher_ReturnsObjectDisposedTask()
     {
         var provider = CreateProvider(
             (_, _) => throw new TestBatchException());
@@ -399,7 +399,7 @@ public sealed class ResponseCompletionTests
         {
             await provider.DisposeAsync();
 
-            var response = batcher.ProcessAsync(1);
+            var response = batcher.ExecuteAsync(1);
 
             await Assert.ThrowsAsync<ObjectDisposedException>(
                 () => response.WaitAsync(_timeout));

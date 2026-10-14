@@ -94,7 +94,7 @@ public class ExplicitSubmissionBenchmarks
         var submissions = new Task[_explicitGroups.Length];
         for (var groupIndex = 0; groupIndex < _explicitGroups.Length; groupIndex++)
         {
-            submissions[groupIndex] = RequestBatcher.ProcessAsync(_explicitGroups[groupIndex]);
+            submissions[groupIndex] = RequestBatcher.ExecuteAsync(_explicitGroups[groupIndex]);
         }
 
         var all = Task.WhenAll(submissions);
@@ -110,13 +110,13 @@ public class ExplicitSubmissionBenchmarks
         var submissions = new Task[SingleRequestCount + _mixedGroups.Length];
         for (var requestIndex = 0; requestIndex < SingleRequestCount; requestIndex++)
         {
-            submissions[requestIndex] = RequestBatcher.ProcessAsync(_requests[requestIndex]);
+            submissions[requestIndex] = RequestBatcher.ExecuteAsync(_requests[requestIndex]);
         }
 
         for (var groupIndex = 0; groupIndex < _mixedGroups.Length; groupIndex++)
         {
             submissions[SingleRequestCount + groupIndex] =
-                RequestBatcher.ProcessAsync(_mixedGroups[groupIndex]);
+                RequestBatcher.ExecuteAsync(_mixedGroups[groupIndex]);
         }
 
         var all = Task.WhenAll(submissions);

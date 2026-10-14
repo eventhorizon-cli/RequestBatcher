@@ -6,17 +6,17 @@ internal sealed class ResponseRequestBatcher<TRequest, TResponse>(
     RequestBatchCoordinator<RequestBatchItem<TRequest, TResponse>> batcher)
     : IRequestBatcher<TRequest, TResponse>
 {
-    public Task<TResponse> ProcessAsync(TRequest request, CancellationToken cancellationToken = default)
+    public Task<TResponse> ExecuteAsync(TRequest request, CancellationToken cancellationToken = default)
     {
         var entry = new RequestBatchItem<TRequest, TResponse>(request);
         var completion = new ResponseCompletion<TRequest, TResponse>(entry);
-        var submission = batcher.ProcessAsync(entry, completion, cancellationToken);
+        var submission = batcher.ExecuteAsync(entry, completion, cancellationToken);
         return ReferenceEquals(submission, completion.Task)
             ? completion.Task
             : AwaitSubmissionAsync(submission, entry);
     }
 
-    public Task<IReadOnlyList<TResponse>> ProcessAsync(
+    public Task<IReadOnlyList<TResponse>> ExecuteAsync(
         IEnumerable<TRequest> requests,
         CancellationToken cancellationToken = default)
     {
@@ -39,7 +39,7 @@ internal sealed class ResponseRequestBatcher<TRequest, TResponse>(
     {
         var entries = new List<RequestBatchItem<TRequest, TResponse>>();
         await batcher
-            .ProcessAsync(CreateEntries(requests, entries), cancellationToken)
+            .ExecuteAsync(CreateEntries(requests, entries), cancellationToken)
             .ConfigureAwait(false);
 
         if (entries.Count == 0)

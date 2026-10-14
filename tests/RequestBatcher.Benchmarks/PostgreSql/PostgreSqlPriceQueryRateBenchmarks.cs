@@ -118,7 +118,7 @@ public class PostgreSqlPriceQueryRateBenchmarks
     {
         Volatile.Write(ref _workloadExecuted, 1);
         _startGate.Release();
-        await SubmitAtTargetRateAsync(request => RequestBatcher.ProcessAsync(request)).ConfigureAwait(false);
+        await SubmitAtTargetRateAsync(request => RequestBatcher.ExecuteAsync(request)).ConfigureAwait(false);
     }
 
     [IterationCleanup(Target = nameof(DirectPacedReadsAsync))]

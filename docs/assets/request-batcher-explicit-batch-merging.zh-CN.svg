@@ -1,0 +1,48 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1800" height="760" viewBox="0 0 1800 760" role="img" aria-labelledby="title description">
+<title id="title">批量提交的拆分、组批与去重</title><desc id="description">A、B各调用一次批量API，按商品ID拆分到分区。示例中的两个Handler批次分别去重查询，然后给所有请求回填结果。</desc>
+<defs><marker id="arrow" markerWidth="9" markerHeight="9" refX="8" refY="4.5" orient="auto"><path d="M0 0 L9 4.5 L0 9 Z" fill="#596773"/></marker>
+<style>
+text { font-family:Arial,'PingFang SC','Microsoft YaHei',sans-serif; font-size:24px; fill:#303b44; text-anchor:middle; }
+.node { stroke-width:2; }
+.client { fill:#e9f6f1; stroke:#2f6f5e; }
+.core { fill:#edf1f5; stroke:#596773; }
+.router { fill:#eaf2ff; stroke:#3567a7; }
+.handler { fill:#f4edfb; stroke:#75529b; }
+.store { fill:#fff4d6; stroke:#8a6a1d; }
+.edge { fill:none; stroke:#596773; stroke-width:2.5; marker-end:url(#arrow); stroke-linejoin:round; }
+.note { font-size:22px; fill:#596773; }
+</style></defs><rect width="1800" height="760" fill="white"/>
+<path class="edge" d="M310 185 H345 V300 H385"/>
+<path class="edge" d="M310 455 H345 V350 H385"/>
+<path class="edge" d="M635 300 H675 V185 H710"/>
+<path class="edge" d="M635 350 H675 V455 H710"/>
+<path class="edge" d="M1020 185 H1100"/>
+<path class="edge" d="M1020 455 H1100"/>
+<path class="edge" d="M1410 185 H1490"/>
+<path class="edge" d="M1410 455 H1490"/>
+<rect class="node client" x="30" y="120" width="280" height="130" rx="8"/>
+<rect class="node client" x="30" y="390" width="280" height="130" rx="8"/>
+<rect class="node router" x="385" y="250" width="250" height="150" rx="8"/>
+<rect class="node core" x="710" y="105" width="310" height="160" rx="8"/>
+<rect class="node handler" x="1100" y="105" width="310" height="160" rx="8"/>
+<rect class="node store" x="1490" y="105" width="280" height="160" rx="8"/>
+<rect class="node core" x="710" y="375" width="310" height="160" rx="8"/>
+<rect class="node handler" x="1100" y="375" width="310" height="160" rx="8"/>
+<rect class="node store" x="1490" y="375" width="280" height="160" rx="8"/>
+<text x="330" y="55" class="note"><tspan x="330" dy="0">A、B 各调用一次 ExecuteAsync(requests)</tspan></text>
+<text x="170" y="155" class=""><tspan x="170" dy="0">调用方 A</tspan><tspan x="170" dy="36">一次批量提交</tspan><tspan x="170" dy="36">[101, 102, 103]</tspan></text>
+<text x="170" y="425" class=""><tspan x="170" dy="0">调用方 B</tspan><tspan x="170" dy="36">一次批量提交</tspan><tspan x="170" dy="36">[102, 103, 104]</tspan></text>
+<text x="510" y="295" class=""><tspan x="510" dy="0">逐项拆分与路由</tspan><tspan x="510" dy="36">按 ProductId</tspan><tspan x="510" dy="36">进入 Partition</tspan></text>
+<text x="865" y="155" class=""><tspan x="865" dy="0">Partition X</tspan><tspan x="865" dy="36">A: [101, 103]</tspan><tspan x="865" dy="36">B: [103]</tspan></text>
+<text x="865" y="425" class=""><tspan x="865" dy="0">Partition Y</tspan><tspan x="865" dy="36">A: [102]</tspan><tspan x="865" dy="36">B: [102, 104]</tspan></text>
+<text x="1255" y="142" class=""><tspan x="1255" dy="0">Handler 批次 1</tspan><tspan x="1255" dy="34">在当前批次内去重</tspan><tspan x="1255" dy="34">[101, 103, 103]</tspan><tspan x="1255" dy="34">→ [101, 103]</tspan></text>
+<text x="1255" y="412" class=""><tspan x="1255" dy="0">Handler 批次 2</tspan><tspan x="1255" dy="34">在当前批次内去重</tspan><tspan x="1255" dy="34">[102, 102, 104]</tspan><tspan x="1255" dy="34">→ [102, 104]</tspan></text>
+<text x="1630" y="155" class=""><tspan x="1630" dy="0">一次下游批量查询</tspan><tspan x="1630" dy="36">[101, 103]</tspan><tspan x="1630" dy="36">2 个商品</tspan></text>
+<text x="1630" y="425" class=""><tspan x="1630" dy="0">一次下游批量查询</tspan><tspan x="1630" dy="36">[102, 104]</tspan><tspan x="1630" dy="36">2 个商品</tspan></text>
+<text x="1060" y="159" class="note"><tspan x="1060" dy="0">组批</tspan></text>
+<text x="1060" y="429" class="note"><tspan x="1060" dy="0">组批</tspan></text>
+<text x="900" y="605" class="note"><tspan x="900" dy="0">各 Handler 按 ProductId 回填结果：6 个请求分别得到结果，本例共查询 4 个商品。</tspan></text>
+<text x="610" y="648" class="note"><tspan x="610" dy="0">A ← [价格 101, 价格 102, 价格 103]</tspan></text>
+<text x="1220" y="648" class="note"><tspan x="1220" dy="0">B ← [价格 102, 价格 103, 价格 104]</tspan></text>
+<text x="900" y="715" class="note"><tspan x="900" dy="0">路由与分批仅为示意：一次提交可能分成多批；相同 key 也可能分批，去重仅限各自的 Handler 批次。</tspan></text>
+</svg>

@@ -17,7 +17,7 @@ public interface IRequestBatcher<in TRequest, TResponse>
     /// Completion includes handler scope disposal. A handler cancellation produces a canceled task with the
     /// original cancellation token, without preserving the cancellation exception instance or derived type.
     /// </remarks>
-    Task<TResponse> ProcessAsync(TRequest request, CancellationToken cancellationToken = default);
+    Task<TResponse> ExecuteAsync(TRequest request, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Enqueues multiple requests with one production operation and asynchronously returns their responses.
@@ -29,7 +29,7 @@ public interface IRequestBatcher<in TRequest, TResponse>
     /// request at the same index in the input sequence, even when the requests are split across handler batches or
     /// queue partitions.
     /// </returns>
-    Task<IReadOnlyList<TResponse>> ProcessAsync(
+    Task<IReadOnlyList<TResponse>> ExecuteAsync(
         IEnumerable<TRequest> requests,
         CancellationToken cancellationToken = default);
 }

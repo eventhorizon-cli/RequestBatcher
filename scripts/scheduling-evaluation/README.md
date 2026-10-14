@@ -12,7 +12,7 @@ python3 scripts/scheduling-evaluation/run.py --output artifacts/scheduling-evalu
 The script builds an isolated copy of the current library in a temporary directory.
 It adds one experimental switch only to that copy: after the execution permit and
 in-flight registration, the offload variant schedules the call to
-`_batchConsumer.ProcessAsync` and keeps the existing `ProcessBatchAsync(ValueTask)`
+`_batchConsumer.ExecuteAsync` and keeps the existing `ProcessBatchAsync(ValueTask)`
 cleanup path. The checkout's runtime and public options are unchanged. The offload
 variant is a performance probe, not a proposed implementation: moving
 `TryStartProcessing` into the scheduled delegate changes the cancellation window,
@@ -39,7 +39,8 @@ configuration, with one full workload warmup and three measured workloads. Tiere
 compilation is disabled equally for both variants to reduce short-run JIT drift.
 The .NET ThreadPool uses its defaults; the script does not raise minimum threads.
 It writes runtime details, the library diff, per-run measurements, and deterministic
-preloaded-burst results to the output directory. NuGet cache paths can be supplied
+preloaded-burst results to the local output directory. Keep generated artifacts outside
+version control; committed evaluation records contain only concise README summaries. NuGet cache paths can be supplied
 through the usual `NUGET_PACKAGES` and `NUGET_HTTP_CACHE_PATH` environment variables.
 
 The workloads use the real coordinator, dependency injection, and BufferQueue:

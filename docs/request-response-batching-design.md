@@ -14,16 +14,22 @@ Implementation design for the current request/response batching API.
 
 ## Public API
 
-Request-only callers submit one request or an explicit request sequence:
+`ExecuteAsync` is the single execution entry point for both one request and an explicit
+request sequence. It admits and queues the requests, then waits for their actual handler
+outcome. A sequence can split across partitions and handler batches; its task completes
+only when every submitted request reaches a terminal outcome. The response overload
+returns results in input order. Handlers implement `HandleAsync` for one dispatched batch.
+
+Request-only callers execute one request or an explicit request sequence:
 
 ```csharp
 public interface IRequestBatcher<TRequest>
 {
-    Task ProcessAsync(
+    Task ExecuteAsync(
         TRequest request,
         CancellationToken cancellationToken = default);
 
-    Task ProcessAsync(
+    Task ExecuteAsync(
         IEnumerable<TRequest> requests,
         CancellationToken cancellationToken = default);
 }
@@ -34,11 +40,11 @@ Request/response callers use the corresponding response-bearing interface:
 ```csharp
 public interface IRequestBatcher<TRequest, TResponse>
 {
-    Task<TResponse> ProcessAsync(
+    Task<TResponse> ExecuteAsync(
         TRequest request,
         CancellationToken cancellationToken = default);
 
-    Task<IReadOnlyList<TResponse>> ProcessAsync(
+    Task<IReadOnlyList<TResponse>> ExecuteAsync(
         IEnumerable<TRequest> requests,
         CancellationToken cancellationToken = default);
 }
@@ -81,6 +87,12 @@ its configuration callback or modify the service descriptors and options of the
 existing pipeline.
 
 ## Compatibility
+
+Both interfaces and all callers use the `ExecuteAsync` overloads shown above. Consumers
+must update their source calls and recompile; no compatibility alias is provided. The
+method name does not alter admission, routing, cancellation, response ordering, exception
+propagation, or shutdown. The internal coordinator and consumer execution methods use
+the same name, while handler implementations continue to use `HandleAsync`.
 
 The public registration surface is type-based: applications provide an
 `IRequestBatchHandler` implementation and choose its service lifetime when
@@ -278,9 +290,10 @@ No nested service provider is created.
 
 ## Validation
 
-The naming convention is checked by compiling the library, sample, and benchmark
-projects and running the existing response and full test suites on both target
-frameworks; it adds no runtime behavior.
+API naming is checked by compiling the library, samples, benchmark projects, and
+scheduling probes against `ExecuteAsync`, then running the existing response and full
+test suites on both target frameworks. Documentation examples and diagram sources use
+the same spelling. The rename adds no runtime behavior.
 
 Deterministic tests cover:
 

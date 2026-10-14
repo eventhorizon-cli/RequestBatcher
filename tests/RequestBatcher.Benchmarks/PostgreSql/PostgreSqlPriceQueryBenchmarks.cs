@@ -123,7 +123,7 @@ public class PostgreSqlPriceQueryBenchmarks
         {
             for (var index = 0; index < _requests.Length; index++)
             {
-                reads[index] = RequestBatcher.ProcessAsync(_requests[index]);
+                reads[index] = RequestBatcher.ExecuteAsync(_requests[index]);
             }
         }
         finally

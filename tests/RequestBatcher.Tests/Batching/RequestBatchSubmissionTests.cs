@@ -6,7 +6,7 @@ namespace RequestBatcher.Tests.Batching;
 public sealed class RequestBatchSubmissionTests
 {
     [Fact]
-    public async Task ProcessAsync_MultipleRequests_ProcessesOneProducedBatch()
+    public async Task ExecuteAsync_MultipleRequests_ProcessesOneProducedBatch()
     {
         var handledBatches = new ConcurrentQueue<int[]>();
 
@@ -19,13 +19,13 @@ public sealed class RequestBatchSubmissionTests
             options => options.BatchSize = 10);
         var batcher = provider.GetRequiredService<IRequestBatcher<int>>();
 
-        await batcher.ProcessAsync([1, 2, 3]).WaitAsync(TimeSpan.FromSeconds(5));
+        await batcher.ExecuteAsync([1, 2, 3]).WaitAsync(TimeSpan.FromSeconds(5));
 
         Assert.Equal(new[] { 1, 2, 3 }, Assert.Single(handledBatches));
     }
 
     [Fact]
-    public async Task ProcessAsync_EmptySequence_CompletesWithoutHandling()
+    public async Task ExecuteAsync_EmptySequence_CompletesWithoutHandling()
     {
         var invocationCount = 0;
 
@@ -36,13 +36,13 @@ public sealed class RequestBatchSubmissionTests
         });
         var batcher = provider.GetRequiredService<IRequestBatcher<int>>();
 
-        await batcher.ProcessAsync([]).WaitAsync(TimeSpan.FromSeconds(5));
+        await batcher.ExecuteAsync([]).WaitAsync(TimeSpan.FromSeconds(5));
 
         Assert.Equal(0, Volatile.Read(ref invocationCount));
     }
 
     [Fact]
-    public async Task ProcessAsync_HandlerFails_CompletesAllRequestsAndPropagatesException()
+    public async Task ExecuteAsync_HandlerFails_CompletesAllRequestsAndPropagatesException()
     {
         var expected = new TestBatchException();
         var handledRequests = new ConcurrentQueue<int>();
@@ -67,14 +67,14 @@ public sealed class RequestBatchSubmissionTests
         var batcher = provider.GetRequiredService<IRequestBatcher<int>>();
 
         var actual = await Assert.ThrowsAsync<TestBatchException>(
-            () => batcher.ProcessAsync(Enumerable.Range(1, 5)));
+            () => batcher.ExecuteAsync(Enumerable.Range(1, 5)));
 
         Assert.Same(expected, actual);
         Assert.Equal(Enumerable.Range(1, 5), handledRequests.Order());
     }
 
     [Fact]
-    public async Task ProcessAsync_WaitModeBatchExceedsCapacity_ProcessesCapacitySizedSlices()
+    public async Task ExecuteAsync_WaitModeBatchExceedsCapacity_ProcessesCapacitySizedSlices()
     {
         var firstSliceStarted = NewSource();
         var releaseFirstSlice = NewSource();
@@ -98,7 +98,7 @@ public sealed class RequestBatchSubmissionTests
             });
         var batcher = provider.GetRequiredService<IRequestBatcher<int>>();
 
-        var processing = batcher.ProcessAsync([1, 2, 3]);
+        var processing = batcher.ExecuteAsync([1, 2, 3]);
         await firstSliceStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         Assert.False(processing.IsCompleted);
@@ -111,7 +111,7 @@ public sealed class RequestBatchSubmissionTests
     }
 
     [Fact]
-    public async Task ProcessAsync_FailModeBatchExceedsCapacity_RejectsWithoutHandling()
+    public async Task ExecuteAsync_FailModeBatchExceedsCapacity_RejectsWithoutHandling()
     {
         var invocationCount = 0;
 
@@ -129,7 +129,7 @@ public sealed class RequestBatchSubmissionTests
         var batcher = provider.GetRequiredService<IRequestBatcher<int>>();
 
         var exception = await Assert.ThrowsAsync<RequestBatchQueueFullException>(
-            () => batcher.ProcessAsync([1, 2, 3]));
+            () => batcher.ExecuteAsync([1, 2, 3]));
 
         Assert.Equal(2, exception.Capacity);
         Assert.Equal(3, exception.RequestedCount);
@@ -137,7 +137,7 @@ public sealed class RequestBatchSubmissionTests
     }
 
     [Fact]
-    public async Task ProcessAsync_WaitModeOversizedBatchCanceledAfterDispatch_WaitsForActiveHandler()
+    public async Task ExecuteAsync_WaitModeOversizedBatchCanceledAfterDispatch_WaitsForActiveHandler()
     {
         var firstSliceStarted = NewSource();
         var releaseFirstSlice = NewSource();
@@ -159,7 +159,7 @@ public sealed class RequestBatchSubmissionTests
         var coordinator = provider.GetRequiredService<RequestBatchCoordinator<int>>();
         using var cancellation = new CancellationTokenSource();
 
-        var processing = batcher.ProcessAsync([1, 2, 3], cancellation.Token);
+        var processing = batcher.ExecuteAsync([1, 2, 3], cancellation.Token);
         await firstSliceStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
         cancellation.Cancel();
         var stopping = coordinator.DisposeAsync().AsTask();
@@ -200,7 +200,7 @@ public sealed class RequestBatchSubmissionTests
             });
         var coordinator = provider.GetRequiredService<RequestBatchCoordinator<int>>();
 
-        var processing = coordinator.ProcessAsync([1, 2, 3, 4, 5]);
+        var processing = coordinator.ExecuteAsync([1, 2, 3, 4, 5]);
         await firstRequestStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
         var stopping = coordinator.DisposeAsync().AsTask();
 
@@ -214,7 +214,7 @@ public sealed class RequestBatchSubmissionTests
     }
 
     [Fact]
-    public async Task ProcessAsync_FailModeHasInsufficientCapacity_RejectsWholeBatch()
+    public async Task ExecuteAsync_FailModeHasInsufficientCapacity_RejectsWholeBatch()
     {
         var firstBatchStarted = NewSource();
         var releaseFirstBatch = NewSource();
@@ -241,15 +241,15 @@ public sealed class RequestBatchSubmissionTests
             });
         var batcher = provider.GetRequiredService<IRequestBatcher<int>>();
 
-        var first = batcher.ProcessAsync(0);
+        var first = batcher.ExecuteAsync(0);
         await firstBatchStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        var queuedFirst = batcher.ProcessAsync(1);
-        var queuedSecond = batcher.ProcessAsync(2);
+        var queuedFirst = batcher.ExecuteAsync(1);
+        var queuedSecond = batcher.ExecuteAsync(2);
 
         try
         {
             var exception = await Assert.ThrowsAsync<RequestBatchQueueFullException>(
-                () => batcher.ProcessAsync([3, 4]));
+                () => batcher.ExecuteAsync([3, 4]));
 
             Assert.Equal(2, exception.Capacity);
             Assert.Equal(2, exception.RequestedCount);
@@ -264,7 +264,7 @@ public sealed class RequestBatchSubmissionTests
     }
 
     [Fact]
-    public async Task ProcessAsync_WaitModeHasInsufficientCapacity_WaitsForWholeBatch()
+    public async Task ExecuteAsync_WaitModeHasInsufficientCapacity_WaitsForWholeBatch()
     {
         var firstBatchStarted = NewSource();
         var releaseFirstBatch = NewSource();
@@ -287,10 +287,10 @@ public sealed class RequestBatchSubmissionTests
             });
         var batcher = provider.GetRequiredService<IRequestBatcher<int>>();
 
-        var first = batcher.ProcessAsync(0);
+        var first = batcher.ExecuteAsync(0);
         await firstBatchStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        var queuedBatch = batcher.ProcessAsync([1, 2]);
-        var waitingBatch = batcher.ProcessAsync([3, 4]);
+        var queuedBatch = batcher.ExecuteAsync([1, 2]);
+        var waitingBatch = batcher.ExecuteAsync([3, 4]);
 
         Assert.False(waitingBatch.IsCompleted);
         releaseFirstBatch.SetResult();
@@ -301,7 +301,7 @@ public sealed class RequestBatchSubmissionTests
     }
 
     [Fact]
-    public async Task ProcessAsync_HandlerFails_ReleasesExecutionSlotForQueuedRequest()
+    public async Task ExecuteAsync_HandlerFails_ReleasesExecutionSlotForQueuedRequest()
     {
         var expected = new TestBatchException();
         var firstRequestStarted = NewSource();
@@ -329,9 +329,9 @@ public sealed class RequestBatchSubmissionTests
             });
         var batcher = provider.GetRequiredService<IRequestBatcher<int>>();
 
-        var first = batcher.ProcessAsync(1);
+        var first = batcher.ExecuteAsync(1);
         await firstRequestStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        var second = batcher.ProcessAsync(2);
+        var second = batcher.ExecuteAsync(2);
 
         Assert.False(second.IsCompleted);
         releaseFirstRequest.SetResult();
@@ -343,7 +343,7 @@ public sealed class RequestBatchSubmissionTests
     }
 
     [Fact]
-    public async Task ProcessAsync_WaitMode_ProcessesWeightedSubmissions()
+    public async Task ExecuteAsync_WaitMode_ProcessesWeightedSubmissions()
     {
         var firstRequestStarted = NewSource();
         var releaseFirstRequest = NewSource();
@@ -369,10 +369,10 @@ public sealed class RequestBatchSubmissionTests
             });
         var batcher = provider.GetRequiredService<IRequestBatcher<int>>();
 
-        var first = batcher.ProcessAsync(0);
+        var first = batcher.ExecuteAsync(0);
         await firstRequestStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        var explicitBatch = batcher.ProcessAsync([1, 2, 3]);
-        var laterSingle = batcher.ProcessAsync(4);
+        var explicitBatch = batcher.ExecuteAsync([1, 2, 3]);
+        var laterSingle = batcher.ExecuteAsync(4);
 
         releaseFirstRequest.SetResult();
         await Task.WhenAll(first, explicitBatch, laterSingle).WaitAsync(TimeSpan.FromSeconds(5));
@@ -380,7 +380,7 @@ public sealed class RequestBatchSubmissionTests
     }
 
     [Fact]
-    public async Task ProcessAsync_CanceledWhileWaiting_ReleasesQueueCapacity()
+    public async Task ExecuteAsync_CanceledWhileWaiting_ReleasesQueueCapacity()
     {
         var firstRequestStarted = NewSource();
         var releaseFirstRequest = NewSource();
@@ -404,17 +404,17 @@ public sealed class RequestBatchSubmissionTests
             });
         var batcher = provider.GetRequiredService<IRequestBatcher<int>>();
 
-        var first = batcher.ProcessAsync(0);
+        var first = batcher.ExecuteAsync(0);
         await firstRequestStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        var queuedBatch = batcher.ProcessAsync([1, 2]);
+        var queuedBatch = batcher.ExecuteAsync([1, 2]);
 
         using var cancellation = new CancellationTokenSource();
-        var canceledBatch = batcher.ProcessAsync([3, 4], cancellation.Token);
+        var canceledBatch = batcher.ExecuteAsync([3, 4], cancellation.Token);
         cancellation.Cancel();
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => canceledBatch);
 
-        var laterBatch = batcher.ProcessAsync([5, 6]);
+        var laterBatch = batcher.ExecuteAsync([5, 6]);
         try
         {
             Assert.False(laterBatch.IsCompleted);
@@ -429,7 +429,7 @@ public sealed class RequestBatchSubmissionTests
     }
 
     [Fact]
-    public async Task ProcessAsync_PartitionedRequests_RoutesEachRequestByKey()
+    public async Task ExecuteAsync_PartitionedRequests_RoutesEachRequestByKey()
     {
         const int concurrency = 2;
         var bothPartitionsStarted = NewSource();
@@ -458,7 +458,7 @@ public sealed class RequestBatchSubmissionTests
             });
         var batcher = provider.GetRequiredService<IRequestBatcher<KeyedRequest>>();
 
-        var processing = batcher.ProcessAsync(
+        var processing = batcher.ExecuteAsync(
             [new KeyedRequest(1), new KeyedRequest(2)]);
 
         try
@@ -475,7 +475,7 @@ public sealed class RequestBatchSubmissionTests
     }
 
     [Fact]
-    public async Task ProcessAsync_PartitionedSubmission_WithSingleConcurrency_StillUsesEachKeyPartition()
+    public async Task ExecuteAsync_PartitionedSubmission_WithSingleConcurrency_StillUsesEachKeyPartition()
     {
         var handledBatches = new ConcurrentQueue<KeyedRequest[]>();
 
@@ -493,7 +493,7 @@ public sealed class RequestBatchSubmissionTests
             });
         var batcher = provider.GetRequiredService<IRequestBatcher<KeyedRequest>>();
 
-        await batcher.ProcessAsync(
+        await batcher.ExecuteAsync(
                 [new KeyedRequest(1, 1), new KeyedRequest(2, 2)])
             .WaitAsync(TimeSpan.FromSeconds(5));
 
@@ -505,7 +505,7 @@ public sealed class RequestBatchSubmissionTests
     }
 
     [Fact]
-    public async Task ProcessAsync_WaitModeOversizedPartitionedBatch_ProcessesAllRoutedItems()
+    public async Task ExecuteAsync_WaitModeOversizedPartitionedBatch_ProcessesAllRoutedItems()
     {
         var handledRequests = new ConcurrentQueue<KeyedRequest>();
 
@@ -532,7 +532,7 @@ public sealed class RequestBatchSubmissionTests
             new(1, 3),
         ];
 
-        await batcher.ProcessAsync(requests).WaitAsync(TimeSpan.FromSeconds(5));
+        await batcher.ExecuteAsync(requests).WaitAsync(TimeSpan.FromSeconds(5));
 
         Assert.Equal(
             requests.OrderBy(request => request.Key).ThenBy(request => request.Sequence),
@@ -540,7 +540,7 @@ public sealed class RequestBatchSubmissionTests
     }
 
     [Fact]
-    public async Task ProcessAsync_PartitionedBatchFails_WaitsForOtherHandlerBeforeFaulting()
+    public async Task ExecuteAsync_PartitionedBatchFails_WaitsForOtherHandlerBeforeFaulting()
     {
         var expected = new TestBatchException();
         var secondPartitionStarted = NewSource();
@@ -566,7 +566,7 @@ public sealed class RequestBatchSubmissionTests
             });
         var batcher = provider.GetRequiredService<IRequestBatcher<KeyedRequest>>();
 
-        var processing = batcher.ProcessAsync(
+        var processing = batcher.ExecuteAsync(
             [new KeyedRequest(1), new KeyedRequest(2)]);
         await secondPartitionStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
@@ -579,7 +579,7 @@ public sealed class RequestBatchSubmissionTests
     }
 
     [Fact]
-    public async Task ProcessAsync_PartitionedBatchHasMultipleFailures_PreservesDistinctExceptions()
+    public async Task ExecuteAsync_PartitionedBatchHasMultipleFailures_PreservesDistinctExceptions()
     {
         var first = new TestBatchException();
         var second = new TestBatchException();
@@ -607,7 +607,7 @@ public sealed class RequestBatchSubmissionTests
             });
         var batcher = provider.GetRequiredService<IRequestBatcher<KeyedRequest>>();
 
-        var processing = batcher.ProcessAsync(
+        var processing = batcher.ExecuteAsync(
             [new KeyedRequest(1), new KeyedRequest(2)]);
         await bothHandlersStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
         releaseHandlers.SetResult();
@@ -622,7 +622,7 @@ public sealed class RequestBatchSubmissionTests
     }
 
     [Fact]
-    public async Task ProcessAsync_BatchSplitByBatchSize_WaitsForLastHandlerCall()
+    public async Task ExecuteAsync_BatchSplitByBatchSize_WaitsForLastHandlerCall()
     {
         var lastHandlerStarted = NewSource();
         var releaseLastHandler = NewSource();
@@ -640,7 +640,7 @@ public sealed class RequestBatchSubmissionTests
             options => options.BatchSize = 1);
         var batcher = provider.GetRequiredService<IRequestBatcher<int>>();
 
-        var processing = batcher.ProcessAsync([1, 2]);
+        var processing = batcher.ExecuteAsync([1, 2]);
         await lastHandlerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
         Assert.False(processing.IsCompleted);
@@ -650,7 +650,7 @@ public sealed class RequestBatchSubmissionTests
     }
 
     [Fact]
-    public async Task ProcessAsync_BatchPartitionSelectorFails_RejectsWithoutPartialHandling()
+    public async Task ExecuteAsync_BatchPartitionSelectorFails_RejectsWithoutPartialHandling()
     {
         var expected = new TestBatchException();
         var handledRequests = new ConcurrentQueue<int>();
@@ -676,17 +676,17 @@ public sealed class RequestBatchSubmissionTests
         var batcher = provider.GetRequiredService<IRequestBatcher<int>>();
 
         var actual = await Assert.ThrowsAsync<TestBatchException>(
-            () => batcher.ProcessAsync([1, -1, 2]));
+            () => batcher.ExecuteAsync([1, -1, 2]));
 
         Assert.Same(expected, actual);
         Assert.Empty(handledRequests);
 
-        await batcher.ProcessAsync([1, 2]).WaitAsync(TimeSpan.FromSeconds(5));
+        await batcher.ExecuteAsync([1, 2]).WaitAsync(TimeSpan.FromSeconds(5));
         Assert.Equal(new[] { 1, 2 }, handledRequests.Order());
     }
 
     [Fact]
-    public async Task ProcessAsync_BatchCanceledAfterDispatch_HandlerFailureTakesPrecedence()
+    public async Task ExecuteAsync_BatchCanceledAfterDispatch_HandlerFailureTakesPrecedence()
     {
         var expected = new TestBatchException();
         var firstRequestStarted = NewSource();
@@ -706,7 +706,7 @@ public sealed class RequestBatchSubmissionTests
         var batcher = provider.GetRequiredService<IRequestBatcher<int>>();
         using var cancellation = new CancellationTokenSource();
 
-        var processing = batcher.ProcessAsync([1, 2], cancellation.Token);
+        var processing = batcher.ExecuteAsync([1, 2], cancellation.Token);
         await firstRequestStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
         cancellation.Cancel();
 

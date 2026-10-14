@@ -39,7 +39,7 @@ public sealed class ConsumerFailureTests
             Options.Create(new RequestBatchOptions<int> { MaxConcurrency = 64 }),
             NullLogger<RequestBatchCoordinator<int>>.Instance);
 
-        var processing = coordinator.ProcessAsync(42);
+        var processing = coordinator.ExecuteAsync(42);
 
         var requestException = await Assert.ThrowsAsync<TestConsumerException>(
             () => processing.WaitAsync(TimeSpan.FromSeconds(5)));

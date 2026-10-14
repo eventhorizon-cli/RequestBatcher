@@ -56,7 +56,7 @@ internal static class Program
         {
             var batcher = provider.GetRequiredService<IRequestBatcher<Work>>();
             var work = new Work("self-check");
-            var completion = batcher.ProcessAsync(work);
+            var completion = batcher.ExecuteAsync(work);
             await entered.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
             if (metrics.HandlerEntered.Task.IsCompleted)
             {
@@ -129,7 +129,7 @@ internal static class Program
             for (var index = producer; index < requests.Length; index += settings.Producers)
             {
                 requests[index].Submitted = Stopwatch.GetTimestamp();
-                pending.Add(batcher.ProcessAsync(requests[index]));
+                pending.Add(batcher.ExecuteAsync(requests[index]));
                 if (pending.Count == 1024)
                 {
                     await Task.WhenAll(pending).ConfigureAwait(false);
@@ -174,10 +174,10 @@ internal static class Program
         for (var i = 0; i < settings.Concurrency; i++)
         {
             var work = new Work($"block:{i}") { Gate = new(TaskCreationOptions.RunContinuationsAsynchronously) };
-            blockers.Add(batcher.ProcessAsync(work));
+            blockers.Add(batcher.ExecuteAsync(work));
             await work.Gate.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
         }
-        var submitted = batcher.ProcessAsync(requests);
+        var submitted = batcher.ExecuteAsync(requests);
         metrics.Release.SetResult();
         await Task.WhenAll(blockers.Append(submitted)).WaitAsync(TimeSpan.FromSeconds(10)).ConfigureAwait(false);
         if (metrics.Handled != settings.Count || requests.Any(work => work.Visits != 1))

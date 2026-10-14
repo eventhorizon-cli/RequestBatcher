@@ -116,7 +116,7 @@ internal sealed class BatchDispatchLoop<TRequest> : IDisposable
         CancellationToken cancellationToken)
     {
         TrackExecution();
-        var processing = _batchConsumer.ProcessAsync(pendingRequests, cancellationToken);
+        var processing = _batchConsumer.ExecuteAsync(pendingRequests, cancellationToken);
         if (processing.IsCompletedSuccessfully)
         {
             CompleteExecution();

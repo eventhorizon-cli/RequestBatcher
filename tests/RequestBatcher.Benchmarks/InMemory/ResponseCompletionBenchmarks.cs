@@ -107,7 +107,7 @@ public class ResponseCompletionBenchmarks
         var tasks = new Task[RequestCount];
         for (var index = 0; index < RequestCount; index++)
         {
-            tasks[index] = RequestBatcher.ProcessAsync(_requestOnlyRequests[index]);
+            tasks[index] = RequestBatcher.ExecuteAsync(_requestOnlyRequests[index]);
         }
 
         var all = AwaitRequestsAsync(tasks);
@@ -129,7 +129,7 @@ public class ResponseCompletionBenchmarks
         var tasks = new Task<int>[RequestCount];
         for (var index = 0; index < RequestCount; index++)
         {
-            tasks[index] = ResponseBatcher.ProcessAsync(_responseRequests[index]);
+            tasks[index] = ResponseBatcher.ExecuteAsync(_responseRequests[index]);
         }
 
         var all = AwaitResponsesAsync(tasks);
@@ -146,7 +146,7 @@ public class ResponseCompletionBenchmarks
         var tasks = new Task<int>[RequestCount];
         for (var index = 0; index < RequestCount; index++)
         {
-            tasks[index] = ResponseBatcher.ProcessAsync(_responseRequests[index]);
+            tasks[index] = ResponseBatcher.ExecuteAsync(_responseRequests[index]);
         }
 
         var all = AwaitResponsesAsync(tasks);
@@ -197,7 +197,7 @@ public class ResponseCompletionBenchmarks
     public async Task ResponsePreDispatchCancellationAsync()
     {
         CancellationHandler.BeginWave();
-        var blocker = BlockedResponseBatcher.ProcessAsync(new BlockedRequest(BlockerRequestId));
+        var blocker = BlockedResponseBatcher.ExecuteAsync(new BlockedRequest(BlockerRequestId));
         try
         {
             await CancellationHandler.BlockerStarted.ConfigureAwait(false);
@@ -206,7 +206,7 @@ public class ResponseCompletionBenchmarks
             var tasks = new Task<int>[RequestCount];
             for (var index = 0; index < RequestCount; index++)
             {
-                tasks[index] = BlockedResponseBatcher.ProcessAsync(_blockedRequests[index], cancellation.Token);
+                tasks[index] = BlockedResponseBatcher.ExecuteAsync(_blockedRequests[index], cancellation.Token);
             }
 
             var all = AwaitResponsesAsync(tasks);
@@ -251,7 +251,7 @@ public class ResponseCompletionBenchmarks
             CancellationHandler.ReleaseBlocker();
         }
 
-        var drain = BlockedResponseBatcher.ProcessAsync(new BlockedRequest(DrainRequestId));
+        var drain = BlockedResponseBatcher.ExecuteAsync(new BlockedRequest(DrainRequestId));
         var blockerResponse = await blocker.ConfigureAwait(false);
         var drainResponse = await drain.ConfigureAwait(false);
         if (blockerResponse != BlockerRequestId || drainResponse != DrainRequestId)
@@ -264,7 +264,7 @@ public class ResponseCompletionBenchmarks
     public async Task ResponseExplicitBatchSuccessAsync()
     {
         ResponseHandler.BeginSuccessWave();
-        var batch = ResponseBatcher.ProcessAsync(_responseRequests);
+        var batch = ResponseBatcher.ExecuteAsync(_responseRequests);
         var all = AwaitBatchResponsesAsync(batch);
         ResponseHandler.ReleaseWave();
         var responses = await all.ConfigureAwait(false);
