@@ -1,0 +1,7 @@
+%% Companion SVG provides the explicit layout. Figures are illustrative assumptions.
+flowchart LR
+    A["80 queued request items"] --> B["Deduplicate: 60 products"]
+    B --> C["Query 30 products"]
+    B --> D["Query 30 products"]
+    C --> E["Await both; map responses to all 80 items"]
+    D --> E

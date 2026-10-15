@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="490" viewBox="0 0 1080 490">
+<rect width="1080" height="490" fill="white"/>
+<g font-family="Arial, PingFang SC, Microsoft YaHei, sans-serif" text-anchor="middle" fill="#233247">
+<text x="540" y="32" font-size="20" font-weight="600" fill="#233247">Same traffic: 38,400 product items/s (including cross-call duplicates) · 6 pods</text>
+<text x="540" y="75" font-size="19" font-weight="600" fill="#233247">Existing: 20 distinct products per call</text>
+<rect x="28" y="92" width="226" height="104" rx="7" fill="#f2f5f9" stroke="#bccbd9"/>
+<text x="141" y="118" font-size="16" font-weight="400" fill="#233247">Items per batch, pre-dedup</text>
+<text x="141" y="157" font-size="31" font-weight="600" fill="#233247">20</text>
+<text x="141" y="181" font-size="15" font-weight="400" fill="#52667c">20 distinct products</text>
+<rect x="294" y="92" width="226" height="104" rx="7" fill="#f2f5f9" stroke="#bccbd9"/>
+<text x="407" y="118" font-size="16" font-weight="400" fill="#233247">Downstream batch QPS</text>
+<text x="407" y="157" font-size="31" font-weight="600" fill="#233247">1,920</text>
+<rect x="560" y="92" width="226" height="104" rx="7" fill="#f2f5f9" stroke="#bccbd9"/>
+<text x="673" y="118" font-size="16" font-weight="400" fill="#233247">Downstream mean RT</text>
+<text x="673" y="157" font-size="31" font-weight="600" fill="#233247">50 ms</text>
+<rect x="826" y="92" width="226" height="104" rx="7" fill="#f2f5f9" stroke="#bccbd9"/>
+<text x="939" y="118" font-size="16" font-weight="400" fill="#233247">Product items queried/s</text>
+<text x="939" y="157" font-size="31" font-weight="600" fill="#233247">38,400</text>
+<text x="939" y="181" font-size="15" font-weight="400" fill="#52667c">Counts cross-call repeats</text>
+<text x="540" y="243" font-size="19" font-weight="600" fill="#233247">Merged example: 80 items → 60 distinct products → two calls of 30</text>
+<rect x="28" y="260" width="226" height="104" rx="7" fill="#edf5fb" stroke="#bccbd9"/>
+<text x="141" y="286" font-size="16" font-weight="400" fill="#233247">Items per batch, pre-dedup</text>
+<text x="141" y="325" font-size="31" font-weight="600" fill="#233247">80</text>
+<text x="141" y="349" font-size="15" font-weight="400" fill="#52667c">60 distinct products</text>
+<rect x="294" y="260" width="226" height="104" rx="7" fill="#edf5fb" stroke="#bccbd9"/>
+<text x="407" y="286" font-size="16" font-weight="400" fill="#233247">Downstream batch QPS</text>
+<text x="407" y="325" font-size="31" font-weight="600" fill="#233247">960</text>
+<text x="407" y="349" font-size="15" font-weight="400" fill="#52667c">480 handlers/s × 2</text>
+<rect x="560" y="260" width="226" height="104" rx="7" fill="#edf5fb" stroke="#bccbd9"/>
+<text x="673" y="286" font-size="16" font-weight="400" fill="#233247">Downstream mean RT</text>
+<text x="673" y="325" font-size="31" font-weight="600" fill="#233247">55 ms</text>
+<text x="673" y="349" font-size="15" font-weight="400" fill="#52667c">Assumed +10%</text>
+<rect x="826" y="260" width="226" height="104" rx="7" fill="#edf5fb" stroke="#bccbd9"/>
+<text x="939" y="286" font-size="16" font-weight="400" fill="#233247">Product items queried/s</text>
+<text x="939" y="325" font-size="31" font-weight="600" fill="#233247">28,800</text>
+<text x="939" y="349" font-size="15" font-weight="400" fill="#52667c">Counts cross-batch repeats</text>
+<rect x="28" y="390" width="1024" height="82" rx="7" fill="#fff8e8" stroke="#bccbd9"/>
+<text x="540" y="417" font-size="19" font-weight="600" fill="#233247">Calls −50% · Product items queried −25% · Downstream mean RT +10%</text>
+<text x="540" y="449" font-size="17" font-weight="400" fill="#233247">Illustrative assumptions, not benchmarks; measure end-to-end latency and resource savings.</text>
+</g>
+</svg>

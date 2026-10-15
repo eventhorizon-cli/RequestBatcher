@@ -1,0 +1,33 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="390" viewBox="0 0 1080 390">
+<rect width="1080" height="390" fill="white"/>
+<g font-family="Arial, PingFang SC, Microsoft YaHei, sans-serif" text-anchor="middle" fill="#233247">
+<text x="540" y="33" font-size="21" font-weight="600" fill="#233247">一个 Handler 批次内完成去重、并行查询和结果回填</text>
+<rect x="24" y="138" width="200" height="110" rx="7" fill="#edf5fb" stroke="#bccbd9"/>
+<rect x="284" y="138" width="200" height="110" rx="7" fill="#f3effa" stroke="#bccbd9"/>
+<rect x="574" y="79" width="180" height="90" rx="7" fill="#fff7e5" stroke="#bccbd9"/>
+<rect x="574" y="217" width="180" height="90" rx="7" fill="#fff7e5" stroke="#bccbd9"/>
+<rect x="824" y="138" width="232" height="110" rx="7" fill="#edf5fb" stroke="#bccbd9"/>
+<text x="124" y="175" font-size="20" font-weight="600" fill="#233247">已排队的 80 项</text>
+<text x="124" y="209" font-size="18" font-weight="400" fill="#233247">可来自多个提交</text>
+<text x="384" y="175" font-size="20" font-weight="600" fill="#233247">按商品去重</text>
+<text x="384" y="209" font-size="18" font-weight="400" fill="#233247">60 个不同商品</text>
+<text x="664" y="116" font-size="20" font-weight="600" fill="#233247">批量查询 A</text>
+<text x="664" y="150" font-size="18" font-weight="400" fill="#233247">30 个商品</text>
+<text x="664" y="254" font-size="20" font-weight="600" fill="#233247">批量查询 B</text>
+<text x="664" y="288" font-size="18" font-weight="400" fill="#233247">30 个商品</text>
+<text x="940" y="175" font-size="20" font-weight="600" fill="#233247">按商品匹配结果</text>
+<text x="940" y="209" font-size="18" font-weight="400" fill="#233247">回填全部 80 项</text>
+<path d="M224 193 H284" fill="none" stroke="#748397" stroke-width="2"/>
+<polygon points="284,193 275,188 275,198" fill="#748397"/>
+<path d="M484 193 H524 V124 H574" fill="none" stroke="#748397" stroke-width="2"/>
+<polygon points="574,124 565,119 565,129" fill="#748397"/>
+<path d="M754 124 H789 V193 H824" fill="none" stroke="#748397" stroke-width="2"/>
+<polygon points="824,193 815,188 815,198" fill="#748397"/>
+<path d="M484 193 H524 V262 H574" fill="none" stroke="#748397" stroke-width="2"/>
+<polygon points="574,262 565,257 565,267" fill="#748397"/>
+<path d="M754 262 H789 V193 H824" fill="none" stroke="#748397" stroke-width="2"/>
+<polygon points="824,193 815,188 815,198" fill="#748397"/>
+<text x="664" y="195" font-size="17" font-weight="400" fill="#233247">并行 · 等待两次完成</text>
+<text x="540" y="350" font-size="17" font-weight="400" fill="#233247">仅合并同一 Pod、同一 Partition 已排队的请求；示例不保证每批 80 项或去重后 60 个商品。</text>
+</g>
+</svg>

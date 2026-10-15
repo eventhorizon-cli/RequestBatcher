@@ -1,0 +1,5 @@
+%% Companion SVG provides the explicit layout. Figures are illustrative assumptions.
+flowchart TB
+    A["MaxConcurrency=4; BatchSize=80; 30 items per downstream call"] --> B["4 concurrent handlers"]
+    B --> C["No duplicates: each handler makes 30 + 30 + 20 in parallel"]
+    C --> D["Up to 12 concurrent downstream calls per batcher; account for all pods"]

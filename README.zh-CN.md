@@ -459,7 +459,7 @@ builder.Services.AddRequestBatcher<ProductQueryItem, ProductBatchHandler>(
     ServiceLifetime.Scoped,
     options =>
     {
-        // 单 Pod 的下游并发上限。6 个 Pod x 4 个名额 = 集群最多 24 个 Handler 批次并发。
+        // 单 Pod 的 Handler 批次并发上限。6 个 Pod x 4 个名额 = 集群最多 24 个 Handler 批次并发。
         options.MaxConcurrency = 4;
         options.BatchSize = 100;
         options.MaxPendingRequests = 5_000;
@@ -474,57 +474,77 @@ builder.Services.AddRequestBatcher<ProductQueryItem, ProductBatchHandler>(
 
 ### 用利特尔法则（Little’s Law）估算 `MaxConcurrency`
 
-**利特尔法则应该应用在 Handler 批次流量上，而不是直接应用在请求项流量上。** 以查询为例，如果一次 Handler 批次对应
-一次下游批量查询，那么应使用批量查询 QPS（`λ_batch`，即每秒批量查询次数）和平均响应时间（`RT`，单位为秒）。
-
-对于已有功能，可以从现有监控指标中取得这两个值；对于新功能，可以先使用预期查询 QPS、目标响应时间或压测结果
-进行估算。QPS 和响应时间必须针对同一种查询操作：
+以查询为例，假设一个 Handler 批次对应一次下游批量查询，且 Handler 的其他耗时可忽略。
+此时可使用**下游批量调用 QPS** 和平均响应时间（RT，单位为秒）估算：
 
 ```text
-同时处理的批次数 = λ_batch x RT
-L = λ x W
+平均并发调用数 = 批量调用 QPS × RT
+单 Pod MaxConcurrency ≈ ceil(平均并发调用数 / Pod 数量 × 安全系数)
 ```
 
-其中，`L` 表示正在处理的 Handler 批次数，`λ` 表示批量查询 QPS（每秒批量查询次数），`W` 表示平均响应时间。
+已有功能可以取监控数据，新功能可以先用预期值或压测结果；QPS 和 RT 必须来自同一种操作、同一组配置。
+上线后再用实际指标校准。
 
-如果已经有批量查询 QPS 和响应时间，可以直接估算整个集群正在处理的批次数：
+例如，6 个活跃 Pod 的下游批量查询合计为 1,920 QPS，平均 RT 为 50 ms，
+对应的平均并发调用数约为 `1,920 × 0.050 = 96`。流量均匀分配时，每 Pod 平均约 `96 / 6 = 16` 个并发调用。
+
+**16 是平均负载的估算值，不是直接推荐的并发上限。** 设置 `MaxConcurrency` 时，应结合流量波动、下游限流和连接池容量留出余量，
+并通过压测确认延迟和吞吐是否满足要求。
+
+### 联合调整 `BatchSize`、Partition 和 `MaxConcurrency`
+
+沿用上例，原来每次批量查询 20 个不同商品，合计 `1,920 × 20 = 38,400` 个请求项/秒，跨调用可能重复。
+可以试验 `BatchSize = 80`：假设一次拉到 80 项，Handler 按商品去重后剩 60 个，再按每次 30 个商品并行查询，
+等待两次查询完成后，为全部 80 项回填结果。
+
+![80 项去重、拆分查询与结果回填](docs/assets/request-batcher-batch-fanout.zh-CN.png)
+
+**合并让不同提交共享一次去重机会；拆分让下游每次仍只处理较小的批量。** 两者的大小可以分别选择：
+`BatchSize` 限制去重前的请求项数，下游每次查询多少个商品由 Handler 控制。
+
+按上述假设，Handler 每秒处理 `38,400 / 80 = 480` 批，下游执行 `480 × 2 = 960` 次查询，共查询
+`960 × 30 = 28,800` 个商品项。与原来相比，**调用次数减少 50%，查询商品项数减少 25%**，所有请求仍得到结果。
+
+![合并前后的调用量、查询项数与 RT 对比](docs/assets/request-batcher-batch-sizing.zh-CN.png)
+
+图中假设下游平均 RT 从 50 ms 增至 55 ms，**这是估算示例，不是压测结果**。更少的调用和重复查询是潜在收益，
+更长的 RT 是代价；是否值得，还要比较端到端延迟和实际资源消耗。
+
+`BatchSize = 80` 不保证每批有 80 项，也不保证去重后只剩 60 个商品。Handler 应按去重后的实际数量拆分，
+例如完全没有重复时，需要查询 `30 + 30 + 20` 三批。请求只在同一 Pod、同一 Partition 的当前队列中合并，**不会额外等待凑满**。
+Partition 数量和消费速度都会影响合并效果，应从较少的 Partition 开始压测。
+
+### 拆分调用时，分别估算两层并发
+
+**`MaxConcurrency` 限制 Handler 批次并发，不直接限制 Handler 内部的下游调用并发。** 上述示例中的 Handler 批次 QPS
+为 480；估算其并发时，应使用整个 Handler 的平均耗时，包括等待所有子查询、结果回填和作用域释放，而不是单次下游 RT：
 
 ```text
-单 Pod MaxConcurrency ≈ ceil(λ_batch x RT / Pod 数量 x 安全系数)
+单 Pod MaxConcurrency ≈ ceil(Handler 批次 QPS × Handler 平均耗时 / Pod 数量 × 安全系数)
 ```
 
-使用预期值只能得到初始配置；功能上线后，应使用生产环境的 metrics 重新校准。
+还要按最坏拆分数量检查下游并发。以 `MaxConcurrency = 4` 为例，80 项最多拆成三次并行查询，
+同一个 Batcher 就可能同时执行 `4 × 3 = 12` 次下游调用；多个 Pod 还需合计。
 
-例如 6 个活跃 Pod 的下游批量调用为 1,920 QPS、平均响应时间 50 ms，则需要约 `1,920 x 0.050 = 96` 个正在处理的批次；在流量均匀分配的前提下，每个 Pod
-设置 `MaxConcurrency = 16` 可提供总计 96 个名额。
+![Handler 并发与下游调用并发的区别](docs/assets/request-batcher-fanout-concurrency.zh-CN.png)
 
-这是平均负载下的估算，不是延迟或吞吐保证。是否提高或降低它，还要结合队列等待、下游限流、CPU 和连接池上限
-重新测量。
+这个 4 只用于说明并发关系，不是上例的推荐配置。若需要严格限制下游调用数，应在 Handler 中为子查询设置共享的并发限制。
 
-如果监控的是商品项或请求项 QPS，就要按每个 Partition 分别测量有效批次大小。对于 Partition `p`，设 `λ_item,p`
-为该 Partition 的请求项 QPS，`B_eff,p` 为实测的平均每批请求项数量，`RT_p` 为该批次 Handler 的平均响应
-时间：
+### 用压测验证合并与去重收益
 
-```text
-λ_batch,p ≈ λ_item,p / B_eff,p
-L_total ≈ Σ(λ_batch,p x RT_p)
-单 Pod MaxConcurrency ≈ ceil(L_total / Pod 数量 x 安全系数)
-```
+以原来每次批量查询 20 个商品为基线，保持请求数据、到达速率、重复比例、热点分布及下游资源限制一致，
+覆盖低流量、正常流量和突发流量，重点比较：
 
-`BatchSize` 只是上限，因此流量稀疏时，`B_eff,p` 可能远小于 `BatchSize`。`partitionCount` 会改变每个 Partition
-接收的请求速率，进而改变 `B_eff,p`。
+- **工作量**：实际每批项数、去重后商品数、下游调用次数和查询总项数（跨批重复查询仍计数）。
+- **延迟与吞吐**：下游及 Handler 平均 RT、调用方端到端 P95/P99、排队时间、吞吐量及错误和限流情况。
+- **资源开销**：应用和下游的 CPU、内存分配、连接池占用。
 
-**`partitionCount` 不是 Worker 数量，不能直接乘进公式。** 增加 Partition 数量可能让每批更小，增大 `BatchSize` 则
-可能同时提高批次大小和响应时间。Partition 数量过大还会降低机会式去重的命中率，因为每个 Partition 在同一时间看到的
-请求更少。
+![配置、压测与重新估算并发的循环](docs/assets/request-batcher-sizing-feedback.zh-CN.png)
 
-如果去重键与 Partition Key 相同，相同键仍会进入同一个 Partition，但仍可能因为分属不同 Handler 批次而无法相互合并；
-如果两个键不同，同一个去重目标还可能被路由到不同 Partition。应选择能够隔离热点键的最小 Partition 数量，并在调整任一
-配置后重新测量有效批次大小和去重命中率。
+每轮调整后，用实测的 Handler 批次 QPS 和耗时重新估算并发，再复测合并效果。
+**目标是减少下游工作量，同时满足延迟和资源要求**，不以批次越大或下游 QPS 越低为唯一标准。
 
-如果已经能直接监控批次 QPS，应优先使用实测值，不要再用请求项 QPS 和批次大小反推。
-
-`MaxPendingRequests` 是排队积压上限，不是执行名额。可以按愿意吸收的排队量（`单个批处理服务的请求项 QPS x 可接受排队时间`）设置，
+`MaxPendingRequests` 控制队列容量，可按 `单个批处理服务的请求项数/秒 × 可接受排队时间` 估算，
 再用突发流量验证接收延迟和内存占用。
 
 ## Partition Key 路由

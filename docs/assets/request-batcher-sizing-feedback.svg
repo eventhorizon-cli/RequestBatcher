@@ -1,0 +1,25 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="350" viewBox="0 0 1080 350">
+<rect width="1080" height="350" fill="white"/>
+<g font-family="Arial, PingFang SC, Microsoft YaHei, sans-serif" text-anchor="middle" fill="#233247">
+<rect x="28" y="65" width="260" height="131" rx="7" fill="#edf5fb" stroke="#bccbd9"/>
+<text x="158" y="99" font-size="20" font-weight="600" fill="#233247">Choose settings</text>
+<text x="158" y="137" font-size="16" font-weight="400" fill="#233247">BatchSize / partitions</text>
+<text x="158" y="167" font-size="16" font-weight="400" fill="#233247">MaxConcurrency</text>
+<path d="M288 130 H410" fill="none" stroke="#748397" stroke-width="2"/>
+<polygon points="410,130 401,125 401,135" fill="#748397"/>
+<rect x="410" y="65" width="260" height="131" rx="7" fill="#edf5fb" stroke="#bccbd9"/>
+<text x="540" y="99" font-size="20" font-weight="600" fill="#233247">Load-test the same traffic</text>
+<text x="540" y="137" font-size="16" font-weight="400" fill="#233247">Existing batches as baseline</text>
+<text x="540" y="167" font-size="16" font-weight="400" fill="#233247">Low, normal, and burst traffic</text>
+<path d="M670 130 H792" fill="none" stroke="#748397" stroke-width="2"/>
+<polygon points="792,130 783,125 783,135" fill="#748397"/>
+<rect x="792" y="65" width="260" height="131" rx="7" fill="#edf5fb" stroke="#bccbd9"/>
+<text x="922" y="99" font-size="20" font-weight="600" fill="#233247">Measure results</text>
+<text x="922" y="137" font-size="16" font-weight="400" fill="#233247">Merging / dedup / call counts</text>
+<text x="922" y="167" font-size="16" font-weight="400" fill="#233247">End-to-end latency / resources</text>
+<path d="M922 196 V292 H158 V196" fill="none" stroke="#748397" stroke-width="2"/>
+<polygon points="158,196 153,205 163,205" fill="#748397"/>
+<text x="540" y="238" font-size="18" font-weight="600" fill="#233247">Recalculate concurrency: handler-batch QPS × mean duration of the whole handler</text>
+<text x="540" y="269" font-size="16" font-weight="400" fill="#233247">Include all child queries and response mapping; also check downstream concurrency limits.</text>
+</g>
+</svg>

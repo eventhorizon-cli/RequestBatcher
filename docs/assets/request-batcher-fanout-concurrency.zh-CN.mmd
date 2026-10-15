@@ -1,0 +1,5 @@
+%% 对应 SVG 定义具体排版；图中数据为示例假设。
+flowchart TB
+    A["MaxConcurrency=4；BatchSize=80；每次下游最多30项"] --> B["4个并发Handler"]
+    B --> C["完全不重复：每个Handler并行查询30 + 30 + 20项"]
+    C --> D["每个Batcher最多12次下游并发调用；多个Pod还需合计"]

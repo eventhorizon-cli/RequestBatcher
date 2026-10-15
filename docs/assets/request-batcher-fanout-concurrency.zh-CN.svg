@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1080" height="370" viewBox="0 0 1080 370">
+<rect width="1080" height="370" fill="white"/>
+<g font-family="Arial, PingFang SC, Microsoft YaHei, sans-serif" text-anchor="middle" fill="#233247">
+<text x="540" y="32" font-size="20" font-weight="600" fill="#233247">并发上限示例：MaxConcurrency = 4 · BatchSize = 80 · 每次下游最多 30 项</text>
+<rect x="28" y="83" width="226" height="63" rx="7" fill="#f3effa" stroke="#bccbd9"/>
+<text x="141" y="122" font-size="22" font-weight="600" fill="#233247">Handler 1</text>
+<rect x="31" y="211" width="64" height="54" rx="7" fill="#fff7e5" stroke="#bccbd9"/>
+<text x="63" y="246" font-size="22" font-weight="600" fill="#233247">30</text>
+<path d="M141 146 V177 H63 V211" fill="none" stroke="#748397" stroke-width="2"/>
+<polygon points="63,211 58,202 68,202" fill="#748397"/>
+<rect x="109" y="211" width="64" height="54" rx="7" fill="#fff7e5" stroke="#bccbd9"/>
+<text x="141" y="246" font-size="22" font-weight="600" fill="#233247">30</text>
+<path d="M141 146 V177 H141 V211" fill="none" stroke="#748397" stroke-width="2"/>
+<polygon points="141,211 136,202 146,202" fill="#748397"/>
+<rect x="187" y="211" width="64" height="54" rx="7" fill="#fff7e5" stroke="#bccbd9"/>
+<text x="219" y="246" font-size="22" font-weight="600" fill="#233247">20</text>
+<path d="M141 146 V177 H219 V211" fill="none" stroke="#748397" stroke-width="2"/>
+<polygon points="219,211 214,202 224,202" fill="#748397"/>
+<rect x="294" y="83" width="226" height="63" rx="7" fill="#f3effa" stroke="#bccbd9"/>
+<text x="407" y="122" font-size="22" font-weight="600" fill="#233247">Handler 2</text>
+<rect x="297" y="211" width="64" height="54" rx="7" fill="#fff7e5" stroke="#bccbd9"/>
+<text x="329" y="246" font-size="22" font-weight="600" fill="#233247">30</text>
+<path d="M407 146 V177 H329 V211" fill="none" stroke="#748397" stroke-width="2"/>
+<polygon points="329,211 324,202 334,202" fill="#748397"/>
+<rect x="375" y="211" width="64" height="54" rx="7" fill="#fff7e5" stroke="#bccbd9"/>
+<text x="407" y="246" font-size="22" font-weight="600" fill="#233247">30</text>
+<path d="M407 146 V177 H407 V211" fill="none" stroke="#748397" stroke-width="2"/>
+<polygon points="407,211 402,202 412,202" fill="#748397"/>
+<rect x="453" y="211" width="64" height="54" rx="7" fill="#fff7e5" stroke="#bccbd9"/>
+<text x="485" y="246" font-size="22" font-weight="600" fill="#233247">20</text>
+<path d="M407 146 V177 H485 V211" fill="none" stroke="#748397" stroke-width="2"/>
+<polygon points="485,211 480,202 490,202" fill="#748397"/>
+<rect x="560" y="83" width="226" height="63" rx="7" fill="#f3effa" stroke="#bccbd9"/>
+<text x="673" y="122" font-size="22" font-weight="600" fill="#233247">Handler 3</text>
+<rect x="563" y="211" width="64" height="54" rx="7" fill="#fff7e5" stroke="#bccbd9"/>
+<text x="595" y="246" font-size="22" font-weight="600" fill="#233247">30</text>
+<path d="M673 146 V177 H595 V211" fill="none" stroke="#748397" stroke-width="2"/>
+<polygon points="595,211 590,202 600,202" fill="#748397"/>
+<rect x="641" y="211" width="64" height="54" rx="7" fill="#fff7e5" stroke="#bccbd9"/>
+<text x="673" y="246" font-size="22" font-weight="600" fill="#233247">30</text>
+<path d="M673 146 V177 H673 V211" fill="none" stroke="#748397" stroke-width="2"/>
+<polygon points="673,211 668,202 678,202" fill="#748397"/>
+<rect x="719" y="211" width="64" height="54" rx="7" fill="#fff7e5" stroke="#bccbd9"/>
+<text x="751" y="246" font-size="22" font-weight="600" fill="#233247">20</text>
+<path d="M673 146 V177 H751 V211" fill="none" stroke="#748397" stroke-width="2"/>
+<polygon points="751,211 746,202 756,202" fill="#748397"/>
+<rect x="826" y="83" width="226" height="63" rx="7" fill="#f3effa" stroke="#bccbd9"/>
+<text x="939" y="122" font-size="22" font-weight="600" fill="#233247">Handler 4</text>
+<rect x="829" y="211" width="64" height="54" rx="7" fill="#fff7e5" stroke="#bccbd9"/>
+<text x="861" y="246" font-size="22" font-weight="600" fill="#233247">30</text>
+<path d="M939 146 V177 H861 V211" fill="none" stroke="#748397" stroke-width="2"/>
+<polygon points="861,211 856,202 866,202" fill="#748397"/>
+<rect x="907" y="211" width="64" height="54" rx="7" fill="#fff7e5" stroke="#bccbd9"/>
+<text x="939" y="246" font-size="22" font-weight="600" fill="#233247">30</text>
+<path d="M939 146 V177 H939 V211" fill="none" stroke="#748397" stroke-width="2"/>
+<polygon points="939,211 934,202 944,202" fill="#748397"/>
+<rect x="985" y="211" width="64" height="54" rx="7" fill="#fff7e5" stroke="#bccbd9"/>
+<text x="1017" y="246" font-size="22" font-weight="600" fill="#233247">20</text>
+<path d="M939 146 V177 H1017 V211" fill="none" stroke="#748397" stroke-width="2"/>
+<polygon points="1017,211 1012,202 1022,202" fill="#748397"/>
+<text x="540" y="62" font-size="17" font-weight="400" fill="#233247">完全不重复时，每个 Handler 最多并行调用 3 次：30 + 30 + 20</text>
+<rect x="28" y="296" width="1024" height="54" rx="7" fill="#fff8e8" stroke="#bccbd9"/>
+<text x="540" y="329" font-size="18" font-weight="600" fill="#233247">单个 Batcher 最多 4 × 3 = 12 次下游并发调用；部署多个 Pod 时还要合计。</text>
+</g>
+</svg>
