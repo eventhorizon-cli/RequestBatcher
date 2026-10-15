@@ -483,7 +483,7 @@ builder.Services.AddRequestBatcher<ProductQueryItem, ProductBatchHandler>(
     ServiceLifetime.Scoped,
     options =>
     {
-        // Per-pod downstream limit. Six pods x four slots = at most 24 handler batches cluster-wide.
+        // Per-pod handler-batch limit. Six pods x four slots = at most 24 handler batches cluster-wide.
         options.MaxConcurrency = 4;
         options.BatchSize = 100;
         options.MaxPendingRequests = 5_000;
@@ -499,63 +499,88 @@ A single partition can also supply several concurrent batches.
 
 ### Sizing `MaxConcurrency` with Little's Law
 
-**Use Little's Law on handler-batch traffic, not directly on item traffic.** For example, if one handler batch issues one
-downstream batch query, use the batch-query QPS (`λ_batch`, queries per second) and its mean response time (`RT`, in
-seconds).
-
-For an existing operation, obtain them from monitoring metrics; for a new operation, use the expected query QPS and
-target response time or a load-test result as the initial estimate. Keep the QPS and response time for the same query
-operation:
+For queries, assume one handler batch makes one downstream batch call and other handler work takes negligible time.
+Then estimate concurrency using **downstream batch-call QPS** and mean response time (RT, in seconds):
 
 ```text
-Concurrency (in flight) = λ_batch × RT
-L = λ x W
+Average concurrent calls = batch-call QPS × RT
+MaxConcurrency_per_pod ≈ ceil(average concurrent calls / pod_count × headroom)
 ```
 
-Here, `L` is the number of in-flight handler batches, `λ` is their arrival rate, and `W` is their mean response time.
+Use monitoring data for an existing operation, or expected values and load-test results for a new one. QPS and RT must
+refer to the same operation and configuration. Recalibrate with production metrics after launch.
 
-If the batch-query QPS and response time are available, estimate the cluster-wide in-flight batch count with
-`L = λ_batch × RT`. Divide by the number of active pods and round up, then add a small safety margin.
+For example, six active pods making a combined 1,920 downstream batch queries per second at a mean RT of 50 ms have
+about `1,920 × 0.050 = 96` concurrent calls on average. With even traffic distribution, that is `96 / 6 = 16` per pod.
 
-Expected values produce a starting configuration; replace them with production metrics after the feature is running.
+**16 estimates average load; it is not a recommended concurrency limit by itself.** Allow headroom within downstream
+rate limits and connection-pool capacity, then load-test to verify latency and throughput.
+
+### Tuning `BatchSize`, Partitions, and `MaxConcurrency` Together
+
+Continuing the example, the existing calls each query 20 distinct products: `1,920 × 20 = 38,400` request items/s,
+with possible duplicates across calls. Try `BatchSize = 80`: suppose a handler receives 80 items and deduplicates them
+to 60 products. It queries those products in two parallel calls of 30, awaits both, and assigns results to all 80 items.
+
+![Deduplicate 80 items, split queries, and map responses](docs/assets/request-batcher-batch-fanout.png)
+
+**Merging lets different submissions share a deduplication opportunity; splitting keeps individual downstream calls
+small.** Choose the sizes separately: `BatchSize` limits items before deduplication, while the handler controls products
+per downstream call.
+
+Under these assumptions, handlers process `38,400 / 80 = 480` batches/s, making `480 × 2 = 960` downstream calls and
+querying `960 × 30 = 28,800` product items/s. That is **50% fewer calls and 25% fewer product items queried**, while
+all requests still receive results.
+
+![Call volume, product items queried, and RT before and after merging](docs/assets/request-batcher-batch-sizing.png)
+
+The diagram assumes downstream mean RT rises from 50 ms to 55 ms. **These are illustrative estimates, not benchmark
+results.** Fewer calls and repeated queries are potential benefits; longer RT is a cost. Compare end-to-end latency
+and actual resource use to decide whether the tradeoff is worthwhile.
+
+`BatchSize = 80` guarantees neither batches of 80 nor 60 distinct products after deduplication. Split the actual distinct
+products: with no duplicates, the handler needs three calls of `30 + 30 + 20`. Only requests currently queued in the same
+pod and partition can merge, **without an added wait to fill a batch**. Partition count and consumption speed both
+affect merging, so start load testing with fewer partitions.
+
+### Estimating Handler and Downstream Concurrency Separately
+
+**`MaxConcurrency` limits concurrent handler batches, not the downstream calls within each handler.** In this example,
+handler-batch QPS is 480. Estimate handler concurrency using the mean duration of the whole handler, including all child
+queries, response mapping, and scope disposal, rather than a single downstream call's RT:
 
 ```text
-MaxConcurrency_per_pod ≈ ceil(λ_batch × RT / pod_count × headroom)
+MaxConcurrency_per_pod ≈ ceil(handler-batch QPS × mean handler duration / pod_count × headroom)
 ```
 
-For example, six active pods handling 1,920 downstream batch calls/second at a 50 ms mean response time need about
-`1,920 × 0.050 = 96` in-flight batch calls. With evenly distributed traffic, `MaxConcurrency = 16` gives 16 slots per pod
-and 96 slots across six pods.
+Also check downstream concurrency against the maximum number of calls per handler. For example, with
+`MaxConcurrency = 4`, batches of 80 can each split into three parallel queries, allowing `4 × 3 = 12` downstream calls
+at once from one batcher. Account for all pods as well.
 
-This estimates average load; it does not guarantee latency or throughput. Adjust the limit using measured queue wait,
-downstream throttling, CPU, and connection limits.
+![Handler concurrency versus downstream call concurrency](docs/assets/request-batcher-fanout-concurrency.png)
 
-When QPS is measured per item, estimate the effective batch size separately for each partition. For partition `p`, let
-`λ_item,p` be its item QPS, `B_eff,p` its measured average items per handler call, and `RT_p` its mean handler response
-time:
+The value 4 illustrates the relationship; it is not a recommendation for the traffic above. To strictly limit downstream
+calls, use a shared concurrency limit for child queries in the handler.
 
-```text
-λ_batch,p ≈ λ_item,p / B_eff,p
-L_total ≈ Σ(λ_batch,p × RT_p)
-MaxConcurrency_per_pod ≈ ceil(L_total / pod_count × headroom)
-```
+### Validating Merging and Deduplication with Load Tests
 
-`BatchSize` is only an upper bound, so `B_eff,p` can be much smaller when traffic is sparse. `partitionCount` changes the
-item rate seen by each partition and therefore can change `B_eff,p`.
+Use the existing 20-product batch calls as the baseline. Keep request data, arrival rate, duplicate fraction, hot-key
+distribution, and downstream resource limits consistent. Cover low, normal, and burst traffic, comparing:
 
-**`partitionCount` is not a worker count and must not be multiplied directly into the formula.** Increasing the partition
-count can reduce batch sizes, while increasing `BatchSize` can increase batch size and response time together. A larger
-partition count can also reduce opportunistic deduplication because each partition sees fewer requests at a time.
+- **Work performed:** actual batch sizes, distinct products per batch, downstream call counts, and total product items
+  queried, counting repeated queries across batches.
+- **Latency and throughput:** downstream and handler mean RT, caller end-to-end P95/P99, queue wait, throughput, errors,
+  and throttling.
+- **Resource costs:** application and downstream CPU, memory allocations, and connection-pool use.
 
-If the deduplication key is the same as the partition key, equal keys still route to one partition, but separate handler
-batches can still miss each other. If the keys differ, requests for one deduplication target can be routed to different
-partitions. Choose the smallest partition count that isolates hot keys, then verify the effective batch size and
-deduplication hit rate after changing either setting.
+![Configure, load-test, measure, and recalculate concurrency](docs/assets/request-batcher-sizing-feedback.png)
 
-If batch-call QPS is available, use the measured value directly instead of estimating it from item QPS and batch size.
+After each adjustment, recalculate concurrency using measured handler-batch QPS and duration, then retest merging.
+**Aim to reduce downstream work while meeting latency and resource requirements**; larger batches or lower downstream
+QPS alone do not determine the best configuration.
 
-`MaxPendingRequests` is a backlog limit, not another execution slot count. Choose it from the queueing you are willing to
-absorb (`item QPS per batcher × acceptable queue time`), then verify admission latency and memory use under bursts.
+Size `MaxPendingRequests`, the queue capacity, from `items/second per batcher × acceptable queue time`, then verify
+admission latency and memory use under bursts.
 
 ## Partition-Key Routing
 

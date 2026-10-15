@@ -1,0 +1,5 @@
+%% 对应 SVG 定义具体排版；图中数据为示例假设。
+flowchart LR
+    A["BatchSize / Partition / MaxConcurrency"] --> B["用同一流量压测，以原有批量调用为基线"]
+    B --> C["测量调用量、去重、延迟和资源开销"]
+    C -->|"Handler批次QPS × 整个Handler耗时；核对下游并发上限"| A

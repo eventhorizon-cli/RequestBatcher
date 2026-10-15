@@ -1,0 +1,5 @@
+%% Companion SVG provides the explicit layout. Figures are illustrative assumptions.
+flowchart LR
+    A["BatchSize / partitions / MaxConcurrency"] --> B["Load-test same traffic against existing batch calls"]
+    B --> C["Measure calls, dedup, latency, resources"]
+    C -->|"Handler QPS × whole-handler RT; check downstream limits"| A
