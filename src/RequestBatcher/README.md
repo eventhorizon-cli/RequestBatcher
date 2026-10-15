@@ -581,7 +581,7 @@ RequestBatcher provides no global, partition-local, or partition-key handler exe
 Partition routing is optional:
 
 ```csharp
-services.AddRequestBatcher<OrderWriteRequest, OrderWriteBatchHandler>(
+services.AddRequestBatcher<PriceQuery, PriceQuote?, PriceQueryHandler>(
     ServiceLifetime.Scoped,
     options =>
     {
@@ -589,7 +589,7 @@ services.AddRequestBatcher<OrderWriteRequest, OrderWriteBatchHandler>(
         options.MaxConcurrency = 4;
 
         // Optional. Without a partition-key function, all requests use one shared partition.
-        options.UsePartitionKey(request => request.OrderId, partitionCount: 8);
+        options.UsePartitionKey(query => query.ProductId, partitionCount: 8);
     });
 ```
 
@@ -597,14 +597,20 @@ Equal finite, integer-valued numeric keys or equal non-null string keys are rout
 key controls routing only: it does not force related requests into one handler batch, deduplicate them, or serialize
 their handler execution.
 
-Handlers can merge repeated updates within the current batch. Correctness across batches still requires application
-safeguards such as version checks, idempotency keys, unique constraints, or transactions.
+### Example: Merging Repeated Queries
 
-Do not move an operation into RequestBatcher when it must commit or roll back with the caller's transaction.
+Several `PriceQuery` requests in one batch may refer to the same `ProductId`. The handler deduplicates product IDs,
+issues one batch query, and maps results by `ProductId` to every original request, including duplicates. Response
+assignment does not depend on database row order.
 
-The runnable
-[PostgreSQL Web API sample](https://github.com/eventhorizon-cli/RequestBatcher/tree/main/samples/RequestBatcher.Deduplication)
-shows batched upserts, version-protected updates, and deduplicated reads.
+Routing by `ProductId` puts equal product IDs in one partition, but does not guarantee the same batch.
+**Deduplication applies only within the current handler batch**; separate batches may query the same product again.
+It is not a cache across batches.
+
+The runnable [PostgreSQL Web API sample](https://github.com/eventhorizon-cli/RequestBatcher/tree/main/samples/RequestBatcher.Deduplication) demonstrates the complete flow:
+`PriceQueryHandler` uses `Distinct()` on product IDs, builds a result dictionary keyed by product ID, and assigns
+responses with `entries.SetResponses(request => pricesByProductId.GetValueOrDefault(request.ProductId))`.
+Missing products return `null`.
 
 ## License
 

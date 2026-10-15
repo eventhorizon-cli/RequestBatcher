@@ -588,7 +588,7 @@ A partition key is an optional routing rule for related requests:
 
 ```csharp
 options.MaxConcurrency = 4;
-options.UsePartitionKey(request => request.OrderId, partitionCount: 8);
+options.UsePartitionKey(query => query.ProductId, partitionCount: 8);
 ```
 
 Equal finite, integer-valued numeric keys or equal non-null string keys are routed to the same queue partition among the
@@ -598,19 +598,20 @@ Different keys can still share a partition, so keys and partitions are not one-t
 Partition routing does not force all requests for one key into the same handler batch, and it does not deduplicate
 requests. It does not provide an execution-order or mutual-exclusion boundary.
 
-### Example: Merging Repeated Updates
+### Example: Merging Repeated Queries
 
-Suppose several `PriceUpdate` requests have the same `ProductId`. A handler can group its current batch by product and
-write only the highest version. Routing by `ProductId` improves locality, but separate handler calls can still process
-that product concurrently.
+Several `PriceQuery` requests in one batch may refer to the same `ProductId`. The handler deduplicates product IDs,
+issues one batch query, and maps results by `ProductId` to every original request, including duplicates. Response
+assignment does not depend on database row order.
 
-The storage layer must still prevent stale versions from overwriting newer state across batches because a partition key
-does not place every update for one product into the same batch. The runnable
-[PostgreSQL Web API sample](samples/RequestBatcher.Deduplication) demonstrates both safeguards:
+Routing by `ProductId` puts equal product IDs in one partition, but does not guarantee the same batch.
+**Deduplication applies only within the current handler batch**; separate batches may query the same product again.
+It is not a cache across batches.
 
-- the write handler merges repeated product updates within one batch, then performs one bulk upsert;
-- the upsert condition ignores older versions that arrive in later batches;
-- the query handler deduplicates product IDs before issuing one SQL query for the batch.
+The runnable [PostgreSQL Web API sample](samples/RequestBatcher.Deduplication) demonstrates the complete flow:
+`PriceQueryHandler` uses `Distinct()` on product IDs, builds a result dictionary keyed by product ID, and assigns
+responses with `entries.SetResponses(request => pricesByProductId.GetValueOrDefault(request.ProductId))`.
+Missing products return `null`.
 
 ## Routing Rules and Dispatch
 

@@ -553,7 +553,7 @@ Partition Key 是一项可选的路由规则，用于将相关请求路由到同
 
 ```csharp
 options.MaxConcurrency = 4;
-options.UsePartitionKey(request => request.OrderId, partitionCount: 8);
+options.UsePartitionKey(query => query.ProductId, partitionCount: 8);
 ```
 
 值相同的有限整数数值键，或值相同的非 `null` 字符串键，会进入指定数量中的同一 Partition。不同键值仍可能落入
@@ -562,17 +562,17 @@ options.UsePartitionKey(request => request.OrderId, partitionCount: 8);
 Partition 路由只决定请求进入哪个 Partition：它不会强制同一键值的全部请求进入同一个处理批次，也不会自动去重。
 它提供了一个路由边界，不提供执行顺序或互斥保证。
 
-### 示例：合并重复更新请求
+### 示例：合并重复查询请求
 
-假设多个 `PriceUpdate` 的 `ProductId` 相同。Handler 可以在当前批次中按商品分组，只写入版本最高的更新。按
-`ProductId` 路由能改善局部性，但不同 Handler 调用仍可能同时处理同一个商品。
+同一批次中的多个 `PriceQuery` 可能查询相同的 `ProductId`。Handler 先对商品 ID 去重，再执行一次批量查询，
+最后按 `ProductId` 将结果回填给每个原始请求，包括重复请求。回填不依赖数据库返回顺序。
 
-Partition Key 无法让同一商品的所有更新都进入同一批，因此存储层仍需防止旧版本跨批次覆盖新状态。可运行的
-[PostgreSQL Web API 示例](samples/RequestBatcher.Deduplication)展示了完整做法：
+按 `ProductId` 路由会让相同商品的请求进入同一 Partition，但不保证进入同一批次。
+**去重只作用于当前 Handler 批次**；不同批次仍可能查询同一个商品，这不是跨批次缓存。
 
-- 写 Handler 会在单批内合并同一商品的更新，然后执行一次批量 upsert；
-- upsert 条件会忽略后续批次中的旧版本；
-- 查询 Handler 会先对商品 ID 去重，再为当前批次执行一次 SQL 查询。
+可运行的 [PostgreSQL Web API 示例](samples/RequestBatcher.Deduplication)展示了完整流程：
+`PriceQueryHandler` 使用 `Distinct()` 去重商品 ID，查询后建立商品 ID 到结果的字典，再通过
+`entries.SetResponses(request => pricesByProductId.GetValueOrDefault(request.ProductId))` 回填结果；商品不存在时返回 `null`。
 
 ## 路由规则与调度
 
