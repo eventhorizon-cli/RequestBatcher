@@ -32,6 +32,11 @@ overloads that accept `Delegate handler` before the optional caller cancellation
 token. Response handlers receive `IReadOnlyList<RequestBatchEntry<TRequest,
 TResponse>>`; request-only handlers receive `IReadOnlyList<TRequest>`. These are
 extension methods, with no new required members for existing interface implementers.
+Handlers must use static implementations: lambdas, anonymous methods and local
+functions explicitly declare `static`, and method groups refer to static methods.
+Delegates may also be supplied through variables, fields, parameters, properties
+and factories. Callers remain responsible for the static-target contract when
+compile-time analysis cannot establish the target.
 Calling an inline overload on a typed-handler or third-party implementation fails
 before admission. Calling the original overload on an inline registration likewise
 fails before admission; every inline submission explicitly supplies its handler.
@@ -52,10 +57,18 @@ each actual batch to a cached typed invoker; delegates do not accompany individu
 queued requests, and batches are never split or regrouped by delegate identity.
 The existing coordinator, pending-request state, partition routing, backpressure,
 batch concurrency and completion machinery remain responsible for execution.
+Explicit delegate copies and delegate `Invoke` wrappers retain their actual outer
+delegate type for invocation and equality. Binding follows delegate targets through
+these wrappers to read the original method's injection, default-value and async
+metadata. Every wrapped invocation list must still contain exactly one method.
+This normalization runs only during initial binding, not on warm submissions or batches.
 
 The first parameter must be the exact batch list type. Remaining parameters may
 contain one `CancellationToken`, supplied from the batch lifecycle, and ordinary
-DI services. `[FromKeyedServices(key)]` selects a keyed service and requires an
+DI services. The entire token parameter may be omitted; when declared, it must
+not have a default value such as `= default`. The optional cancellation argument
+on `ExecuteAsync` belongs to the caller and is distinct from this batch token.
+`[FromKeyedServices(key)]` selects a keyed service and requires an
 explicit key; inherited-key lookup is rejected because the forwarding handler
 has no application service key. Other parameters are required services by default,
 so ASP.NET applications may annotate
@@ -87,18 +100,59 @@ forwarding handler. A cancellation-token parameter alone does not require a scop
 Typed-handler registrations continue to honor their explicit handler lifetime,
 including handlers without constructor dependencies.
 
-## Static Lambda Analyzer
+## Static Handler Analyzer
 
 The main NuGet package includes a C# analyzer under `analyzers/dotnet/cs`.
-Diagnostic `RB0001`, an error by default, requires the handler argument of these
-specific extension methods to be a directly supplied `static` lambda. Non-static
-lambdas, method groups and delegate variables are rejected because their static
-lambda origin cannot be established at the call site. Ordinary instance methods
-and similarly named APIs in other types are unaffected. Explicit casts and
-parentheses around a static lambda may be unwrapped for this check.
+Diagnostic `RB0001`, an error by default, requires statically known handler targets
+to be static. Supported forms include static lambdas, static anonymous methods,
+static local functions, ordinary and closed generic static method groups, explicit
+delegate construction, and delegates stored in variables or fields. Parentheses,
+casts and delegate conversions do not restrict the supported forms. Non-static
+lambdas, instance methods, non-static local functions and bound extension-method
+receivers are rejected when their target is known. Unrelated APIs are unaffected.
+Delegate parameters, properties, factory results and mutable storage are accepted
+when their target cannot be proven; absence of proof is not an error. A known
+constructed delegate type still permits checking its `Invoke` signature. Simple
+unchanged local initializers may be followed to recover the target and actual
+delegate type. Field and property values are not assumed to equal their initializers.
+For opaque sources, reference-type generic variance can make the runtime delegate
+type differ from its declared type. Signature checks defer errors affected by that
+variance rather than rejecting a possibly valid runtime delegate. Fixed signature
+parts, including value-type arguments, remain checked.
+The analyzer does not attempt whole-program value-flow analysis or execute user code.
+
+Diagnostic `RB0002`, also an error by default, validates each statically known
+handler signature at compile time. Its first parameter must be exactly
+`IReadOnlyList<TRequest>` for request-only submissions or
+`IReadOnlyList<RequestBatchEntry<TRequest, TResponse>>` for response submissions,
+using the request and response types inferred for the selected extension overload.
+Nullable reference annotations do not change this runtime type identity, and
+generic callers with matching type parameters remain supported.
+
+Return types must be `void`, non-generic `Task` or non-generic `ValueTask`;
+`async void` and by-reference returns are rejected. Optional, by-reference,
+pointer, function-pointer and ref-like parameters are rejected. After the batch
+parameter, at most one unkeyed `CancellationToken` is allowed; other parameters
+are DI services. `[FromKeyedServices]` requires an explicit key (including explicit
+`null`) and cannot annotate the batch or cancellation-token parameter. Ordinary
+service parameters and optional `[FromServices]` annotations remain valid.
+
+Signature validation uses semantic symbols for the target method and its constructed
+delegate's `Invoke` method, so aliases, generic methods and explicit delegate casts
+are handled according to their actual types. When a target is known, its parameter
+attributes supply DI binding metadata, including keyed-service selection. `RB0001`
+takes precedence for known non-static targets; `RB0002` reports the first signature
+issue with a specific reason. The analyzer does not infer DI registrations, check service
+availability or enforce delegate identity across separate submissions. Incomplete
+or erroneous compiler symbols must not cause analyzer failures. Runtime binding
+validation remains authoritative when analyzers are disabled, bypassed or unable
+to establish a target. Registration, admission, scheduling and service lifetimes
+remain governed by the existing pipeline contracts.
 
 The analyzer is a source-level development constraint and can be disabled by the
-consumer. The runtime does not try to infer a static lambda from `Delegate.Target`
+consumer. For opaque delegate sources, runtime binding validates the actual signature,
+service metadata and single binding; it does not prove source-level staticness.
+The runtime does not try to infer a static lambda from `Delegate.Target`
 or `MethodInfo.IsStatic`, which are not reliable indicators of its source syntax.
 The analyzer targets .NET Standard 2.0 and Roslyn 4.8 to support C# 12 compiler hosts.
 Roslyn dependencies are private build/test dependencies, not application runtime
@@ -150,9 +204,19 @@ database smoke checks require PostgreSQL.
 
 Analyzer tests compile representative call sites and inspect diagnostics: static
 and non-static lambdas, captured state, named arguments, both submission forms,
-explicit casts, delegate variables, method groups, unrelated APIs and existing
-handler APIs. A packaged consumer build verifies analyzer delivery, with a static
+explicit casts, delegate variables and fields, method groups, static local functions,
+static anonymous methods, generic static methods, unrelated APIs and existing
+handler APIs. Runtime tests execute these forms with ordinary and keyed DI parameters,
+verify equal delegates from separate conversions reuse a binding, and verify a
+different method still fails before admission. Delegate copies retain keyed service
+metadata and cannot hide multicast handlers, optional source parameters or async void.
+A packaged consumer build verifies analyzer delivery, with a static
 example compiling and a non-static example failing with `RB0001`.
+Signature diagnostics additionally cover all four submission overloads, exact
+batch element types, supported and unsupported return types, async void, invalid
+parameter modifiers and defaults, cancellation-token multiplicity, keyed-service
+attributes, generic callers, aliases and casts. A packaged consumer verifies
+`RB0002` delivery without introducing analyzer dependencies at runtime.
 
 Steady-state in-memory benchmarks compare typed handlers and inline delegates with
 identical requests, responses, configuration, batching gates and correctness checks,

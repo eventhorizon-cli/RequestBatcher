@@ -199,12 +199,15 @@ public sealed class PricesController : ControllerBase
 
 ## 委托 Handler
 
-委托 Handler 适合逻辑较简单的批处理场景，例如批量查询和结果回填。在 `ExecuteAsync` 调用处编写 static lambda，
-可以将请求提交与处理逻辑放在一起，便于结合调用上下文阅读和修改。处理逻辑较复杂，或需要多处复用、独立组织
-测试时，更适合使用单独的 `IRequestBatchHandler` 类。
+委托 Handler 适合逻辑较简单的批处理场景，例如批量查询和结果回填。在 `ExecuteAsync` 调用处使用 static lambda、
+static 匿名方法、static 局部函数或 static 方法组，可以将请求提交与处理逻辑放在一起，便于结合调用上下文阅读和修改。
+处理逻辑较复杂，或需要多处复用、独立组织测试时，更适合使用单独的 `IRequestBatchHandler` 类。
 
-使用 `AddDelegateRequestBatcher` 注册请求和响应类型及批处理选项，在执行时提供委托：
-注册阶段只声明请求、响应类型和配置，不需要 Handler 类型：
+**Handler 必须使用静态实现，不捕获局部变量或实例状态。**lambda、匿名方法和局部函数要显式加 `static`，
+方法组应指向普通或泛型静态方法；所需服务通过参数注入。
+委托可以直接传入，也可以通过变量、字段、参数、属性或工厂传递，支持显式创建、括号和类型转换。
+
+使用 `AddDelegateRequestBatcher` 注册请求、响应类型及批处理选项，不需要提供 Handler 类型：
 
 ```csharp
 using Microsoft.Extensions.DependencyInjection;
@@ -234,19 +237,43 @@ var prices = await batcher.ExecuteAsync(
     });
 ```
 
-这里沿用下方带返回值示例中的 `IPriceStore`，请注册自己的实现（示例中为 `PriceStore`）。不传 `batcherName`
-即可注册默认管线。无返回值场景使用 `AddDelegateRequestBatcher<TRequest>()`，lambda 首参数是
-`IReadOnlyList<TRequest>`。两种模式都通过 `ExecuteAsync` 扩展方法支持单条和显式列表提交，原有接口不增加成员。
-同一请求类型与名称只能选择一种注册模式：委托模式每次提交都传 handler；原有 Handler 类型注册继续使用原有重载。
+也可以将上面的 lambda 替换为静态方法或静态局部函数。同一管线选择其中一种写法：
 
-首次有效调用为该管线绑定唯一委托，同一个 static lambda 调用点的后续调用复用绑定。传入不同委托会在入队前报错；
-不同位置的 lambda 即使内容相同，也属于不同 Handler，应使用不同的 `batcherName`。并发首次调用只会绑定一次。
+```csharp
+var price = await batcher.ExecuteAsync(101, HandlePricesAsync);
+
+static async ValueTask HandlePricesAsync(
+    IReadOnlyList<RequestBatchEntry<int, decimal?>> entries,
+    [FromKeyedServices("catalog")] IPriceStore store,
+    CancellationToken batchCancellation)
+{
+    var ids = entries.Select(entry => (long)entry.Request).Distinct();
+    var rows = await store.FindAsync(ids, batchCancellation).ConfigureAwait(false);
+    var pricesById = rows.ToDictionary(row => row.ProductId);
+    entries.SetResponses(id => pricesById.GetValueOrDefault(id)?.Price);
+}
+```
+
+这里复用下方带返回值示例中的 `IPriceStore`，使用时需要注册自己的实现，示例中写作 `PriceStore`。
+无返回值时，使用 `AddDelegateRequestBatcher<TRequest>()` 注册，lambda 首参数改为 `IReadOnlyList<TRequest>`。
+两种模式都通过 `ExecuteAsync` 扩展方法支持单条和显式列表提交。
+
+对于 `int`、`string` 这类容易在多个业务中复用的请求类型，建议用 `batcherName` 区分业务管线。
+例如，价格查询使用 `"price"`，其他同样以 `int` 为请求类型的业务使用各自的名称，避免共用管线时发生委托绑定冲突。
+省略 `batcherName` 时，注册的是默认管线。
+
+同一请求类型与名称只能选择一种注册模式：委托模式每次提交都传入 handler；
+原有 Handler 类型继续使用原有重载，`IRequestBatcher` 接口不增加成员。
+
+首次有效调用为该管线绑定唯一委托，后续传入相等的委托会复用绑定；传入不同委托会在入队前报错。
+不同的 handler 目标即使代码内容相同，也属于不同 Handler，应使用不同的 `batcherName`。并发首次调用只会绑定一次。
 委托由管线以单例持有，服务参数在每个实际执行批次中注入，不捕获调用方的请求作用域。
 
 首参数必须是对应的批次列表类型。其余参数默认从 DI 解析必需服务，`[FromKeyedServices(key)]` 选择 keyed 服务；
 必须显式指定 key，不支持继承 key。
-Web 应用也可以标注 `[FromServices]`，普通服务按约定注入，因此此标注可省略。可以声明一个批次生命周期的
-`CancellationToken` 参数（不写默认参数值）。支持返回 `void`、`Task` 或 `ValueTask`，拒绝 `async void`
+Web 应用也可以标注 `[FromServices]`，普通服务按约定注入，因此此标注可省略。Handler 可以完全省略批次生命周期的
+`CancellationToken`；如果声明，只能声明一个，且不得写 `= default` 等默认值。这个注入的 token 由批次共享，
+与调用方可选的 `ExecuteAsync` `cancellationToken` 参数不同。支持返回 `void`、`Task` 或 `ValueTask`，拒绝 `async void`
 和带返回值的 Task/ValueTask。每个响应 entry 仍需设置结果；列表即使被拆成多批，也会保留输入顺序、重复和缺失项。
 
 委托 Handler 和绑定的委托始终是每条管线独立的单例，因此注册不提供 `ServiceLifetime` 参数。注入服务仍遵循各自的
@@ -254,12 +281,25 @@ DI 生命周期：Singleton 在容器内共享，Scoped 在同一批次内共享
 解析后的服务实例。原有类型 Handler 注册继续遵循显式指定的生命周期。
 
 有服务参数时，每批创建并异步释放独立 DI scope，释放完成后调用方才收到完成结果；没有服务参数则不创建 scope。
-签名检查和强类型调用器编译只发生在首次绑定，后续执行使用缓存，不进行反射调用、`DynamicInvoke` 或参数数组构造。
+
+委托 Handler 已针对稳定调用做过性能优化：签名检查和通过表达式树编译强类型调用器只发生在首次绑定；
+后续提交优先通过引用比较校验委托，批次执行复用缓存的调用器，不进行反射调用、`DynamicInvoke` 或参数数组构造。
 自动绑定依赖动态代码，不支持 NativeAOT 或裁剪。
 
-包内附带默认级别为 Error 的 Analyzer **`RB0001`**，要求 handler 参数直接传入 **static lambda**；
-委托变量和方法组不符合此规则，原有 Handler 调用不受影响。使用方可以禁用 Analyzer；运行时不能可靠判断源码是否写了
-`static`。详见[委托 Handler 设计](docs/delegate-handlers-design.md)和[性能对比](docs/evaluations/delegate-handlers/README.md)。
+现有相同配置的内存 benchmark 中，委托与传统 Handler 的逐条提交均值相差约 1%，内存分配接近，
+未观察到明显的稳定调用性能退化。该结果不包含首次绑定的编译开销，具体配置和结果见
+[性能对比](docs/evaluations/delegate-handlers/README.md)。
+
+**内置 Analyzer 提供基础的编译期检查**，两个诊断默认都作为编译错误报告：
+
+- `RB0001`：能确定 handler 来自非 static lambda、非静态局部函数或实例方法时，提示改用静态实现。
+- `RB0002`：检查能确定的委托签名，包括批次列表类型、返回类型、参数修饰符和默认值，
+  以及 `CancellationToken` 和 `[FromKeyedServices]` 的使用限制。
+
+委托经过参数、属性或工厂传递后，Analyzer 可能无法确定它的目标。这类写法仍然允许使用，
+调用方应保证最终传入的是静态实现。运行时会验证实际签名、服务绑定和委托是否与已绑定的委托一致，
+但无法可靠区分源码中的 static lambda 与不捕获变量的普通 lambda。
+原有 Handler 调用不受影响，使用方也可以禁用 Analyzer。详见[委托 Handler 设计](docs/delegate-handlers-design.md)。
 
 [独立的委托版 PostgreSQL 示例](samples/RequestBatcher.Delegates)使用委托 Handler 完成价格写入和
 `POST /prices/query` 列表查询，每个 static lambda 都从批次 scope 注入 keyed scoped `PriceStore`。

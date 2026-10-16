@@ -1,13 +1,12 @@
 using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Diagnostics;
 using Microsoft.CodeAnalysis.Operations;
 
 namespace RequestBatcher.Analyzers;
 
 /// <summary>
-/// Requires delegate RequestBatcher handlers to be supplied as static lambda expressions.
+/// Validates static targets and signatures supplied as delegate RequestBatcher handlers.
 /// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class StaticDelegateHandlerAnalyzer : DiagnosticAnalyzer
@@ -20,27 +19,42 @@ public sealed class StaticDelegateHandlerAnalyzer : DiagnosticAnalyzer
 
     private static readonly DiagnosticDescriptor _rule = new(
         "RB0001",
-        "Delegate handler must be a static lambda",
-        "The delegate handler argument must be supplied as a static lambda expression",
+        "Delegate handler must be static",
+        "The delegate handler must use a static lambda, anonymous method, local function, or method",
         "Usage",
         DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: "Require RequestBatcher delegate handlers to be directly supplied static lambdas.",
+        description: "Reject statically known non-static RequestBatcher delegate handler targets.",
+        helpLinkUri: "https://github.com/eventhorizon-cli/RequestBatcher/blob/main/docs/delegate-handlers-design.md");
+
+    private static readonly DiagnosticDescriptor _signatureRule = new(
+        "RB0002",
+        "Invalid delegate handler signature",
+        "Invalid delegate handler signature: {0}",
+        "Usage",
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true,
+        description: "Require delegate handler signatures to match RequestBatcher batch and injection contracts.",
         helpLinkUri: "https://github.com/eventhorizon-cli/RequestBatcher/blob/main/docs/delegate-handlers-design.md");
 
     /// <inheritdoc />
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics =>
-        ImmutableArray.Create(_rule);
+        ImmutableArray.Create(_rule, _signatureRule);
 
     /// <inheritdoc />
     public override void Initialize(AnalysisContext context)
     {
         context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
         context.EnableConcurrentExecution();
-        context.RegisterOperationAction(AnalyzeInvocation, OperationKind.Invocation);
+        context.RegisterCompilationStartAction(startContext =>
+        {
+            var validator = new DelegateHandlerSignatureValidator(startContext.Compilation);
+            startContext.RegisterOperationAction(
+                operationContext => AnalyzeInvocation(operationContext, validator), OperationKind.Invocation);
+        });
     }
 
-    private static void AnalyzeInvocation(OperationAnalysisContext context)
+    private static void AnalyzeInvocation(OperationAnalysisContext context, DelegateHandlerSignatureValidator validator)
     {
         var invocation = (IInvocationOperation)context.Operation;
         var method = invocation.TargetMethod;
@@ -66,12 +80,24 @@ public sealed class StaticDelegateHandlerAnalyzer : DiagnosticAnalyzer
 
         var handlerArgument = invocation.Arguments.FirstOrDefault(
             argument => SymbolEqualityComparer.Default.Equals(argument.Parameter, handlerParameter));
-        if (handlerArgument is null || IsStaticLambda(handlerArgument.Value))
+        if (handlerArgument is null)
         {
             return;
         }
 
-        context.ReportDiagnostic(Diagnostic.Create(_rule, handlerArgument.Syntax.GetLocation()));
+        var target = DelegateHandlerTargetResolver.Resolve(
+            handlerArgument.Value, context.Compilation, context.CancellationToken);
+        if (target.IsStatic == false)
+        {
+            context.ReportDiagnostic(Diagnostic.Create(_rule, handlerArgument.Syntax.GetLocation()));
+            return;
+        }
+
+        var reason = validator.Validate(target.Invoke, target.Method, method.TypeArguments);
+        if (reason is not null)
+        {
+            context.ReportDiagnostic(Diagnostic.Create(_signatureRule, handlerArgument.Syntax.GetLocation(), reason));
+        }
     }
 
     private static bool IsRequestBatcherType(ITypeSymbol type) =>
@@ -80,20 +106,4 @@ public sealed class StaticDelegateHandlerAnalyzer : DiagnosticAnalyzer
         (namedType.Arity == 1 || namedType.Arity == 2) &&
         namedType.ContainingNamespace?.ToDisplayString() == ExtensionNamespaceName;
 
-    private static bool IsStaticLambda(IOperation operation)
-    {
-        var syntax = operation.Syntax;
-        while (syntax is CastExpressionSyntax or ParenthesizedExpressionSyntax)
-        {
-            syntax = syntax switch
-            {
-                CastExpressionSyntax cast => cast.Expression,
-                ParenthesizedExpressionSyntax parenthesized => parenthesized.Expression,
-                _ => syntax
-            };
-        }
-
-        return syntax is LambdaExpressionSyntax lambda &&
-            lambda.Modifiers.Any(static modifier => modifier.IsKind(Microsoft.CodeAnalysis.CSharp.SyntaxKind.StaticKeyword));
-    }
 }

@@ -86,14 +86,28 @@ internal sealed class DelegateRequestBatchHandler<TRequest>(
     [RequiresUnreferencedCode("Delegate handlers inspect the delegate signature and service parameter attributes.")]
     private static Binding CreateBinding(Delegate handler)
     {
-        if (handler.GetInvocationList().Length != 1 || handler.Method.ContainsGenericParameters)
+        var sourceHandler = handler;
+        while (true)
         {
-            throw InvalidHandler("Only a single closed delegate is supported.");
+            if (sourceHandler.GetInvocationList().Length != 1 || sourceHandler.Method.ContainsGenericParameters)
+            {
+                throw InvalidHandler("Only a single closed delegate is supported.");
+            }
+
+            if (sourceHandler.Method.Name != "Invoke" ||
+                sourceHandler.Method.DeclaringType is not { } declaringType ||
+                !typeof(Delegate).IsAssignableFrom(declaringType) || sourceHandler.Target is not Delegate target)
+            {
+                break;
+            }
+
+            // A delegate copy can wrap Invoke; binding metadata belongs to the original method.
+            sourceHandler = target;
         }
 
         var invokeMethod = handler.GetType().GetMethod("Invoke")!;
         var parameters = invokeMethod.GetParameters();
-        var sourceParameters = handler.Method.GetParameters();
+        var sourceParameters = sourceHandler.Method.GetParameters();
         if (parameters.Length == 0 || parameters[0].ParameterType != typeof(IReadOnlyList<TRequest>) ||
             parameters.Length != sourceParameters.Length)
         {
@@ -106,7 +120,7 @@ internal sealed class DelegateRequestBatchHandler<TRequest>(
             throw InvalidHandler("The return type must be void, Task, or ValueTask.");
         }
 
-        if (returnType == typeof(void) && handler.Method.IsDefined(typeof(AsyncStateMachineAttribute), false))
+        if (returnType == typeof(void) && sourceHandler.Method.IsDefined(typeof(AsyncStateMachineAttribute), false))
         {
             throw InvalidHandler("Async void handlers are not supported.");
         }
