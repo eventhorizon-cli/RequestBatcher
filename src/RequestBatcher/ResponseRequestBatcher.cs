@@ -3,12 +3,12 @@ using RequestBatcher.PendingRequests;
 namespace RequestBatcher;
 
 internal sealed class ResponseRequestBatcher<TRequest, TResponse>(
-    RequestBatchCoordinator<RequestBatchItem<TRequest, TResponse>> batcher)
+    RequestBatchCoordinator<RequestBatchEntry<TRequest, TResponse>> batcher)
     : IRequestBatcher<TRequest, TResponse>
 {
     public Task<TResponse> ExecuteAsync(TRequest request, CancellationToken cancellationToken = default)
     {
-        var entry = new RequestBatchItem<TRequest, TResponse>(request);
+        var entry = new RequestBatchEntry<TRequest, TResponse>(request);
         var completion = new ResponseCompletion<TRequest, TResponse>(entry);
         var submission = batcher.ExecuteAsync(entry, completion, cancellationToken);
         return ReferenceEquals(submission, completion.Task)
@@ -27,7 +27,7 @@ internal sealed class ResponseRequestBatcher<TRequest, TResponse>(
 
     private static async Task<TResponse> AwaitSubmissionAsync(
         Task submission,
-        RequestBatchItem<TRequest, TResponse> entry)
+        RequestBatchEntry<TRequest, TResponse> entry)
     {
         await submission.ConfigureAwait(false);
         return entry.GetResponse();
@@ -37,7 +37,7 @@ internal sealed class ResponseRequestBatcher<TRequest, TResponse>(
         IEnumerable<TRequest> requests,
         CancellationToken cancellationToken)
     {
-        var entries = new List<RequestBatchItem<TRequest, TResponse>>();
+        var entries = new List<RequestBatchEntry<TRequest, TResponse>>();
         await batcher
             .ExecuteAsync(CreateEntries(requests, entries), cancellationToken)
             .ConfigureAwait(false);
@@ -56,13 +56,13 @@ internal sealed class ResponseRequestBatcher<TRequest, TResponse>(
         return responses;
     }
 
-    private static IEnumerable<RequestBatchItem<TRequest, TResponse>> CreateEntries(
+    private static IEnumerable<RequestBatchEntry<TRequest, TResponse>> CreateEntries(
         IEnumerable<TRequest> requests,
-        ICollection<RequestBatchItem<TRequest, TResponse>> entries)
+        ICollection<RequestBatchEntry<TRequest, TResponse>> entries)
     {
         foreach (var request in requests)
         {
-            var entry = new RequestBatchItem<TRequest, TResponse>(request);
+            var entry = new RequestBatchEntry<TRequest, TResponse>(request);
             entries.Add(entry);
             yield return entry;
         }

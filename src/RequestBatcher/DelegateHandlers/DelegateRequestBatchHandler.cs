@@ -1,0 +1,197 @@
+using System.Diagnostics.CodeAnalysis;
+using System.Linq.Expressions;
+using System.Reflection;
+using System.Runtime.CompilerServices;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace RequestBatcher.DelegateHandlers;
+
+internal sealed class DelegateRequestBatchHandler<TRequest>(
+    IServiceScopeFactory scopeFactory,
+    Action<IReadOnlyList<TRequest>>? validateResponses = null) : IRequestBatchHandler<TRequest>
+{
+    private readonly object _bindingLock = new();
+    private Binding? _binding;
+
+    [RequiresDynamicCode("Delegate handlers compile a typed invoker on first use.")]
+    [RequiresUnreferencedCode("Delegate handlers inspect the delegate signature and service parameter attributes.")]
+    public void Bind(Delegate handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+
+        var binding = Volatile.Read(ref _binding);
+        if (binding is not null)
+        {
+            EnsureSameHandler(binding, handler);
+            return;
+        }
+
+        lock (_bindingLock)
+        {
+            binding = _binding;
+            if (binding is null)
+            {
+                binding = CreateBinding(handler);
+                Volatile.Write(ref _binding, binding);
+            }
+            else
+            {
+                EnsureSameHandler(binding, handler);
+            }
+        }
+    }
+
+    public ValueTask HandleAsync(
+        IReadOnlyList<TRequest> requests,
+        CancellationToken cancellationToken = default)
+    {
+        var binding = Volatile.Read(ref _binding) ??
+            throw new InvalidOperationException("The delegate handler has not been bound.");
+
+        return binding.RequiresServices
+            ? HandleInScopeAsync(binding, requests, cancellationToken)
+            : HandleWithoutServicesAsync(binding, requests, cancellationToken);
+    }
+
+    private async ValueTask HandleWithoutServicesAsync(
+        Binding binding,
+        IReadOnlyList<TRequest> requests,
+        CancellationToken cancellationToken)
+    {
+        await binding.Invoke(requests, null!, cancellationToken).ConfigureAwait(false);
+        validateResponses?.Invoke(requests);
+    }
+
+    private async ValueTask HandleInScopeAsync(
+        Binding binding,
+        IReadOnlyList<TRequest> requests,
+        CancellationToken cancellationToken)
+    {
+        await using var scope = scopeFactory.CreateAsyncScope();
+        await binding.Invoke(requests, scope.ServiceProvider, cancellationToken).ConfigureAwait(false);
+        validateResponses?.Invoke(requests);
+    }
+
+    private static void EnsureSameHandler(Binding binding, Delegate handler)
+    {
+        if (!ReferenceEquals(binding.Handler, handler) && !binding.Handler.Equals(handler))
+        {
+            throw new InvalidOperationException(
+                "A different delegate handler has already been bound to this request batcher. " +
+                "Use a separate batcher name for a different handler.");
+        }
+    }
+
+    [RequiresDynamicCode("Delegate handlers compile a typed invoker on first use.")]
+    [RequiresUnreferencedCode("Delegate handlers inspect the delegate signature and service parameter attributes.")]
+    private static Binding CreateBinding(Delegate handler)
+    {
+        if (handler.GetInvocationList().Length != 1 || handler.Method.ContainsGenericParameters)
+        {
+            throw InvalidHandler("Only a single closed delegate is supported.");
+        }
+
+        var invokeMethod = handler.GetType().GetMethod("Invoke")!;
+        var parameters = invokeMethod.GetParameters();
+        var sourceParameters = handler.Method.GetParameters();
+        if (parameters.Length == 0 || parameters[0].ParameterType != typeof(IReadOnlyList<TRequest>) ||
+            parameters.Length != sourceParameters.Length)
+        {
+            throw InvalidHandler($"The first parameter must be {typeof(IReadOnlyList<TRequest>)}.");
+        }
+
+        var returnType = invokeMethod.ReturnType;
+        if (returnType != typeof(void) && returnType != typeof(Task) && returnType != typeof(ValueTask))
+        {
+            throw InvalidHandler("The return type must be void, Task, or ValueTask.");
+        }
+
+        if (returnType == typeof(void) && handler.Method.IsDefined(typeof(AsyncStateMachineAttribute), false))
+        {
+            throw InvalidHandler("Async void handlers are not supported.");
+        }
+
+        var requests = Expression.Parameter(typeof(IReadOnlyList<TRequest>), "requests");
+        var provider = Expression.Parameter(typeof(IServiceProvider), "provider");
+        var cancellationToken = Expression.Parameter(typeof(CancellationToken), "cancellationToken");
+        var arguments = new Expression[parameters.Length];
+        arguments[0] = requests;
+        var requiresServices = false;
+        var hasCancellationToken = false;
+
+        for (var index = 0; index < parameters.Length; index++)
+        {
+            var parameterType = parameters[index].ParameterType;
+            var source = sourceParameters[index];
+            var keyedService = source.GetCustomAttribute<FromKeyedServicesAttribute>();
+            if (keyedService?.LookupMode == ServiceKeyLookupMode.InheritKey)
+            {
+                throw InvalidHandler("FromKeyedServices must specify an explicit key for a delegate handler.");
+            }
+
+            if (parameterType.IsByRef || parameterType.IsPointer || parameterType.IsByRefLike ||
+                parameterType.ContainsGenericParameters || parameters[index].IsOptional || source.IsOptional)
+            {
+                throw InvalidHandler("Optional, by-reference, pointer, and open generic parameters are not supported.");
+            }
+
+            if (index == 0)
+            {
+                if (keyedService is not null)
+                {
+                    throw InvalidHandler("The batch parameter cannot select a keyed service.");
+                }
+
+                continue;
+            }
+
+            if (parameterType == typeof(CancellationToken))
+            {
+                if (hasCancellationToken || keyedService is not null)
+                {
+                    throw InvalidHandler("At most one unkeyed CancellationToken parameter is supported.");
+                }
+
+                hasCancellationToken = true;
+                arguments[index] = cancellationToken;
+                continue;
+            }
+
+            requiresServices = true;
+            var service = keyedService is null
+                ? Expression.Call(
+                    typeof(ServiceProviderServiceExtensions),
+                    nameof(ServiceProviderServiceExtensions.GetRequiredService),
+                    Type.EmptyTypes,
+                    provider,
+                    Expression.Constant(parameterType))
+                : Expression.Call(
+                    typeof(ServiceProviderKeyedServiceExtensions),
+                    nameof(ServiceProviderKeyedServiceExtensions.GetRequiredKeyedService),
+                    Type.EmptyTypes,
+                    provider,
+                    Expression.Constant(parameterType),
+                    Expression.Constant(keyedService.Key, typeof(object)));
+            arguments[index] = Expression.Convert(service, parameterType);
+        }
+
+        var call = Expression.Invoke(Expression.Constant(handler, handler.GetType()), arguments);
+        Expression body = returnType == typeof(void)
+            ? Expression.Block(call, Expression.Default(typeof(ValueTask)))
+            : returnType == typeof(Task)
+                ? Expression.New(typeof(ValueTask).GetConstructor([typeof(Task)])!, call)
+                : call;
+        var invoker = Expression.Lambda<
+            Func<IReadOnlyList<TRequest>, IServiceProvider, CancellationToken, ValueTask>>(
+            body, requests, provider, cancellationToken).Compile();
+
+        return new Binding(handler, invoker, requiresServices);
+    }
+
+    private static ArgumentException InvalidHandler(string message) => new(message, "handler");
+
+    private sealed record Binding(
+        Delegate Handler,
+        Func<IReadOnlyList<TRequest>, IServiceProvider, CancellationToken, ValueTask> Invoke,
+        bool RequiresServices);
+}

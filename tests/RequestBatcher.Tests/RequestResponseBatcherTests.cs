@@ -13,10 +13,10 @@ public sealed class RequestResponseBatcherTests
         var handler = new Mock<IRequestBatchHandler<ResponseRequest, string>>(MockBehavior.Strict);
         handler
             .Setup(subject => subject.HandleAsync(
-                It.Is<IReadOnlyList<RequestBatchItem<ResponseRequest, string>>>(
+                It.Is<IReadOnlyList<RequestBatchEntry<ResponseRequest, string>>>(
                     entries => entries.Count == 1 && entries[0].Request.Value == 42),
                 It.IsAny<CancellationToken>()))
-            .Returns((IReadOnlyList<RequestBatchItem<ResponseRequest, string>> entries, CancellationToken _) =>
+            .Returns((IReadOnlyList<RequestBatchEntry<ResponseRequest, string>> entries, CancellationToken _) =>
             {
                 entries[0].SetResponse("answer");
                 return ValueTask.CompletedTask;
@@ -134,7 +134,7 @@ public sealed class RequestResponseBatcherTests
     [Fact]
     public void SetResponse_SameItemTwice_PreservesFirstResponse()
     {
-        var entry = new RequestBatchItem<int, string>(1);
+        var entry = new RequestBatchEntry<int, string>(1);
 
         entry.SetResponse("first");
 
@@ -455,7 +455,7 @@ public sealed class RequestResponseBatcherTests
 
     private static void AddResponseHandler<TRequest, TResponse>(
         IServiceCollection services,
-        Func<IReadOnlyList<RequestBatchItem<TRequest, TResponse>>, CancellationToken, ValueTask> handler,
+        Func<IReadOnlyList<RequestBatchEntry<TRequest, TResponse>>, CancellationToken, ValueTask> handler,
         ServiceLifetime handlerLifetime = ServiceLifetime.Singleton,
         Action<RequestBatchOptions<TRequest>>? configure = null)
     {
@@ -466,7 +466,7 @@ public sealed class RequestResponseBatcherTests
     }
 
     private static ServiceProvider CreateProvider<TRequest, TResponse>(
-        Func<IReadOnlyList<RequestBatchItem<TRequest, TResponse>>, CancellationToken, ValueTask> handler,
+        Func<IReadOnlyList<RequestBatchEntry<TRequest, TResponse>>, CancellationToken, ValueTask> handler,
         Action<RequestBatchOptions<TRequest>>? configure = null)
     {
         var services = new ServiceCollection();
@@ -475,13 +475,13 @@ public sealed class RequestResponseBatcherTests
             new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
     }
 
-    private static RequestBatchItem<int, string>[] CreateEntries() =>
+    private static RequestBatchEntry<int, string>[] CreateEntries() =>
     [
-        new RequestBatchItem<int, string>(1),
-        new RequestBatchItem<int, string>(2),
+        new RequestBatchEntry<int, string>(1),
+        new RequestBatchEntry<int, string>(2),
     ];
 
-    private static void AssertResponseIsUnset(RequestBatchItem<int, string> entry) =>
+    private static void AssertResponseIsUnset(RequestBatchEntry<int, string> entry) =>
         Assert.Throws<InvalidOperationException>(() => entry.GetResponse());
 
     private static TaskCompletionSource NewSource() =>
@@ -494,11 +494,11 @@ public sealed class RequestResponseBatcherTests
     private sealed class TestBatchException : Exception;
 
     private sealed class TestResponseHandler<TRequest, TResponse>(
-        Func<IReadOnlyList<RequestBatchItem<TRequest, TResponse>>, CancellationToken, ValueTask> handler)
+        Func<IReadOnlyList<RequestBatchEntry<TRequest, TResponse>>, CancellationToken, ValueTask> handler)
         : IRequestBatchHandler<TRequest, TResponse>
     {
         public ValueTask HandleAsync(
-            IReadOnlyList<RequestBatchItem<TRequest, TResponse>> entries,
+            IReadOnlyList<RequestBatchEntry<TRequest, TResponse>> entries,
             CancellationToken cancellationToken = default) =>
             handler(entries, cancellationToken);
     }
@@ -514,7 +514,7 @@ public sealed class RequestResponseBatcherTests
     private sealed class DuplicateResponseHandler : IRequestBatchHandler<int, string>
     {
         public ValueTask HandleAsync(
-            IReadOnlyList<RequestBatchItem<int, string>> entries,
+            IReadOnlyList<RequestBatchEntry<int, string>> entries,
             CancellationToken cancellationToken = default) =>
             ValueTask.CompletedTask;
     }
@@ -536,7 +536,7 @@ public sealed class RequestResponseBatcherTests
         private readonly Guid _id = Guid.NewGuid();
 
         public ValueTask HandleAsync(
-            IReadOnlyList<RequestBatchItem<int, string>> entries,
+            IReadOnlyList<RequestBatchEntry<int, string>> entries,
             CancellationToken cancellationToken = default)
         {
             probe.HandlerIds.Enqueue(_id);

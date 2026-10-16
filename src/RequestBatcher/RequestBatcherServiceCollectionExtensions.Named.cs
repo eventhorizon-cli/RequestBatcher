@@ -67,7 +67,7 @@ public static partial class RequestBatcherServiceCollectionExtensions
     {
         ValidateNamedRegistration<TRequest>(services, batcherName, handlerLifetime);
         var options = CreateNamedOptions(configure);
-        var entryOptions = options.Project<RequestBatchItem<TRequest, TResponse>>(static entry => entry.Request);
+        var entryOptions = options.Project<RequestBatchEntry<TRequest, TResponse>>(static entry => entry.Request);
         var pipelineKey = new object();
 
         RegisterNamedPipeline<TRequest>(services, batcherName);
@@ -75,17 +75,17 @@ public static partial class RequestBatcherServiceCollectionExtensions
             typeof(IRequestBatchHandler<TRequest, TResponse>), batcherName, typeof(THandler), handlerLifetime));
         AddNamedOptions(services, batcherName, options);
         services.Add(new ServiceDescriptor(
-            typeof(IRequestBatchHandler<RequestBatchItem<TRequest, TResponse>>),
+            typeof(IRequestBatchHandler<RequestBatchEntry<TRequest, TResponse>>),
             pipelineKey,
             (provider, _) => new ResponseRequestBatchHandler<TRequest, TResponse>(
                 provider.GetRequiredKeyedService<IRequestBatchHandler<TRequest, TResponse>>(batcherName)),
             handlerLifetime));
-        AddKeyedCoordinator<RequestBatchItem<TRequest, TResponse>>(
+        AddKeyedCoordinator<RequestBatchEntry<TRequest, TResponse>>(
             services, pipelineKey, handlerLifetime, entryOptions);
         services.AddKeyedSingleton<IRequestBatcher<TRequest, TResponse>>(
             batcherName,
             (provider, _) => new ResponseRequestBatcher<TRequest, TResponse>(
-                provider.GetRequiredKeyedService<RequestBatchCoordinator<RequestBatchItem<TRequest, TResponse>>>(
+                provider.GetRequiredKeyedService<RequestBatchCoordinator<RequestBatchEntry<TRequest, TResponse>>>(
                     pipelineKey)));
 
         return services;

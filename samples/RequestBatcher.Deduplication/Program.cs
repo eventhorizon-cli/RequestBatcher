@@ -14,7 +14,10 @@ builder.Services.AddRequestBatcher<PriceUpdate, PriceUpdateHandler>(
     ServiceLifetime.Scoped,
     options =>
     {
-        ConfigureBatching(options);
+        options.BatchSize = 100;
+        options.MaxConcurrency = 4;
+        options.MaxPendingRequests = 10_000;
+        options.FullMode = RequestBatchFullMode.Wait;
         // Optional: equal product IDs share one of eight keyed partitions; omit this line to use one shared partition.
         options.UsePartitionKey(static update => update.ProductId, partitionCount: 8);
     });
@@ -24,7 +27,10 @@ builder.Services.AddRequestBatcher<int, decimal?, PriceQueryHandler>(
     handlerLifetime: ServiceLifetime.Scoped,
     configure: options =>
     {
-        ConfigureBatching(options);
+        options.BatchSize = 100;
+        options.MaxConcurrency = 4;
+        options.MaxPendingRequests = 10_000;
+        options.FullMode = RequestBatchFullMode.Wait;
         // Optional: equal product IDs share one of eight keyed partitions; omit this line to use one shared partition.
         options.UsePartitionKey(static productId => productId, partitionCount: 8);
     });
@@ -37,15 +43,6 @@ app.MapGet("/prices/{productId:int}", FindAsync);
 app.MapPost("/prices/query", FindManyAsync);
 
 await app.RunAsync();
-
-static void ConfigureBatching<TRequest>(RequestBatchOptions<TRequest> options)
-{
-    // RequestBatcher options stay in code so the sample's batching behavior is visible at registration.
-    options.BatchSize = 100;
-    options.MaxConcurrency = 4;
-    options.MaxPendingRequests = 10_000;
-    options.FullMode = RequestBatchFullMode.Wait;
-}
 
 static async Task<IResult> ExecuteAsync(
     PriceUpdate update,

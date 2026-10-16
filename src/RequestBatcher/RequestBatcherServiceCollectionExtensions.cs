@@ -106,21 +106,21 @@ public static partial class RequestBatcherServiceCollectionExtensions
 
         var configuredOptions = ConfigureOptions(services, configure);
         var entryOptions = configuredOptions
-            .Project<RequestBatchItem<TRequest, TResponse>>(static entry => entry.Request);
+            .Project<RequestBatchEntry<TRequest, TResponse>>(static entry => entry.Request);
 
         registerHandler(services);
-        AddRequestBatcherCore<RequestBatchItem<TRequest, TResponse>>(
+        AddRequestBatcherCore<RequestBatchEntry<TRequest, TResponse>>(
             services,
             handlerLifetime,
             options => options.CopyFrom(entryOptions),
             services => services.Add(new ServiceDescriptor(
-                typeof(IRequestBatchHandler<RequestBatchItem<TRequest, TResponse>>),
+                typeof(IRequestBatchHandler<RequestBatchEntry<TRequest, TResponse>>),
                 provider => new ResponseRequestBatchHandler<TRequest, TResponse>(
                     provider.GetRequiredService<IRequestBatchHandler<TRequest, TResponse>>()),
                 handlerLifetime)));
         services.AddSingleton<IRequestBatcher<TRequest, TResponse>>(
             provider => new ResponseRequestBatcher<TRequest, TResponse>(
-                provider.GetRequiredService<RequestBatchCoordinator<RequestBatchItem<TRequest, TResponse>>>()));
+                provider.GetRequiredService<RequestBatchCoordinator<RequestBatchEntry<TRequest, TResponse>>>()));
 
         return services;
     }

@@ -144,7 +144,7 @@ in the application's service collection as shown above:
 public sealed class PriceByIdHandler(IPriceStore store) : IRequestBatchHandler<int, decimal?>
 {
     public async ValueTask HandleAsync(
-        IReadOnlyList<RequestBatchItem<int, decimal?>> entries,
+        IReadOnlyList<RequestBatchEntry<int, decimal?>> entries,
         CancellationToken cancellationToken = default)
     {
         var ids = entries.Select(entry => (long)entry.Request).Distinct().ToArray();
@@ -212,6 +212,86 @@ handlers and batching options identical, comparing single and explicit submissio
 The runnable [PostgreSQL sample](samples/RequestBatcher.Deduplication) uses a named `int` price-query batcher with
 `decimal?` responses, widens IDs for its PostgreSQL `bigint` column, and accepts a JSON `int[]` at `POST /prices/query`.
 
+## Delegate Handlers
+
+Delegate handlers keep short batch-processing logic next to the `ExecuteAsync` call that submits the work, so you
+can read and update the submission and handling code together. They suit straightforward batch lookups or result
+mapping. When the logic grows or needs to be reused and tested independently, use a separate `IRequestBatchHandler`
+class.
+
+Use `AddDelegateRequestBatcher` to declare the request/response contract and options, then supply a static lambda
+at the call site:
+
+```csharp
+using Microsoft.Extensions.DependencyInjection;
+using RequestBatcher;
+
+services.AddKeyedScoped<IPriceStore, PriceStore>("catalog");
+services.AddDelegateRequestBatcher<int, decimal?>(
+    batcherName: "price",
+    configure: options =>
+    {
+        options.BatchSize = 100;
+        options.MaxConcurrency = 4;
+    });
+
+var batcher = serviceProvider.GetRequiredKeyedService<IRequestBatcher<int, decimal?>>("price");
+var prices = await batcher.ExecuteAsync(
+    new[] { 101, 102, 101 },
+    static async ValueTask (
+        IReadOnlyList<RequestBatchEntry<int, decimal?>> entries,
+        [FromKeyedServices("catalog")] IPriceStore store,
+        CancellationToken batchCancellation) =>
+    {
+        var ids = entries.Select(entry => (long)entry.Request).Distinct().ToArray();
+        var rows = await store.FindAsync(ids, batchCancellation).ConfigureAwait(false);
+        var pricesById = rows.ToDictionary(row => row.ProductId);
+        entries.SetResponses(id => pricesById.GetValueOrDefault(id)?.Price);
+    });
+```
+
+This uses the `IPriceStore` contract from the request/response example below; register your own implementation
+(shown as `PriceStore`). Omit `batcherName` for the default registration. Request-only pipelines use
+`AddDelegateRequestBatcher<TRequest>()` and a first lambda parameter of `IReadOnlyList<TRequest>`. Both modes
+support individual requests and explicit lists through `ExecuteAsync` extension methods; the original interfaces
+have no added members. Choose either typed-handler or delegate registration for each request type and name.
+Delegate registrations require the handler argument on every submission; typed-handler registrations use the
+original overloads.
+
+The first valid call binds one delegate to that pipeline. Repeated calls from the same static lambda call site
+reuse it; a different delegate fails before enqueueing. Different lambda call sites are different handlers even
+when their bodies look identical, so use different batcher names for different operations. Concurrent first calls
+bind atomically. Services are supplied per dispatched batch, not captured from the caller's scope.
+
+The first parameter must be the exact batch list type. Other parameters are required DI services, with
+`[FromKeyedServices(key)]` selecting a keyed service. The key must be explicit; inherited keys are unsupported.
+Web applications may write `[FromServices]` on ordinary
+service parameters; it is optional because services are injected by convention. One optional batch lifecycle
+`CancellationToken` parameter is supported (without a default parameter value). The lambda may return `void`,
+`Task` or `ValueTask`; `async void` and result-bearing return types are rejected. Every response entry must still
+receive a response. List results preserve order and duplicates even when submission spans multiple handler batches.
+
+The delegate handler and its bound delegate are always singleton per pipeline; registration has no
+`ServiceLifetime` argument. Injected services retain their registered lifetimes: singleton instances are shared by
+the container, scoped instances are shared within one batch, and transient instances are resolved separately for
+each parameter. Resolved services are never cached in the singleton handler. Typed-handler registrations continue
+to honor their explicit handler lifetime.
+
+Each batch that injects services owns an async DI scope, and callers complete after scope disposal. A delegate
+without service parameters skips scope creation. Signature inspection and typed-invoker compilation happen once
+on first binding; steady-state dispatch uses the cached invoker without reflection, `DynamicInvoke` or argument
+arrays. This automatic binding mode requires dynamic code and is not supported for NativeAOT or trimming.
+
+The package includes analyzer **`RB0001`**, an error by default, requiring a directly supplied **static lambda**.
+Delegate variables and method groups are rejected by this rule. Ordinary typed-handler calls are unaffected.
+The analyzer can be disabled by the consumer; runtime reflection cannot reliably prove that a lambda was written
+as `static`. See the [delegate-handler design](docs/delegate-handlers-design.md) and
+[performance comparison](docs/evaluations/delegate-handlers/README.md).
+
+The standalone [delegate PostgreSQL sample](samples/RequestBatcher.Delegates) uses delegate handlers for both price updates and
+`POST /prices/query` list lookups. Each static lambda injects a keyed scoped `PriceStore` per handler batch.
+The [typed-handler sample](samples/RequestBatcher.Deduplication) provides the original handler-class examples separately.
+
 ## When to Use It
 
 Use RequestBatcher when requests are independent, temporary in-memory queuing is acceptable, and the downstream
@@ -242,6 +322,11 @@ RequestBatcher is not a durable background queue or a transaction coordinator:
   handler and cannot cancel the shared handler call.
 
 ## APIs
+
+The response wrapper is `RequestBatchEntry<TRequest, TResponse>`. When upgrading code that used
+`RequestBatchItem<TRequest, TResponse>`, update that type and its extension class name to `RequestBatchEntry`
+and `RequestBatchEntryExtensions`, then rebuild all consumers. This is a source and binary breaking change;
+response assignment and completion behavior are unchanged.
 
 ### Request-Only API
 
@@ -290,7 +375,7 @@ public interface IRequestBatchHandler<TRequest, TResponse>
 {
     // Process one batch and assign exactly one response to every entry.
     ValueTask HandleAsync(
-        IReadOnlyList<RequestBatchItem<TRequest, TResponse>> entries,
+        IReadOnlyList<RequestBatchEntry<TRequest, TResponse>> entries,
         CancellationToken cancellationToken = default);
 }
 ```
@@ -382,7 +467,7 @@ public sealed class PriceQueryHandler(IPriceStore store)
     : IRequestBatchHandler<PriceQuery, PriceQuote?>
 {
     public async ValueTask HandleAsync(
-        IReadOnlyList<RequestBatchItem<PriceQuery, PriceQuote?>> entries,
+        IReadOnlyList<RequestBatchEntry<PriceQuery, PriceQuote?>> entries,
         CancellationToken cancellationToken = default)
     {
         var keys = entries
@@ -494,7 +579,7 @@ sequence may still be split by `BatchSize` or partition routing.
 ## Single vs. Group Submission
 
 In this documentation, a **submission** is one caller invocation of `ExecuteAsync`. A **handler batch** is the
-`IReadOnlyList<TRequest>` or `IReadOnlyList<RequestBatchItem<TRequest, TResponse>>` passed to one `HandleAsync`
+`IReadOnlyList<TRequest>` or `IReadOnlyList<RequestBatchEntry<TRequest, TResponse>>` passed to one `HandleAsync`
 invocation.
 
 **A submission and a handler batch are not the same boundary.**
@@ -818,6 +903,13 @@ Both query endpoints inject `[FromKeyedServices("price")] IRequestBatcher<int, d
 at `17.90` and products `102` and `999` absent, submitting `[101,102,101,999]` returns `[17.90,null,17.90,null]`.
 The list can span multiple handler batches; duplicate IDs share a database lookup only within each handler batch.
 See the [sample README](samples/RequestBatcher.Deduplication/README.md) for Docker startup and complete curl commands.
+
+The standalone [delegate-handler PostgreSQL sample](samples/RequestBatcher.Delegates) uses `AddDelegateRequestBatcher` and static lambdas
+for both `POST /prices` updates and `POST /prices/query` list lookups. The query pipeline is named `"price"` and accepts
+primitive `int` IDs with `decimal?` responses. Each lambda receives a keyed scoped `PriceStore` from its batch scope;
+the delegate handler is singleton and registration has no lifetime argument. The original sample remains the
+handler-class version. The delegate sample has its own HTTP and database ports; see its
+[README](samples/RequestBatcher.Delegates/README.md) for startup and curl commands.
 
 ## License
 
