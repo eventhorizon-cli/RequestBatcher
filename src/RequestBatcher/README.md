@@ -107,6 +107,107 @@ Use `Microsoft.Extensions.DependencyInjection` and `RequestBatcher`. The [Reques
 section below defines `PriceQuery`, `PriceQuote`, `PriceQueryHandler`, and the `IPriceStore` dependency. In application
 services, constructor-inject `IRequestBatcher<PriceQuery, PriceQuote?>` instead of resolving it manually.
 
+## Named Batchers and Primitive Requests
+
+A request can be a primitive ID. Use the `batcherName` overload when several operations accept the same request type:
+for example, `"price"` and `"stock"` can each register an independent `int` pipeline. Each name has its own handler,
+options, queue capacity, and concurrency limit. Named and unnamed registrations may coexist.
+
+```csharp
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using RequestBatcher;
+
+services.AddRequestBatcher<int, decimal?, PriceByIdHandler>(
+    batcherName: "price",
+    handlerLifetime: ServiceLifetime.Scoped,
+    configure: options =>
+    {
+        options.BatchSize = 100;
+        options.MaxConcurrency = 4;
+        options.UsePartitionKey(id => id, partitionCount: 8);
+    });
+
+var batcher = serviceProvider.GetRequiredKeyedService<IRequestBatcher<int, decimal?>>("price");
+var prices = await batcher.ExecuteAsync(new[] { 101, 102, 101 });
+var options = serviceProvider.GetRequiredService<IOptionsMonitor<RequestBatchOptions<int>>>().Get("price");
+```
+
+The handler below uses the `IPriceStore` contract from the request/response example. Register its implementation
+in the application's service collection as shown above:
+
+```csharp
+public sealed class PriceByIdHandler(IPriceStore store) : IRequestBatchHandler<int, decimal?>
+{
+    public async ValueTask HandleAsync(
+        IReadOnlyList<RequestBatchItem<int, decimal?>> entries,
+        CancellationToken cancellationToken = default)
+    {
+        var ids = entries.Select(entry => (long)entry.Request).Distinct().ToArray();
+        var prices = await store.FindAsync(ids, cancellationToken).ConfigureAwait(false);
+        var pricesById = prices.ToDictionary(price => price.ProductId);
+        entries.SetResponses(id => pricesById.GetValueOrDefault(id)?.Price);
+    }
+}
+```
+
+Results follow input order, including duplicates; missing products return null. An explicit list can split into
+multiple handler batches.
+
+In application services, inject the named batcher through the constructor. Register `PriceLookup` with
+`services.AddScoped<PriceLookup>()`; the attribute selects the same `"price"` name used during batcher registration:
+
+```csharp
+using Microsoft.Extensions.DependencyInjection;
+using RequestBatcher;
+
+public sealed class PriceLookup(
+    [FromKeyedServices("price")] IRequestBatcher<int, decimal?> batcher)
+{
+    public Task<IReadOnlyList<decimal?>> FindAsync(
+        IEnumerable<int> productIds,
+        CancellationToken cancellationToken = default) =>
+        batcher.ExecuteAsync(productIds, cancellationToken);
+}
+```
+
+In ASP.NET Core MVC, the same attribute can inject the batcher directly into a Controller Action parameter:
+
+```csharp
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
+using RequestBatcher;
+
+[ApiController]
+[Route("api/prices")]
+public sealed class PricesController : ControllerBase
+{
+    [HttpPost("query")]
+    public Task<IReadOnlyList<decimal?>> FindAsync(
+        [FromBody] int[] productIds,
+        [FromKeyedServices("price")] IRequestBatcher<int, decimal?> batcher,
+        CancellationToken cancellationToken) =>
+        batcher.ExecuteAsync(productIds, cancellationToken);
+}
+```
+
+Register MVC with `builder.Services.AddControllers()` and map it with `app.MapControllers()`. Minimal API handler
+parameters support the same attribute, as shown in the runnable sample. See Microsoft's official documentation for
+[keyed services and constructor injection](https://learn.microsoft.com/en-us/dotnet/core/extensions/dependency-injection/overview#keyed-services)
+and [Controller Action injection](https://learn.microsoft.com/en-us/aspnet/core/mvc/controllers/dependency-injection?view=aspnetcore-8.0#action-injection-with-fromkeyedservices).
+
+The request-only overload also accepts `batcherName`. Names are case-sensitive and must not be null, empty, or
+whitespace; a request type and name identify one pipeline, regardless of response type. Use the original overload
+for the unnamed default. Configuration is captured at registration; named options expose that configuration and
+do not provide runtime queue reconfiguration. `UsePartitionKey` routes requests within the selected batcher and
+does not select a batcher or serialize its handler batches.
+
+The [named versus unnamed benchmark](https://github.com/eventhorizon-cli/RequestBatcher/blob/main/docs/evaluations/named-batching/README.md) keeps request/response types,
+handlers and batching options identical, comparing single and explicit submissions with singleton and scoped handlers.
+
+The runnable [PostgreSQL sample](https://github.com/eventhorizon-cli/RequestBatcher/tree/main/samples/RequestBatcher.Deduplication) uses a named `int` price-query batcher with
+`decimal?` responses, widens IDs for its PostgreSQL `bigint` column, and accepts a JSON `int[]` at `POST /prices/query`.
+
 ## When to Use It
 
 Use RequestBatcher for independent database, cache, or downstream operations that benefit from a batch API. It also
@@ -319,7 +420,8 @@ public sealed class PriceService(IRequestBatcher<PriceQuery, PriceQuote?> priceB
 
 Register your application's `IPriceStore` implementation (shown as `PriceStore`) and the batcher in the existing
 service collection, then inject `IRequestBatcher<PriceQuery, PriceQuote?>` into application services. The runnable
-[PostgreSQL Web API sample](https://github.com/eventhorizon-cli/RequestBatcher/tree/main/samples/RequestBatcher.Deduplication) implements the same lookup flow directly with Dapper and PostgreSQL.
+[PostgreSQL Web API sample](https://github.com/eventhorizon-cli/RequestBatcher/tree/main/samples/RequestBatcher.Deduplication) uses Dapper and PostgreSQL with a named
+`IRequestBatcher<int, decimal?>`: callers submit primitive IDs and receive price values.
 
 ```csharp
 using Microsoft.Extensions.DependencyInjection;
@@ -607,10 +709,27 @@ Routing by `ProductId` puts equal product IDs in one partition, but does not gua
 **Deduplication applies only within the current handler batch**; separate batches may query the same product again.
 It is not a cache across batches.
 
-The runnable [PostgreSQL Web API sample](https://github.com/eventhorizon-cli/RequestBatcher/tree/main/samples/RequestBatcher.Deduplication) demonstrates the complete flow:
-`PriceQueryHandler` uses `Distinct()` on product IDs, builds a result dictionary keyed by product ID, and assigns
-responses with `entries.SetResponses(request => pricesByProductId.GetValueOrDefault(request.ProductId))`.
-Missing products return `null`.
+The runnable [PostgreSQL Web API sample](https://github.com/eventhorizon-cli/RequestBatcher/tree/main/samples/RequestBatcher.Deduplication) uses primitive `int` IDs in its named
+`"price"` pipeline. Its `PriceQueryHandler` deduplicates IDs with `Distinct()`, queries PostgreSQL, and maps rows by
+product ID with `entries.SetResponses(id => pricesById.GetValueOrDefault(id)?.Price)`. Callers receive `decimal?`
+prices, with `null` for missing products. Both single-ID and list submissions use this handler; list results retain
+input order and duplicates even when requests span several handler batches.
+
+## Sample Application
+
+The [PostgreSQL Web API sample](https://github.com/eventhorizon-cli/RequestBatcher/tree/main/samples/RequestBatcher.Deduplication) demonstrates two pipelines in a Minimal API:
+
+- `POST /prices` submits a structured `PriceUpdate` to the unnamed write batcher. The handler merges updates by
+  product ID, keeps the highest version in its batch, and performs a PostgreSQL upsert.
+- `GET /prices/{productId}` submits one `int` ID to the named `"price"` batcher and returns a price value, or `404`
+  when the product is missing.
+- `POST /prices/query` submits a JSON `int[]` to the same named batcher and returns a `decimal?` array in input order,
+  preserving duplicates and returning `null` for missing products.
+
+Both query endpoints inject `[FromKeyedServices("price")] IRequestBatcher<int, decimal?>`. With product `101` stored
+at `17.90` and products `102` and `999` absent, submitting `[101,102,101,999]` returns `[17.90,null,17.90,null]`.
+The list can span multiple handler batches; duplicate IDs share a database lookup only within each handler batch.
+See the [sample README](https://github.com/eventhorizon-cli/RequestBatcher/blob/main/samples/RequestBatcher.Deduplication/README.md) for Docker startup and complete curl commands.
 
 ## License
 

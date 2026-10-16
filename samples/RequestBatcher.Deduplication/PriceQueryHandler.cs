@@ -4,7 +4,7 @@ using Npgsql;
 namespace RequestBatcher.Deduplication;
 
 internal sealed class PriceQueryHandler(NpgsqlDataSource dataSource)
-    : IRequestBatchHandler<PriceQuery, PriceUpdate?>
+    : IRequestBatchHandler<int, decimal?>
 {
     private const string QuerySql = """
         SELECT product_id AS "ProductId",
@@ -15,12 +15,13 @@ internal sealed class PriceQueryHandler(NpgsqlDataSource dataSource)
         """;
 
     public async ValueTask HandleAsync(
-        IReadOnlyList<RequestBatchItem<PriceQuery, PriceUpdate?>> entries,
+        IReadOnlyList<RequestBatchItem<int, decimal?>> entries,
         CancellationToken cancellationToken = default)
     {
         // Duplicate callers in this handler batch share one database lookup for their product ID.
+        // Widen the public int IDs to match the database's bigint column.
         var productIds = entries
-            .Select(entry => entry.Request.ProductId)
+            .Select(entry => (long)entry.Request)
             .Distinct()
             .ToArray();
 
@@ -32,19 +33,19 @@ internal sealed class PriceQueryHandler(NpgsqlDataSource dataSource)
                 QuerySql,
                 new { ProductIds = productIds },
                 cancellationToken: cancellationToken)).ConfigureAwait(false);
-        var pricesByProductId = prices.ToDictionary(price => price.ProductId);
+        var pricesById = prices.ToDictionary(price => price.ProductId);
 
         // Resolve every original request, including duplicates, without depending on database row order.
         // Missing products return null. The factory receives TRequest, not its entry wrapper.
-        entries.SetResponses(request => pricesByProductId.GetValueOrDefault(request.ProductId));
+        entries.SetResponses(id => pricesById.GetValueOrDefault(id)?.Price);
 
         // If query deduplication is unnecessary, remove Distinct() above and keep the same response factory.
         // Two other assignment styles are available; use only ONE style for each entry:
         // 1. Assign each entry individually:
         // foreach (var entry in entries)
-        //     entry.SetResponse(pricesByProductId.GetValueOrDefault(entry.Request.ProductId));
+        //     entry.SetResponse(pricesById.GetValueOrDefault(entry.Request)?.Price);
         // 2. Assign an already aligned response sequence:
-        // var responses = entries.Select(entry => pricesByProductId.GetValueOrDefault(entry.Request.ProductId));
+        // var responses = entries.Select(entry => pricesById.GetValueOrDefault(entry.Request)?.Price);
         // entries.SetResponses(responses);
         // This overload requires input order and exactly one result per original entry, including duplicates and
         // missing keys. Do not pass database rows directly; map them back to the entries as shown above.

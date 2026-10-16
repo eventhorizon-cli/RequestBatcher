@@ -10,7 +10,7 @@ namespace RequestBatcher;
 /// <summary>
 /// Registration helpers that compose RequestBatcher into an externally owned dependency injection container.
 /// </summary>
-public static class RequestBatcherServiceCollectionExtensions
+public static partial class RequestBatcherServiceCollectionExtensions
 {
     /// <summary>
     /// Registers one singleton request batcher and its handler for <typeparamref name="TRequest"/>.
@@ -72,7 +72,8 @@ public static class RequestBatcherServiceCollectionExtensions
         Action<RequestBatchOptions<TRequest>>? configure,
         Action<IServiceCollection> registerHandler)
     {
-        if (services.Any(descriptor => descriptor.ServiceType == typeof(IRequestBatcher<TRequest>)))
+        if (services.Any(descriptor =>
+                descriptor.ServiceType == typeof(IRequestBatcher<TRequest>) && !descriptor.IsKeyedService))
         {
             throw new InvalidOperationException(
                 $"A request batcher for '{typeof(TRequest)}' has already been registered.");
@@ -154,13 +155,14 @@ public static class RequestBatcherServiceCollectionExtensions
 
     private static void AddInternalBufferQueueTopic<TRequest>(
         IServiceCollection services,
-        RequestBatchOptions<TRequest> options)
+        RequestBatchOptions<TRequest> options,
+        string topicName = RequestBatchCoordinator<TRequest>.TopicName)
     {
         services.AddBufferQueue(queue =>
             queue.UseMemory(memory =>
                 memory.AddTopic<PendingBatchRequest<TRequest>>(topic =>
                 {
-                    topic.TopicName = RequestBatchCoordinator<TRequest>.TopicName;
+                    topic.TopicName = topicName;
                     topic.PartitionNumber = GetPartitionCount(
                         options.PartitionKey?.PartitionCount ?? 1,
                         options.PartitionKey is not null);
@@ -178,7 +180,8 @@ public static class RequestBatcherServiceCollectionExtensions
 
     private static void RegisterBatcherPipeline<TRequest>(IServiceCollection services)
     {
-        if (services.Any(descriptor => descriptor.ServiceType == typeof(RequestBatcherRegistration<TRequest>)))
+        if (services.Any(descriptor =>
+                descriptor.ServiceType == typeof(RequestBatcherRegistration<TRequest>) && !descriptor.IsKeyedService))
         {
             throw new InvalidOperationException(
                 $"A request batcher for '{typeof(TRequest)}' has already been registered.");

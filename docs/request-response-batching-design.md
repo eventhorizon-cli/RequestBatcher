@@ -80,9 +80,10 @@ services.AddRequestBatcher<TRequest, TResponse, THandler>(
     configure);
 ```
 
-One logical pipeline may be registered for a request type. Registering both
-forms for the same `TRequest` is invalid because their queue topology and
-capacity configuration would conflict. A rejected registration does not invoke
+One logical pipeline may be registered for a request type and name,
+including the unkeyed default. [Named registrations](named-batching-design.md)
+allow independent pipelines for the same request type. Registering both forms
+for the same `TRequest` and name is invalid. A rejected registration does not invoke
 its configuration callback or modify the service descriptors and options of the
 existing pipeline.
 

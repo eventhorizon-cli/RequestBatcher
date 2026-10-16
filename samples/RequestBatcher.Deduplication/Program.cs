@@ -18,20 +18,23 @@ builder.Services.AddRequestBatcher<PriceUpdate, PriceUpdateHandler>(
         // Optional: equal product IDs share one of eight keyed partitions; omit this line to use one shared partition.
         options.UsePartitionKey(static update => update.ProductId, partitionCount: 8);
     });
-builder.Services.AddRequestBatcher<PriceQuery, PriceUpdate?, PriceQueryHandler>(
-    ServiceLifetime.Scoped,
-    options =>
+// The name selects an independent pipeline; requests and responses can be primitive values.
+builder.Services.AddRequestBatcher<int, decimal?, PriceQueryHandler>(
+    batcherName: "price",
+    handlerLifetime: ServiceLifetime.Scoped,
+    configure: options =>
     {
         ConfigureBatching(options);
         // Optional: equal product IDs share one of eight keyed partitions; omit this line to use one shared partition.
-        options.UsePartitionKey(static query => query.ProductId, partitionCount: 8);
+        options.UsePartitionKey(static productId => productId, partitionCount: 8);
     });
 
 var app = builder.Build();
 await InitializeDatabaseAsync(app.Services.GetRequiredService<NpgsqlDataSource>());
 
 app.MapPost("/prices", ExecuteAsync);
-app.MapGet("/prices/{productId:long}", FindAsync);
+app.MapGet("/prices/{productId:int}", FindAsync);
+app.MapPost("/prices/query", FindManyAsync);
 
 await app.RunAsync();
 
@@ -58,9 +61,12 @@ static async Task<IResult> ExecuteAsync(
     return Results.NoContent();
 }
 
+// [FromKeyedServices("price")] also works on constructor parameters and MVC Controller Action parameters.
+// Constructor DI: https://learn.microsoft.com/en-us/dotnet/core/extensions/dependency-injection/overview#keyed-services
+// Action DI: https://learn.microsoft.com/en-us/aspnet/core/mvc/controllers/dependency-injection?view=aspnetcore-8.0#action-injection-with-fromkeyedservices
 static async Task<IResult> FindAsync(
-    long productId,
-    IRequestBatcher<PriceQuery, PriceUpdate?> batcher,
+    int productId,
+    [FromKeyedServices("price")] IRequestBatcher<int, decimal?> batcher,
     CancellationToken cancellationToken)
 {
     if (productId <= 0)
@@ -68,8 +74,23 @@ static async Task<IResult> FindAsync(
         return Results.BadRequest("ProductId must be positive.");
     }
 
-    var result = await batcher.ExecuteAsync(new PriceQuery(productId), cancellationToken).ConfigureAwait(false);
+    var result = await batcher.ExecuteAsync(productId, cancellationToken).ConfigureAwait(false);
     return result is null ? Results.NotFound() : Results.Ok(result);
+}
+
+static async Task<IResult> FindManyAsync(
+    int[]? productIds,
+    [FromKeyedServices("price")] IRequestBatcher<int, decimal?> batcher,
+    CancellationToken cancellationToken)
+{
+    if (productIds is null || productIds.Any(static productId => productId <= 0))
+    {
+        return Results.BadRequest("Product IDs must be positive.");
+    }
+
+    // A list may span handler batches; results retain input order, duplicates, and null for missing IDs.
+    var results = await batcher.ExecuteAsync(productIds, cancellationToken).ConfigureAwait(false);
+    return Results.Ok(results);
 }
 
 static async Task InitializeDatabaseAsync(NpgsqlDataSource dataSource)
