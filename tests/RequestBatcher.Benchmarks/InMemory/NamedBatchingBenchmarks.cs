@@ -174,7 +174,7 @@ public class NamedBatchingBenchmarks
     private sealed class WaveHandler(WaveState state) : IRequestBatchHandler<int, int>
     {
         public async ValueTask HandleAsync(
-            IReadOnlyList<RequestBatchItem<int, int>> entries,
+            IReadOnlyList<RequestBatchEntry<int, int>> entries,
             CancellationToken cancellationToken = default)
         {
             await state.StartGate.WaitAsync().ConfigureAwait(false);

@@ -1,9 +1,11 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/RequestBatcher/RequestBatcher.csproj" />
+    <Project Path="src/RequestBatcher.Analyzers/RequestBatcher.Analyzers.csproj" />
   </Folder>
   <Folder Name="/samples/">
     <Project Path="samples/RequestBatcher.Deduplication/RequestBatcher.Deduplication.csproj" />
+    <Project Path="samples/RequestBatcher.Delegates/RequestBatcher.Delegates.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/RequestBatcher.Benchmarks/RequestBatcher.Benchmarks.csproj" />

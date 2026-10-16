@@ -340,7 +340,7 @@ public class ResponseCompletionBenchmarks
         public void ReleaseWave() => _gate.Release();
 
         public async ValueTask HandleAsync(
-            IReadOnlyList<RequestBatchItem<int, int>> entries,
+            IReadOnlyList<RequestBatchEntry<int, int>> entries,
             CancellationToken cancellationToken = default)
         {
             await _gate.WaitAsync().ConfigureAwait(false);
@@ -400,7 +400,7 @@ public class ResponseCompletionBenchmarks
         public void ReleaseBlocker() => Volatile.Read(ref _releaseBlocker).TrySetResult();
 
         public async ValueTask HandleAsync(
-            IReadOnlyList<RequestBatchItem<BlockedRequest, int>> entries,
+            IReadOnlyList<RequestBatchEntry<BlockedRequest, int>> entries,
             CancellationToken cancellationToken = default)
         {
             foreach (var entry in entries)

@@ -127,7 +127,7 @@ public sealed class UnkeyedPartitionTests
     }
 
     private static ServiceProvider CreateResponseProvider(
-        Func<IReadOnlyList<RequestBatchItem<int, string>>, CancellationToken, ValueTask> handler,
+        Func<IReadOnlyList<RequestBatchEntry<int, string>>, CancellationToken, ValueTask> handler,
         Action<RequestBatchOptions<int>> configure)
     {
         var services = new ServiceCollection();
@@ -150,11 +150,11 @@ public sealed class UnkeyedPartitionTests
     }
 
     private sealed class ResponseHandler(
-        Func<IReadOnlyList<RequestBatchItem<int, string>>, CancellationToken, ValueTask> handler)
+        Func<IReadOnlyList<RequestBatchEntry<int, string>>, CancellationToken, ValueTask> handler)
         : IRequestBatchHandler<int, string>
     {
         public ValueTask HandleAsync(
-            IReadOnlyList<RequestBatchItem<int, string>> entries,
+            IReadOnlyList<RequestBatchEntry<int, string>> entries,
             CancellationToken cancellationToken = default) =>
             handler(entries, cancellationToken);
     }

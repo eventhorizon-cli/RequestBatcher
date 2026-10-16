@@ -131,7 +131,7 @@ var options = serviceProvider.GetRequiredService<IOptionsMonitor<RequestBatchOpt
 public sealed class PriceByIdHandler(IPriceStore store) : IRequestBatchHandler<int, decimal?>
 {
     public async ValueTask HandleAsync(
-        IReadOnlyList<RequestBatchItem<int, decimal?>> entries,
+        IReadOnlyList<RequestBatchEntry<int, decimal?>> entries,
         CancellationToken cancellationToken = default)
     {
         var ids = entries.Select(entry => (long)entry.Request).Distinct().ToArray();
@@ -197,6 +197,74 @@ public sealed class PricesController : ControllerBase
 可运行的 [PostgreSQL 示例](samples/RequestBatcher.Deduplication) 使用名为 `"price"` 的 `int` 请求和 `decimal?`
 响应，查询时将 ID 扩展为 PostgreSQL `bigint`，并提供 `POST /prices/query` 接收 JSON `int[]`。
 
+## 委托 Handler
+
+委托 Handler 适合逻辑较简单的批处理场景，例如批量查询和结果回填。在 `ExecuteAsync` 调用处编写 static lambda，
+可以将请求提交与处理逻辑放在一起，便于结合调用上下文阅读和修改。处理逻辑较复杂，或需要多处复用、独立组织
+测试时，更适合使用单独的 `IRequestBatchHandler` 类。
+
+使用 `AddDelegateRequestBatcher` 注册请求和响应类型及批处理选项，在执行时提供委托：
+注册阶段只声明请求、响应类型和配置，不需要 Handler 类型：
+
+```csharp
+using Microsoft.Extensions.DependencyInjection;
+using RequestBatcher;
+
+services.AddKeyedScoped<IPriceStore, PriceStore>("catalog");
+services.AddDelegateRequestBatcher<int, decimal?>(
+    batcherName: "price",
+    configure: options =>
+    {
+        options.BatchSize = 100;
+        options.MaxConcurrency = 4;
+    });
+
+var batcher = serviceProvider.GetRequiredKeyedService<IRequestBatcher<int, decimal?>>("price");
+var prices = await batcher.ExecuteAsync(
+    new[] { 101, 102, 101 },
+    static async ValueTask (
+        IReadOnlyList<RequestBatchEntry<int, decimal?>> entries,
+        [FromKeyedServices("catalog")] IPriceStore store,
+        CancellationToken batchCancellation) =>
+    {
+        var ids = entries.Select(entry => (long)entry.Request).Distinct().ToArray();
+        var rows = await store.FindAsync(ids, batchCancellation).ConfigureAwait(false);
+        var pricesById = rows.ToDictionary(row => row.ProductId);
+        entries.SetResponses(id => pricesById.GetValueOrDefault(id)?.Price);
+    });
+```
+
+这里沿用下方带返回值示例中的 `IPriceStore`，请注册自己的实现（示例中为 `PriceStore`）。不传 `batcherName`
+即可注册默认管线。无返回值场景使用 `AddDelegateRequestBatcher<TRequest>()`，lambda 首参数是
+`IReadOnlyList<TRequest>`。两种模式都通过 `ExecuteAsync` 扩展方法支持单条和显式列表提交，原有接口不增加成员。
+同一请求类型与名称只能选择一种注册模式：委托模式每次提交都传 handler；原有 Handler 类型注册继续使用原有重载。
+
+首次有效调用为该管线绑定唯一委托，同一个 static lambda 调用点的后续调用复用绑定。传入不同委托会在入队前报错；
+不同位置的 lambda 即使内容相同，也属于不同 Handler，应使用不同的 `batcherName`。并发首次调用只会绑定一次。
+委托由管线以单例持有，服务参数在每个实际执行批次中注入，不捕获调用方的请求作用域。
+
+首参数必须是对应的批次列表类型。其余参数默认从 DI 解析必需服务，`[FromKeyedServices(key)]` 选择 keyed 服务；
+必须显式指定 key，不支持继承 key。
+Web 应用也可以标注 `[FromServices]`，普通服务按约定注入，因此此标注可省略。可以声明一个批次生命周期的
+`CancellationToken` 参数（不写默认参数值）。支持返回 `void`、`Task` 或 `ValueTask`，拒绝 `async void`
+和带返回值的 Task/ValueTask。每个响应 entry 仍需设置结果；列表即使被拆成多批，也会保留输入顺序、重复和缺失项。
+
+委托 Handler 和绑定的委托始终是每条管线独立的单例，因此注册不提供 `ServiceLifetime` 参数。注入服务仍遵循各自的
+DI 生命周期：Singleton 在容器内共享，Scoped 在同一批次内共享，Transient 每个参数分别解析。单例 Handler 不缓存
+解析后的服务实例。原有类型 Handler 注册继续遵循显式指定的生命周期。
+
+有服务参数时，每批创建并异步释放独立 DI scope，释放完成后调用方才收到完成结果；没有服务参数则不创建 scope。
+签名检查和强类型调用器编译只发生在首次绑定，后续执行使用缓存，不进行反射调用、`DynamicInvoke` 或参数数组构造。
+自动绑定依赖动态代码，不支持 NativeAOT 或裁剪。
+
+包内附带默认级别为 Error 的 Analyzer **`RB0001`**，要求 handler 参数直接传入 **static lambda**；
+委托变量和方法组不符合此规则，原有 Handler 调用不受影响。使用方可以禁用 Analyzer；运行时不能可靠判断源码是否写了
+`static`。详见[委托 Handler 设计](docs/delegate-handlers-design.md)和[性能对比](docs/evaluations/delegate-handlers/README.md)。
+
+[独立的委托版 PostgreSQL 示例](samples/RequestBatcher.Delegates)使用委托 Handler 完成价格写入和
+`POST /prices/query` 列表查询，每个 static lambda 都从批次 scope 注入 keyed scoped `PriceStore`。
+[原有示例](samples/RequestBatcher.Deduplication)继续单独展示 Handler 类的写法。
+
 ## 适用场景
 
 当请求彼此独立、可以接受在内存中短暂排队（不会等待凑满 `BatchSize`，只需等待全局执行名额可用），且下游一次
@@ -223,6 +291,11 @@ RequestBatcher 既不是持久化后台队列，也不是事务协调器：
   请求，因此单个调用方的 `CancellationToken` 不会传给 Handler，也不能取消这个共享的 Handler 调用。
 
 ## API 概览
+
+响应包装类型统一命名为 `RequestBatchEntry<TRequest, TResponse>`。升级已有代码时，将
+`RequestBatchItem<TRequest, TResponse>` 和 `RequestBatchItemExtensions` 分别改为
+`RequestBatchEntry<TRequest, TResponse>` 和 `RequestBatchEntryExtensions`，并重新编译所有调用方。
+这是源码与二进制不兼容的变更；响应赋值与完成行为保持一致。
 
 ### 无返回值 API
 
@@ -271,7 +344,7 @@ public interface IRequestBatchHandler<TRequest, TResponse>
 {
     // 处理一个批次，并为每个条目设置且仅设置一个结果。
     ValueTask HandleAsync(
-        IReadOnlyList<RequestBatchItem<TRequest, TResponse>> entries,
+        IReadOnlyList<RequestBatchEntry<TRequest, TResponse>> entries,
         CancellationToken cancellationToken = default);
 }
 ```
@@ -337,7 +410,7 @@ public sealed class OrderService(IRequestBatcher<OrderWriteRequest> batcher)
 ## 带返回值批处理
 
 如果每个请求都需要返回一个值，请使用带返回值的 API。Handler 接收由
-`RequestBatchItem<TRequest, TResponse>` 包装的条目列表；每个条目都包含原始请求和返回值槽位，其中 `entry.Request`
+`RequestBatchEntry<TRequest, TResponse>` 包装的条目列表；每个条目都包含原始请求和返回值槽位，其中 `entry.Request`
 是原始的 `TRequest`。下面的示例使用标准 LINQ
 `Distinct`，先在当前处理批次内合并重复的商品 ID，再查询存储层：
 
@@ -363,7 +436,7 @@ public sealed class PriceQueryHandler(IPriceStore store)
     : IRequestBatchHandler<PriceQuery, PriceQuote?>
 {
     public async ValueTask HandleAsync(
-        IReadOnlyList<RequestBatchItem<PriceQuery, PriceQuote?>> entries,
+        IReadOnlyList<RequestBatchEntry<PriceQuery, PriceQuote?>> entries,
         CancellationToken cancellationToken = default)
     {
         var keys = entries
@@ -472,7 +545,7 @@ Partition 路由拆成多个处理批次。
 ## 单次提交与显式批量提交
 
 本文中的**提交**是指调用方执行一次 `ExecuteAsync`；**处理批次**是指一次 `HandleAsync` 收到的
-`IReadOnlyList<TRequest>` 或 `IReadOnlyList<RequestBatchItem<TRequest, TResponse>>`。
+`IReadOnlyList<TRequest>` 或 `IReadOnlyList<RequestBatchEntry<TRequest, TResponse>>`。
 
 **提交和处理批次不是同一个边界。**
 
@@ -762,6 +835,12 @@ Handler 会在分发调用链上执行，直到完成或遇到尚未完成的异
 例如先写入商品 `101` 的价格 `17.90`，并假设 `102` 和 `999` 不存在，提交 `[101, 102, 101, 999]` 会返回
 `[17.90, null, 17.90, null]`。列表提交仍可能拆成多个 Handler 批次，去重只发生在每个批次内；详见
 [示例 README](samples/RequestBatcher.Deduplication/README.md)中的 Docker 启动和 curl 步骤。
+
+[独立的委托版 PostgreSQL 示例](samples/RequestBatcher.Delegates)通过 `AddDelegateRequestBatcher` 注册价格写入与
+查询，在 `POST /prices` 和 `POST /prices/query` 的调用处直接传入 static lambda。查询管线名为 `"price"`，接受
+`int` ID、返回 `decimal?`；委托从每个批次的 scope 注入 keyed scoped `PriceStore`，注册时不指定 Handler 生命周期。
+原示例继续展示 Handler 类的写法。委托版使用独立的 HTTP 和数据库端口，启动及 curl 步骤见其
+[README](samples/RequestBatcher.Delegates/README.md)。
 
 ## 许可证
 

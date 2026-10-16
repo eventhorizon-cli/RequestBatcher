@@ -565,7 +565,7 @@ public sealed class NamedRequestBatcherTests
         : IRequestBatchHandler<int, int>
     {
         public ValueTask HandleAsync(
-            IReadOnlyList<RequestBatchItem<int, int>> entries,
+            IReadOnlyList<RequestBatchEntry<int, int>> entries,
             CancellationToken cancellationToken = default)
         {
             foreach (var entry in entries)
@@ -582,7 +582,7 @@ public sealed class NamedRequestBatcherTests
         : IRequestBatchHandler<int, int>
     {
         public ValueTask HandleAsync(
-            IReadOnlyList<RequestBatchItem<int, int>> entries,
+            IReadOnlyList<RequestBatchEntry<int, int>> entries,
             CancellationToken cancellationToken = default)
         {
             foreach (var entry in entries)
@@ -598,7 +598,7 @@ public sealed class NamedRequestBatcherTests
     private sealed class RecordingStringResponseHandler : IRequestBatchHandler<int, string>
     {
         public ValueTask HandleAsync(
-            IReadOnlyList<RequestBatchItem<int, string>> entries,
+            IReadOnlyList<RequestBatchEntry<int, string>> entries,
             CancellationToken cancellationToken = default)
         {
             foreach (var entry in entries)
@@ -616,7 +616,7 @@ public sealed class NamedRequestBatcherTests
         private readonly Guid _id = Guid.NewGuid();
 
         public ValueTask HandleAsync(
-            IReadOnlyList<RequestBatchItem<int, string>> entries,
+            IReadOnlyList<RequestBatchEntry<int, string>> entries,
             CancellationToken cancellationToken = default)
         {
             probe.HandlerIds.Enqueue(_id);

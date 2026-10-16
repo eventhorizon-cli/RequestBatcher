@@ -3,7 +3,7 @@ namespace RequestBatcher;
 /// <summary>
 /// Provides response assignment helpers for handler batch entries.
 /// </summary>
-public static class RequestBatchItemExtensions
+public static class RequestBatchEntryExtensions
 {
     /// <summary>
     /// Sets one response on every request entry from an ordered response sequence.
@@ -20,7 +20,7 @@ public static class RequestBatchItemExtensions
     /// </remarks>
     /// <exception cref="ArgumentException">The response count does not match the request count.</exception>
     public static void SetResponses<TRequest, TResponse>(
-        this IReadOnlyList<RequestBatchItem<TRequest, TResponse>> entries,
+        this IReadOnlyList<RequestBatchEntry<TRequest, TResponse>> entries,
         IEnumerable<TResponse> responses)
     {
         ArgumentNullException.ThrowIfNull(entries);
@@ -53,7 +53,7 @@ public static class RequestBatchItemExtensions
     /// failure cannot leave a partially assigned batch.
     /// </remarks>
     public static void SetResponses<TRequest, TResponse>(
-        this IReadOnlyList<RequestBatchItem<TRequest, TResponse>> entries,
+        this IReadOnlyList<RequestBatchEntry<TRequest, TResponse>> entries,
         Func<TRequest, TResponse> responseFactory)
     {
         ArgumentNullException.ThrowIfNull(entries);
@@ -69,7 +69,7 @@ public static class RequestBatchItemExtensions
     }
 
     private static void EnsureResponsesAreUnset<TRequest, TResponse>(
-        IReadOnlyList<RequestBatchItem<TRequest, TResponse>> entries)
+        IReadOnlyList<RequestBatchEntry<TRequest, TResponse>> entries)
     {
         for (var index = 0; index < entries.Count; index++)
         {

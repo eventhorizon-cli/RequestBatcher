@@ -411,7 +411,7 @@ public sealed class ResponseCompletionTests
     }
 
     private static ServiceProvider CreateProvider(
-        Func<IReadOnlyList<RequestBatchItem<int, string>>, CancellationToken, ValueTask> handler,
+        Func<IReadOnlyList<RequestBatchEntry<int, string>>, CancellationToken, ValueTask> handler,
         Action<RequestBatchOptions<int>>? configure = null)
     {
         var services = new ServiceCollection();
@@ -423,7 +423,7 @@ public sealed class ResponseCompletionTests
 
     private static ServiceProvider CreateScopedProvider(
         ResponseHandlerProbe probe,
-        Func<IReadOnlyList<RequestBatchItem<int, string>>, CancellationToken, ValueTask> handler)
+        Func<IReadOnlyList<RequestBatchEntry<int, string>>, CancellationToken, ValueTask> handler)
     {
         var services = new ServiceCollection();
         services.AddSingleton(probe);
@@ -448,22 +448,22 @@ public sealed class ResponseCompletionTests
         new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private sealed class DelegateResponseHandler(
-        Func<IReadOnlyList<RequestBatchItem<int, string>>, CancellationToken, ValueTask> handler)
+        Func<IReadOnlyList<RequestBatchEntry<int, string>>, CancellationToken, ValueTask> handler)
         : IRequestBatchHandler<int, string>
     {
         public ValueTask HandleAsync(
-            IReadOnlyList<RequestBatchItem<int, string>> entries,
+            IReadOnlyList<RequestBatchEntry<int, string>> entries,
             CancellationToken cancellationToken = default) =>
             handler(entries, cancellationToken);
     }
 
     private sealed class AsyncScopedResponseHandler(
         ResponseHandlerProbe probe,
-        Func<IReadOnlyList<RequestBatchItem<int, string>>, CancellationToken, ValueTask> handler)
+        Func<IReadOnlyList<RequestBatchEntry<int, string>>, CancellationToken, ValueTask> handler)
         : IRequestBatchHandler<int, string>, IAsyncDisposable
     {
         public ValueTask HandleAsync(
-            IReadOnlyList<RequestBatchItem<int, string>> entries,
+            IReadOnlyList<RequestBatchEntry<int, string>> entries,
             CancellationToken cancellationToken = default) =>
             handler(entries, cancellationToken);
 
@@ -483,7 +483,7 @@ public sealed class ResponseCompletionTests
     private sealed class ResponseValueHandler : IRequestBatchHandler<int, ResponseValue>
     {
         public ValueTask HandleAsync(
-            IReadOnlyList<RequestBatchItem<int, ResponseValue>> entries,
+            IReadOnlyList<RequestBatchEntry<int, ResponseValue>> entries,
             CancellationToken cancellationToken = default)
         {
             entries[0].SetResponse(new ResponseValue(entries[0].Request));

@@ -63,7 +63,7 @@ public interface IRequestBatchHandler<TRequest>
 public interface IRequestBatchHandler<TRequest, TResponse>
 {
     ValueTask HandleAsync(
-        IReadOnlyList<RequestBatchItem<TRequest, TResponse>> entries,
+        IReadOnlyList<RequestBatchEntry<TRequest, TResponse>> entries,
         CancellationToken cancellationToken = default);
 }
 ```
@@ -107,13 +107,13 @@ calls retain the same contract.
 
 ## Response Items
 
-`RequestBatchItem<TRequest, TResponse>` is the physical request type carried by
+`RequestBatchEntry<TRequest, TResponse>` is the physical request type carried by
 the response pipeline. It exposes the submitted `Request` and one response
 slot.
 
 Variables and parameters use `entry` / `entries` for these wrappers and
 `request` / `requests` for the original `TRequest` values. The public wrapper type
-remains `RequestBatchItem<TRequest, TResponse>`. This naming convention does not
+remains `RequestBatchEntry<TRequest, TResponse>`. This naming convention does not
 change routing, response assignment, or the completion flow described below.
 
 The handler sets a response with `SetResponse(TResponse)`. The response slot
@@ -186,17 +186,17 @@ IRequestBatcher<TRequest, TResponse>
 ResponseRequestBatcher<TRequest, TResponse>
         |
         v
-IRequestBatcher<RequestBatchItem<TRequest, TResponse>>
+IRequestBatcher<RequestBatchEntry<TRequest, TResponse>>
         |
         v
-RequestBatchCoordinator<RequestBatchItem<TRequest, TResponse>>
+RequestBatchCoordinator<RequestBatchEntry<TRequest, TResponse>>
         |
         +--> PendingRequestProducer
         +--> BufferQueue
         +--> BatchDispatchLoop
         |
         v
-IRequestBatchHandler<RequestBatchItem<TRequest, TResponse>>
+IRequestBatchHandler<RequestBatchEntry<TRequest, TResponse>>
         |
         v
 ResponseRequestBatchHandler<TRequest, TResponse>
@@ -219,11 +219,11 @@ routing splits items across partitions or handler invocations.
 The configuration callback produces one validated
 `RequestBatchOptions<TRequest>` snapshot. That snapshot is registered for
 application inspection and projected to
-`RequestBatchOptions<RequestBatchItem<TRequest, TResponse>>` for the internal
+`RequestBatchOptions<RequestBatchEntry<TRequest, TResponse>>` for the internal
 queue.
 
 `UsePartitionKey(selector, partitionCount)` always receives the original
-`TRequest`. The projected queue selector reads `RequestBatchItem.Request`
+`TRequest`. The projected queue selector reads `RequestBatchEntry.Request`
 before calculating the key and preserves the configured partition count. Equal
 keys route to the same queue partition but do not guarantee serialized handler
 execution or ordering. The partition count must be greater than one and is

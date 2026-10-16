@@ -15,7 +15,7 @@ internal sealed class PriceQueryHandler(NpgsqlDataSource dataSource)
         """;
 
     public async ValueTask HandleAsync(
-        IReadOnlyList<RequestBatchItem<int, decimal?>> entries,
+        IReadOnlyList<RequestBatchEntry<int, decimal?>> entries,
         CancellationToken cancellationToken = default)
     {
         // Duplicate callers in this handler batch share one database lookup for their product ID.
