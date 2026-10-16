@@ -8,13 +8,16 @@ window. `BatchSize` is only a maximum, while `MaxConcurrency` limits concurrent 
 This is a small RequestBatcher example. Concurrent `POST /prices` calls are collected into handler batches. The write
 handler keeps the highest version for each product and writes its batch with one Dapper PostgreSQL upsert.
 
-Concurrent `GET /prices/{productId}` calls are also batched. The query handler deduplicates product IDs, performs one
-PostgreSQL query for the distinct IDs, and distributes each returned price to all matching callers. The query handler
-uses LINQ `Distinct()` on product IDs and then calls
-`entries.SetResponses(request => pricesByProductId.GetValueOrDefault(request.ProductId))`.
+Concurrent `GET /prices/{productId}` calls are also batched through the named `price` pipeline. The query handler
+accepts primitive `int` product IDs and returns `decimal?` prices. It widens distinct IDs to `long[]` for the PostgreSQL
+`bigint` column, then distributes each returned price to all matching callers. `POST /prices/query` submits a JSON
+`int[]` to the same pipeline and returns nullable prices in input order.
+The handler uses LINQ `Distinct()` and then calls
+`entries.SetResponses(id => pricesById.GetValueOrDefault(id)?.Price)`.
 The factory receives the original request once per entry, including duplicates; database result order does not matter
-and missing products return null. Reference-type results are shared, not cloned. Deduplication applies within each
-handler batch; separate batches may query the same product again.
+and missing products return null. Deduplication applies within each handler batch; separate batches may query the same
+product again. An explicit list can be split across multiple handler batches, so one `ExecuteAsync` list submission is
+not one handler invocation.
 
 If query deduplication is unnecessary, remove `Distinct()` and keep the same response factory. The query handler also
 shows two commented assignment alternatives: `entry.SetResponse(response)` for individual entries, or
@@ -22,13 +25,47 @@ shows two commented assignment alternatives: `entry.SetResponse(response)` for i
 The ordered-sequence overload requires exactly one response per original entry in input order, including duplicates
 and missing products; do not pass the database rows directly to it.
 
-`UsePartitionKey(update => update.ProductId, partitionCount: 8)` keeps equal product IDs in one of eight keyed processing
-partitions while allowing
-different keys to progress independently. Without a partition key, RequestBatcher uses one shared partition. The database
-only updates a row when its incoming version is newer, so stale updates are also rejected across handler batches; equal-key
-requests can still be handled by separate concurrent batches.
+`UsePartitionKey(update => update.ProductId, partitionCount: 8)` keeps equal update IDs in one of eight keyed processing
+partitions while allowing different IDs to progress independently. The query pipeline uses the same routing idea for its
+primitive IDs. Without a partition key, RequestBatcher uses one shared partition. The database only updates a row when
+its incoming version is newer, so stale updates are also rejected across handler batches; equal-key requests can still
+be handled by separate concurrent batches. Partition routing does not select a named batcher or guarantee handler order.
 Updates with the same product ID and version should carry the same price; the sample does not resolve conflicting
 prices at an equal version.
+
+The query handler is registered as `AddRequestBatcher<int, decimal?, PriceQueryHandler>(batcherName: "price", ...)`.
+The name selects the complete query pipeline, including its handler, capacity, and partitioning. Different names can
+register independent pipelines for the same primitive request type, and the write pipeline remains the unnamed,
+structured `PriceUpdate` pipeline. The public API can be used like this:
+
+```csharp
+using Microsoft.Extensions.DependencyInjection;
+using RequestBatcher;
+
+services.AddRequestBatcher<int, decimal?, PriceQueryHandler>(
+    batcherName: "price",
+    handlerLifetime: ServiceLifetime.Scoped,
+    configure: options =>
+    {
+        options.BatchSize = 100;
+        options.MaxConcurrency = 4;
+        options.UsePartitionKey(id => id, partitionCount: 8);
+    });
+
+var batcher = serviceProvider
+    .GetRequiredKeyedService<IRequestBatcher<int, decimal?>>("price");
+var prices = await batcher.ExecuteAsync(new[] { 101, 102, 101 });
+```
+
+Inject that same named pipeline with `[FromKeyedServices("price")] IRequestBatcher<int, decimal?>` on a constructor,
+Controller Action, or Minimal API handler parameter. The [root README](../../README.md#named-batchers-and-primitive-requests)
+shows complete constructor and Controller Action examples; this sample uses Minimal API handler parameters in `Program.cs`.
+See Microsoft's official documentation for
+[constructor injection with keyed services](https://learn.microsoft.com/en-us/dotnet/core/extensions/dependency-injection/overview#keyed-services)
+and [Controller Action injection](https://learn.microsoft.com/en-us/aspnet/core/mvc/controllers/dependency-injection?view=aspnetcore-8.0#action-injection-with-fromkeyedservices).
+A single GET submits one `int` and returns its price,
+or `404` when the price is missing. The batch POST returns one nullable `decimal` per input ID, preserving duplicates
+and missing IDs.
 
 ## Run
 
@@ -63,5 +100,23 @@ Read the persisted price:
 curl http://localhost:5080/prices/101
 ```
 
-The API returns `204 No Content` only after the applicable handler batch has finished. Database failures propagate to
-the HTTP request as a server error; RequestBatcher does not retry them automatically.
+On a fresh database, the previous update returns `17.90`. A missing product returns `404`:
+
+```bash
+curl --include http://localhost:5080/prices/102
+```
+
+Read several prices with one batch submission. Results preserve input order, including duplicate and missing IDs:
+
+```bash
+curl --request POST http://localhost:5080/prices/query \
+  --header "Content-Type: application/json" \
+  --data '[101,102,101,999]'
+```
+
+With only product `101` seeded, the response is `[17.90,null,17.90,null]`: the duplicate `101` remains duplicated,
+and both missing IDs are represented by `null`. Product IDs must be positive. The API returns `204 No Content` for a
+successful update and waits for the applicable handler batch before completing each query request.
+
+Database failures propagate to the HTTP request as a server error; RequestBatcher does not retry them automatically.
+RequestBatcher is in-process, so pending requests are not recovered after a process failure.

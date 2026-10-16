@@ -100,6 +100,103 @@ var quote = await batcher.ExecuteAsync(new PriceQuery(ProductId: 101));
 `PriceQuery`、`PriceQuote`、`PriceQueryHandler` 以及 `IPriceStore` 依赖。应用服务中推荐通过构造函数注入
 `IRequestBatcher<PriceQuery, PriceQuote?>`。
 
+## 命名批处理与基础类型请求
+
+请求可以直接使用商品 ID。多种操作使用相同请求类型时，通过 `batcherName` 重载区分，例如 `"price"` 和
+`"stock"` 都可以使用 `int`，各自拥有独立的 Handler、配置、队列容量和并发限制。命名注册可以与原有默认注册共存。
+
+```csharp
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using RequestBatcher;
+
+services.AddRequestBatcher<int, decimal?, PriceByIdHandler>(
+    batcherName: "price",
+    handlerLifetime: ServiceLifetime.Scoped,
+    configure: options =>
+    {
+        options.BatchSize = 100;
+        options.MaxConcurrency = 4;
+        options.UsePartitionKey(id => id, partitionCount: 8);
+    });
+
+var batcher = serviceProvider.GetRequiredKeyedService<IRequestBatcher<int, decimal?>>("price");
+var prices = await batcher.ExecuteAsync(new[] { 101, 102, 101 });
+var options = serviceProvider.GetRequiredService<IOptionsMonitor<RequestBatchOptions<int>>>().Get("price");
+```
+
+下面的 Handler 复用带返回值示例中的 `IPriceStore`，其实现仍需要在应用容器中注册：
+
+```csharp
+public sealed class PriceByIdHandler(IPriceStore store) : IRequestBatchHandler<int, decimal?>
+{
+    public async ValueTask HandleAsync(
+        IReadOnlyList<RequestBatchItem<int, decimal?>> entries,
+        CancellationToken cancellationToken = default)
+    {
+        var ids = entries.Select(entry => (long)entry.Request).Distinct().ToArray();
+        var prices = await store.FindAsync(ids, cancellationToken).ConfigureAwait(false);
+        var pricesById = prices.ToDictionary(price => price.ProductId);
+        entries.SetResponses(id => pricesById.GetValueOrDefault(id)?.Price);
+    }
+}
+```
+
+结果按输入顺序返回，重复 ID 各自保留一个结果，未找到的商品返回 `null`。输入列表仍可能被拆成多个 Handler 批次。
+构造函数注入或 ASP.NET Core Controller Action 参数注入时，都可以在 Batcher 参数上标注
+`[FromKeyedServices("price")]`。参见 [.NET 依赖注入中的 keyed services](https://learn.microsoft.com/en-us/dotnet/core/extensions/dependency-injection/overview#keyed-services)
+和 [使用 `FromKeyedServices` 注入 Action 参数](https://learn.microsoft.com/en-us/aspnet/core/mvc/controllers/dependency-injection?view=aspnetcore-8.0#action-injection-with-fromkeyedservices)。
+
+在应用服务构造函数中注入命名 Batcher，并通过 `services.AddScoped<PriceLookup>()` 注册该服务。
+属性中的 `"price"` 与注册 Batcher 时使用的名称一致：
+
+```csharp
+using Microsoft.Extensions.DependencyInjection;
+using RequestBatcher;
+
+public sealed class PriceLookup(
+    [FromKeyedServices("price")] IRequestBatcher<int, decimal?> batcher)
+{
+    public Task<IReadOnlyList<decimal?>> FindAsync(
+        IEnumerable<int> productIds,
+        CancellationToken cancellationToken = default) =>
+        batcher.ExecuteAsync(productIds, cancellationToken);
+}
+```
+
+在 MVC Controller Action 参数中也可以使用同一个属性：
+
+```csharp
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
+using RequestBatcher;
+
+[ApiController]
+[Route("api/prices")]
+public sealed class PricesController : ControllerBase
+{
+    [HttpPost("query")]
+    public Task<IReadOnlyList<decimal?>> FindAsync(
+        [FromBody] int[] productIds,
+        [FromKeyedServices("price")] IRequestBatcher<int, decimal?> batcher,
+        CancellationToken cancellationToken) =>
+        batcher.ExecuteAsync(productIds, cancellationToken);
+}
+```
+
+使用 MVC Controller 时注册 `AddControllers()` 并调用 `MapControllers()`。当前 PostgreSQL 示例使用 Minimal API，
+同样在 endpoint 参数上标注 `[FromKeyedServices("price")]`。无返回值重载也支持 `batcherName`。
+
+名称区分大小写，不能为 `null`、空字符串或纯空白。同一请求类型与名称只能注册一条管线，包括不同返回类型的情况。
+默认服务继续使用原有不带名称的重载。配置在注册时确定，可以通过 named options 查看，不支持运行时重配队列。
+`UsePartitionKey` 仅负责选定 Batcher 内部的请求路由，不负责选择 Batcher，也不保证 Handler 批次串行执行。
+
+[命名与默认注册的性能对比](docs/evaluations/named-batching/README.md)保持请求、响应类型、Handler 和批处理配置一致，
+分别测量 Singleton、Scoped Handler 下的逐条提交与显式批量提交。
+
+可运行的 [PostgreSQL 示例](samples/RequestBatcher.Deduplication) 使用名为 `"price"` 的 `int` 请求和 `decimal?`
+响应，查询时将 ID 扩展为 PostgreSQL `bigint`，并提供 `POST /prices/query` 接收 JSON `int[]`。
+
 ## 适用场景
 
 当请求彼此独立、可以接受在内存中短暂排队（不会等待凑满 `BatchSize`，只需等待全局执行名额可用），且下游一次
@@ -316,7 +413,8 @@ public sealed class PriceService(IRequestBatcher<PriceQuery, PriceQuote?> priceB
 
 先在应用现有的服务集合中注册应用自己的 `IPriceStore` 实现（示例中写作 `PriceStore`）和 Batcher，再在应用服务中注入
 `IRequestBatcher<PriceQuery, PriceQuote?>`。可运行的 [PostgreSQL Web API 示例](samples/RequestBatcher.Deduplication)
-直接用 Dapper 和 PostgreSQL 实现同样的查询流程：
+则使用 Dapper 和 PostgreSQL 实现了一个独立的命名价格查询管线：它接收 `int` ID，返回 `decimal?`，并将 ID
+扩展为 `long` 查询 PostgreSQL 的 `bigint` 列。上面的 `PriceQuery` 示例仍是通用的结构化请求示例：
 
 ```csharp
 using Microsoft.Extensions.DependencyInjection;
@@ -570,9 +668,10 @@ Partition 路由只决定请求进入哪个 Partition：它不会强制同一键
 按 `ProductId` 路由会让相同商品的请求进入同一 Partition，但不保证进入同一批次。
 **去重只作用于当前 Handler 批次**；不同批次仍可能查询同一个商品，这不是跨批次缓存。
 
-可运行的 [PostgreSQL Web API 示例](samples/RequestBatcher.Deduplication)展示了完整流程：
-`PriceQueryHandler` 使用 `Distinct()` 去重商品 ID，查询后建立商品 ID 到结果的字典，再通过
-`entries.SetResponses(request => pricesByProductId.GetValueOrDefault(request.ProductId))` 回填结果；商品不存在时返回 `null`。
+可运行的 [PostgreSQL Web API 示例](samples/RequestBatcher.Deduplication)使用命名的 `int` 价格查询管线展示了完整流程：
+`PriceQueryHandler` 将当前批次的 `int` ID 扩展为 `long`，使用 `Distinct()` 去重并查询 PostgreSQL，建立商品 ID 到
+结果的字典，再通过 `entries.SetResponses(id => pricesById.GetValueOrDefault(id)?.Price)` 回填结果；商品不存在时返回
+`null`。去重只发生在当前 Handler 批次内。
 
 ## 路由规则与调度
 
@@ -652,7 +751,17 @@ Handler 会在分发调用链上执行，直到完成或遇到尚未完成的异
 
 ## 示例应用
 
-- [PostgreSQL Web API 示例](samples/RequestBatcher.Deduplication)
+[PostgreSQL Web API 示例](samples/RequestBatcher.Deduplication)包含三个价格操作：
+
+- `POST /prices` 使用未命名的 `IRequestBatcher<PriceUpdate>`，提交完整的结构化 `PriceUpdate` 并写入价格。
+- `GET /prices/{productId}` 在 endpoint 参数上使用 `[FromKeyedServices("price")]` 注入命名的
+  `IRequestBatcher<int, decimal?>`，返回单个价格；商品不存在时返回 `404`。
+- `POST /prices/query` 使用同一个命名 Batcher 接收 JSON `int[]`，按输入顺序返回 nullable 价格，保留重复 ID，缺失
+  商品返回 `null`。
+
+例如先写入商品 `101` 的价格 `17.90`，并假设 `102` 和 `999` 不存在，提交 `[101, 102, 101, 999]` 会返回
+`[17.90, null, 17.90, null]`。列表提交仍可能拆成多个 Handler 批次，去重只发生在每个批次内；详见
+[示例 README](samples/RequestBatcher.Deduplication/README.md)中的 Docker 启动和 curl 步骤。
 
 ## 许可证
 

@@ -45,14 +45,15 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
         IBufferQueue bufferQueue,
         RequestBatchHandler<TRequest> handler,
         IOptions<RequestBatchOptions<TRequest>> options,
-        ILogger<RequestBatchCoordinator<TRequest>> logger)
+        ILogger<RequestBatchCoordinator<TRequest>> logger,
+        string topicName = TopicName)
     {
         _logger = logger;
         _options = options.Value.ValidateAndClone();
         _onRequestFinished = OnRequestFinished;
 
         _producer = new PendingRequestProducer<TRequest>(
-            bufferQueue.GetProducer<PendingBatchRequest<TRequest>>(TopicName),
+            bufferQueue.GetProducer<PendingBatchRequest<TRequest>>(topicName),
             _logger,
             _requestTypeName,
             _options.MaxPendingRequests,
@@ -66,7 +67,7 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
         var consumer = bufferQueue.CreatePullConsumers<PendingBatchRequest<TRequest>>(
             new BufferPullConsumerOptions
             {
-                TopicName = TopicName,
+                TopicName = topicName,
                 GroupName = ConsumerGroupName,
                 BatchSize = _options.BatchSize,
                 AutoCommit = true,
