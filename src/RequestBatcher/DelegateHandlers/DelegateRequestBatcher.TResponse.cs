@@ -44,5 +44,5 @@ internal sealed class DelegateRequestBatcher<TRequest, TResponse>(
     }
 
     private static InvalidOperationException MissingHandler() => new(
-        "This request batcher requires a delegate handler. Use the ExecuteAsync overload with a static lambda.");
+        "This request batcher requires a delegate handler. Use the ExecuteAsync overload with a handler delegate.");
 }

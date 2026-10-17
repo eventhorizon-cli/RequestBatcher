@@ -11,6 +11,9 @@ This sample uses RequestBatcher with two delegate pipelines and two HTTP endpoin
 - `POST /prices/query` reads primitive `int` product IDs through the named `price` response pipeline and returns
   nullable prices in input order.
 
+This sample names the primitive `int` pipeline `"price"` because simple request types may be reused by different
+business operations. Use a distinct `batcherName` for each such operation; omitting it selects the default pipeline.
+
 Both pipelines use the same in-process batching settings. `BatchSize` is a maximum, so an explicit list can be split
 across multiple handler batches. Deduplication applies only within the current handler batch. Partition routing keeps
 equal keys in the same partition but does not serialize separate batches or guarantee handler order.
@@ -52,6 +55,11 @@ services.AddDelegateRequestBatcher<int, decimal?>(
     });
 ```
 
+**Handlers must use static implementations without capturing locals or instance state.** Explicitly declare lambdas,
+anonymous methods and local functions `static`, or use ordinary or generic static method groups. Delegates can be
+passed through variables, fields, parameters, properties or factories; explicit construction and casts are supported.
+Receive services through injected parameters. The built-in analyzer checks known targets and signatures as described below.
+
 The write endpoint passes a direct static lambda to `ExecuteAsync`:
 
 ```csharp
@@ -90,9 +98,19 @@ var prices = await batcher.ExecuteAsync(
     cancellationToken);
 ```
 
-The first valid call binds the delegate for that pipeline. Later calls from the same static lambda call site reuse
-it; supplying a different delegate fails before admission. Keep one call site per pipeline, or use separate batcher
-names for different operations. The package's `RB0001` analyzer requires a directly supplied static lambda.
+The first valid call binds the delegate for that pipeline. Later calls with an equal delegate reuse it; supplying
+a different delegate fails before admission. Keep one equivalent delegate per pipeline, or use separate batcher
+names for different operations.
+
+**The built-in analyzer provides basic compile-time checks.** `RB0001` rejects known non-static targets; `RB0002`
+checks known batch and return types, parameter modifiers/defaults, and cancellation/keyed-service restrictions.
+Delegates from parameters, properties, factories or fields remain allowed when their target cannot be determined;
+callers must ensure that target is static. Runtime binding validates the actual signature, service binding and
+delegate identity, but cannot reliably distinguish static-lambda source from a non-capturing ordinary lambda.
+
+The handler may omit the batch-lifecycle `CancellationToken`; if present, it must declare exactly one without a default
+such as `= default`. This injected token is distinct from the optional caller `ExecuteAsync` `cancellationToken`.
+See the [delegate-handler design](../../docs/delegate-handlers-design.md).
 
 `[FromServices]` is optional for ordinary DI services under the normal conventions. `[FromKeyedServices]` supports
 constructor and ASP.NET Core Controller Action injection as well; this sample uses it on Minimal API parameters and on

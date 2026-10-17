@@ -18,7 +18,7 @@ public static class RequestBatcherDelegateExtensions
     /// <typeparam name="TRequest">The request type.</typeparam>
     /// <param name="batcher">A batcher registered with AddDelegateRequestBatcher.</param>
     /// <param name="request">The request to submit.</param>
-    /// <param name="handler">A static lambda receiving the batch followed by optional DI services and a batch token.</param>
+    /// <param name="handler">A delegate to a static lambda, anonymous method, local function, or method receiving the batch, DI services and an optional batch token.</param>
     /// <param name="cancellationToken">Cancels the request only before dispatch.</param>
     /// <returns>A task that completes after handler execution and batch scope disposal.</returns>
     /// <remarks>The first handler binds the pipeline; subsequent calls must supply an equal delegate.</remarks>
@@ -41,7 +41,7 @@ public static class RequestBatcherDelegateExtensions
     /// <typeparam name="TRequest">The request type.</typeparam>
     /// <param name="batcher">A batcher registered with AddDelegateRequestBatcher.</param>
     /// <param name="requests">The requests to submit; they may span multiple handler batches.</param>
-    /// <param name="handler">A static lambda receiving the batch followed by optional DI services and a batch token.</param>
+    /// <param name="handler">A delegate to a static lambda, anonymous method, local function, or method receiving the batch, DI services and an optional batch token.</param>
     /// <param name="cancellationToken">Cancels requests only before dispatch.</param>
     /// <returns>A task that completes after all submitted requests complete.</returns>
     /// <remarks>The first handler binds the pipeline; subsequent calls must supply an equal delegate.</remarks>
@@ -66,7 +66,7 @@ public static class RequestBatcherDelegateExtensions
     /// <typeparam name="TResponse">The response type.</typeparam>
     /// <param name="batcher">A batcher registered with AddDelegateRequestBatcher.</param>
     /// <param name="request">The request to submit.</param>
-    /// <param name="handler">A static lambda receiving response entries, optional DI services and a batch token.</param>
+    /// <param name="handler">A delegate to a static lambda, anonymous method, local function, or method receiving response entries, DI services and an optional batch token.</param>
     /// <param name="cancellationToken">Cancels the request only before dispatch.</param>
     /// <returns>A task containing the response after handler execution and batch scope disposal.</returns>
     /// <remarks>The first handler binds the pipeline; subsequent calls must supply an equal delegate.</remarks>
@@ -90,7 +90,7 @@ public static class RequestBatcherDelegateExtensions
     /// <typeparam name="TResponse">The response type.</typeparam>
     /// <param name="batcher">A batcher registered with AddDelegateRequestBatcher.</param>
     /// <param name="requests">The requests to submit; they may span multiple handler batches.</param>
-    /// <param name="handler">A static lambda receiving response entries, optional DI services and a batch token.</param>
+    /// <param name="handler">A delegate to a static lambda, anonymous method, local function, or method receiving response entries, DI services and an optional batch token.</param>
     /// <param name="cancellationToken">Cancels requests only before dispatch.</param>
     /// <returns>A task containing one response per input, including duplicates, after all requests complete.</returns>
     /// <remarks>The first handler binds the pipeline; subsequent calls must supply an equal delegate.</remarks>

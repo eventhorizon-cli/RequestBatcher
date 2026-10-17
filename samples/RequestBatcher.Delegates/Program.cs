@@ -90,6 +90,8 @@ static async Task<IResult> QueryAsync(
 
     // This direct static lambda call site is reused for every submission to the named price pipeline.
     // Ordinary service parameters can optionally use [FromServices]; keyed services require an explicit key.
+    // The handler may omit CancellationToken entirely; if declared, do not give it a default value.
+    // It receives the batch lifecycle token; the final ExecuteAsync argument is the caller's optional token.
     var results = await batcher.ExecuteAsync(
         productIds,
         static async ValueTask (

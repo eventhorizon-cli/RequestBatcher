@@ -212,11 +212,17 @@ The runnable [PostgreSQL sample](https://github.com/eventhorizon-cli/RequestBatc
 
 Delegate handlers keep short batch-processing logic next to the `ExecuteAsync` call that submits the work, so you
 can read and update the submission and handling code together. They suit straightforward batch lookups or result
-mapping. When the logic grows or needs to be reused and tested independently, use a separate `IRequestBatchHandler`
+mapping. At the call site, use a static lambda, static anonymous method, static local function, or static method
+group. When the logic grows or needs to be reused and tested independently, use a separate `IRequestBatchHandler`
 class.
 
-Use `AddDelegateRequestBatcher` to declare the request/response contract and options, then supply a static lambda
-at the call site:
+Use `AddDelegateRequestBatcher` to declare the request/response contract and options, then supply a static handler
+target at the call site:
+
+**Handlers must use static implementations without capturing locals or instance state.** Lambdas, anonymous
+methods and local functions must explicitly declare `static`; method groups must refer to ordinary or generic
+static methods. Receive services through injected parameters. Delegates may be passed directly or through variables,
+fields, parameters, properties or factories, including explicit construction, parentheses and casts.
 
 ```csharp
 using Microsoft.Extensions.DependencyInjection;
@@ -246,24 +252,46 @@ var prices = await batcher.ExecuteAsync(
     });
 ```
 
-This uses the `IPriceStore` contract from the request/response example below; register your own implementation
-(shown as `PriceStore`). Omit `batcherName` for the default registration. Request-only pipelines use
-`AddDelegateRequestBatcher<TRequest>()` and a first lambda parameter of `IReadOnlyList<TRequest>`. Both modes
-support individual requests and explicit lists through `ExecuteAsync` extension methods; the original interfaces
-have no added members. Choose either typed-handler or delegate registration for each request type and name.
-Delegate registrations require the handler argument on every submission; typed-handler registrations use the
-original overloads.
+Alternatively, replace the lambda above with a static method or static local function. Choose one form per pipeline:
 
-The first valid call binds one delegate to that pipeline. Repeated calls from the same static lambda call site
-reuse it; a different delegate fails before enqueueing. Different lambda call sites are different handlers even
-when their bodies look identical, so use different batcher names for different operations. Concurrent first calls
-bind atomically. Services are supplied per dispatched batch, not captured from the caller's scope.
+```csharp
+var price = await batcher.ExecuteAsync(101, HandlePricesAsync);
+
+static async ValueTask HandlePricesAsync(
+    IReadOnlyList<RequestBatchEntry<int, decimal?>> entries,
+    [FromKeyedServices("catalog")] IPriceStore store,
+    CancellationToken batchCancellation)
+{
+    var ids = entries.Select(entry => (long)entry.Request).Distinct();
+    var rows = await store.FindAsync(ids, batchCancellation).ConfigureAwait(false);
+    var pricesById = rows.ToDictionary(row => row.ProductId);
+    entries.SetResponses(id => pricesById.GetValueOrDefault(id)?.Price);
+}
+```
+
+This uses the `IPriceStore` contract from the request/response example below; register your own implementation
+(shown as `PriceStore`). Request-only pipelines use `AddDelegateRequestBatcher<TRequest>()` with a first lambda
+parameter of `IReadOnlyList<TRequest>`. Both modes support individual requests and explicit lists through the
+`ExecuteAsync` extension methods; the original interfaces have no added members.
+
+For simple or shared request types such as `int` or `string`, prefer a distinct `batcherName` for each
+business operation. For example, name a price `int` pipeline `"price"` when another operation also uses `int`,
+to avoid delegate collisions or accidental binding. Omit `batcherName` to use the default pipeline. A request type
+and name can use only one registration mode: delegate registrations require the handler on every submission, while
+typed-handler registrations use the original overloads.
+
+The first valid call binds one delegate to that pipeline. Repeated calls with an equal delegate reuse it; a
+different delegate fails before enqueueing. Different handler targets represent different handlers even when their
+bodies look identical, so use different batcher names for different operations. Concurrent first calls bind atomically.
+Services are supplied per dispatched batch, not captured from the caller's scope.
 
 The first parameter must be the exact batch list type. Other parameters are required DI services, with
 `[FromKeyedServices(key)]` selecting a keyed service. The key must be explicit; inherited keys are unsupported.
 Web applications may write `[FromServices]` on ordinary
-service parameters; it is optional because services are injected by convention. One optional batch lifecycle
-`CancellationToken` parameter is supported (without a default parameter value). The lambda may return `void`,
+service parameters; it is optional because services are injected by convention. The handler may omit the batch
+lifecycle `CancellationToken`; if present, it must declare exactly one and must not give it a default such as
+`= default`. This injected token is shared by the batch and is distinct from the optional caller
+`ExecuteAsync` `cancellationToken`. The lambda may return `void`,
 `Task` or `ValueTask`; `async void` and result-bearing return types are rejected. Every response entry must still
 receive a response. List results preserve order and duplicates even when submission spans multiple handler batches.
 
@@ -274,15 +302,27 @@ each parameter. Resolved services are never cached in the singleton handler. Typ
 to honor their explicit handler lifetime.
 
 Each batch that injects services owns an async DI scope, and callers complete after scope disposal. A delegate
-without service parameters skips scope creation. Signature inspection and typed-invoker compilation happen once
-on first binding; steady-state dispatch uses the cached invoker without reflection, `DynamicInvoke` or argument
-arrays. This automatic binding mode requires dynamic code and is not supported for NativeAOT or trimming.
+without service parameters skips scope creation. Delegate handlers are optimized for repeated execution:
+signature inspection and expression-tree compilation of a strongly typed invoker happen once on first binding.
+Subsequent submissions use a reference-equality fast path, and dispatched batches reuse the cached invoker without
+reflection, `DynamicInvoke` or argument arrays. This automatic binding mode requires dynamic code and is not
+supported for NativeAOT or trimming.
 
-The package includes analyzer **`RB0001`**, an error by default, requiring a directly supplied **static lambda**.
-Delegate variables and method groups are rejected by this rule. Ordinary typed-handler calls are unaffected.
-The analyzer can be disabled by the consumer; runtime reflection cannot reliably prove that a lambda was written
-as `static`. See the [delegate-handler design](https://github.com/eventhorizon-cli/RequestBatcher/blob/main/docs/delegate-handlers-design.md) and
-[performance comparison](https://github.com/eventhorizon-cli/RequestBatcher/blob/main/docs/evaluations/delegate-handlers/README.md).
+In-memory benchmarks using the same configuration show individual-submission means for delegate and typed handlers
+differing by about 1%, with similar allocations and no clear steady-state regression. These measurements exclude
+the initial compilation cost; see the [delegate-handler performance comparison](https://github.com/eventhorizon-cli/RequestBatcher/blob/main/docs/evaluations/delegate-handlers/README.md).
+
+**The built-in analyzer provides basic compile-time checks.** Both diagnostics are errors by default:
+
+- `RB0001` rejects known non-static lambdas, local functions and instance methods.
+- `RB0002` checks known delegate signatures, including batch-list and return types, parameter modifiers and defaults,
+  and the restrictions on `CancellationToken` and `[FromKeyedServices]`.
+
+Delegate targets may be unknown after passing through parameters, properties or factories. These forms remain
+allowed; callers must ensure the eventual target is static. Runtime binding validates the actual signature, service
+binding and delegate identity, but cannot reliably distinguish static-lambda source from a non-capturing ordinary
+lambda. Ordinary typed-handler calls are unaffected, and consumers can disable the analyzers. See the
+[delegate-handler design](https://github.com/eventhorizon-cli/RequestBatcher/blob/main/docs/delegate-handlers-design.md).
 
 The standalone [delegate PostgreSQL sample](https://github.com/eventhorizon-cli/RequestBatcher/tree/main/samples/RequestBatcher.Delegates) uses delegate handlers for both price updates and
 `POST /prices/query` list lookups. Each static lambda injects a keyed scoped `PriceStore` per handler batch.
