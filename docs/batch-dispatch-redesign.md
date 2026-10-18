@@ -83,7 +83,7 @@ items passed to one handler invocation. It is not multiplied by `H`.
 
 ## Queue Dependency Contract
 
-The pipeline uses BufferQueue 2.0.3 with its memory storage. The single pull
+The pipeline uses BufferQueue 2.0.4 with its memory storage. The single pull
 consumer scans assigned partitions in a ring and resumes after the partition
 that supplied the last batch. Notifications wake the consumer without giving
 the notifying partition priority. This balances pull opportunities between
