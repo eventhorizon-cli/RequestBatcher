@@ -32,7 +32,7 @@ The illustration above shows how requests may be combined. This section explains
 
 RequestBatcher uses [BufferQueue](https://github.com/eventhorizon-cli/BufferQueue) to combine queued requests within a
 .NET process and pass them to an application handler. The current dependency is
-[BufferQueue 2.0.4](https://www.nuget.org/packages/BufferQueue/2.0.4); applications do not register or configure it
+[BufferQueue 2.0.3](https://www.nuget.org/packages/BufferQueue/2.0.3); applications do not register or configure it
 separately.
 
 This is **opportunistic batching**: writing a request to BufferQueue sends a push notification that wakes an idle
@@ -54,7 +54,7 @@ same partition during a burst.
 
 ![Opportunistic merging flow](https://raw.githubusercontent.com/eventhorizon-cli/RequestBatcher/main/docs/assets/request-batcher-opportunistic-merging.png)
 
-The diagram shows normal consumption and omits cancellation and shutdown. [BufferQueue's consumer loop](https://github.com/eventhorizon-cli/BufferQueue/blob/75d4cbbc83358e5f026bbb4eef5c2f8f797fd90d/src/BufferQueue/BufferPullConsumer.cs#L69)
+The diagram shows normal consumption and omits cancellation and shutdown. [BufferQueue's consumer loop](https://github.com/eventhorizon-cli/BufferQueue/blob/90c6208f940592f797ab8cf78ad4af88d1163649/src/BufferQueue/BufferPullConsumer.cs#L59)
 checks the notification version before waiting. If new data was signaled during the scan, it retries the pull to avoid a
 missed wake-up.
 

@@ -36,7 +36,7 @@ RequestBatcher 会合并已经排队的请求，限制 Handler 批次并发数�
 上面的示意图展示了请求可能如何合并。本节说明这种批次是如何形成的。
 
 RequestBatcher 基于 [BufferQueue](https://github.com/eventhorizon-cli/BufferQueue)，将 .NET 进程内已经排队的并发请求
-合并为批次，交给应用的 Handler 处理。当前依赖 [BufferQueue 2.0.4](https://www.nuget.org/packages/BufferQueue/2.0.4)，
+合并为批次，交给应用的 Handler 处理。当前依赖 [BufferQueue 2.0.3](https://www.nuget.org/packages/BufferQueue/2.0.3)，
 应用无需单独注册或配置它。
 
 这种批次处理可以理解为**机会式攒批（opportunistic batching）**：请求写入 BufferQueue 后会发出 push 通知，唤醒空闲的消费流程。
@@ -53,7 +53,7 @@ RequestBatcher 基于 [BufferQueue](https://github.com/eventhorizon-cli/BufferQu
 
 ![机会式合并流程图](docs/assets/request-batcher-opportunistic-merging.zh-CN.png)
 
-图中展示正常消费流程，省略了取消与停止分支。[BufferQueue 的消费循环](https://github.com/eventhorizon-cli/BufferQueue/blob/75d4cbbc83358e5f026bbb4eef5c2f8f797fd90d/src/BufferQueue/BufferPullConsumer.cs#L69)
+图中展示正常消费流程，省略了取消与停止分支。[BufferQueue 的消费循环](https://github.com/eventhorizon-cli/BufferQueue/blob/90c6208f940592f797ab8cf78ad4af88d1163649/src/BufferQueue/BufferPullConsumer.cs#L59)
 会在进入等待前检查通知版本；如果这期间有新数据通知到达，就重新尝试拉取，避免漏掉唤醒。
 
 请求仅保存在进程内，进程故障后无法恢复尚未完成的请求。
