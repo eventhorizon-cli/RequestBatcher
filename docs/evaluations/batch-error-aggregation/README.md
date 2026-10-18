@@ -38,9 +38,11 @@ measure an unrelated artifact. Exception preparation is outside measurement.
 Cleanup validates the complete set using reference identity. Public cases use
 the existing gated handlers and validate exactly-once processing, the original
 failure, cancellation, and capacity waiting on each operation.
-The complete unit-test project passes 323 cases on each of .NET 8 and .NET 10,
+The complete unit-test project passes 324 cases on each of .NET 8 and .NET 10,
 including concurrent repeated failures, a held final item, and exceptions with
-equal user-defined values but distinct object identities.
+equal user-defined values but distinct object identities. A combined concurrent
+case also mixes success, cancellation, and equal-valued distinct failures,
+checking every original exception reference after the final completion.
 
 ## Method and reproduction
 

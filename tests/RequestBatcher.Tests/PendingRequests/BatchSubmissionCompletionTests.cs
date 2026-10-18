@@ -183,6 +183,50 @@ public sealed class BatchSubmissionCompletionTests
     }
 
     [Fact]
+    public async Task CompleteWithError_ConcurrentCancellationAndEqualValuedFailures_PreservesAllFailures()
+    {
+        const int workerCount = 4;
+        const int reportsPerWorker = 64;
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var failures = Enumerable.Range(0, 4).Select(_ => new EqualValueTestException()).ToArray();
+        var subject = new BatchSubmissionCompletion(workerCount * reportsPerWorker, cancellation.Token);
+        using var start = new Barrier(workerCount + 1);
+
+        var workers = Enumerable.Range(0, workerCount).Select(worker => Task.Run(() =>
+        {
+            Assert.True(start.SignalAndWait(TimeSpan.FromSeconds(5)));
+            for (var report = 0; report < reportsPerWorker; report++)
+            {
+                switch (report % 3)
+                {
+                    case 0:
+                        subject.CompleteWithError(failures[(worker + report) % failures.Length]);
+                        break;
+                    case 1:
+                        subject.CompleteCanceled();
+                        break;
+                    default:
+                        subject.CompleteSuccessfully();
+                        break;
+                }
+            }
+        })).ToArray();
+
+        Assert.True(start.SignalAndWait(TimeSpan.FromSeconds(5)));
+        await Assert.ThrowsAsync<EqualValueTestException>(
+            () => subject.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+        var actual = subject.Task.Exception!.InnerExceptions;
+        await Task.WhenAll(workers).WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(failures.Length, actual.Count);
+        foreach (var failure in failures)
+        {
+            Assert.Contains(actual, candidate => ReferenceEquals(candidate, failure));
+        }
+    }
+
+    [Fact]
     public async Task CompleteWithError_EqualValuedDistinctExceptions_PreservesReferenceIdentity()
     {
         var first = new EqualValueTestException();
