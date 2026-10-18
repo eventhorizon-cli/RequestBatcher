@@ -2,6 +2,8 @@
 
 For real HTTP I/O, synchronous preparation, connection-pool limits, and a batch-formation
 control, see the [external I/O experiment](README.io.md).
+For current-source paced arrivals, slot utilization, caller tail latency, and
+PostgreSQL/Redis comparisons, see the [arrival-rate probe](README.arrival.md).
 
 Run from the repository root with the SDK selected by `global.json`:
 
@@ -70,6 +72,7 @@ whole process during measurement, including instrumentation and submission tasks
 The batch histogram also includes instrumentation cost. No ThreadPool queue-length
 trace or precise enqueue/dispatch split is collected.
 
-A full BenchmarkDotNet campaign, additional launches, paced latency measurements,
-and downstream database validation remain necessary before changing defaults.
-The PostgreSQL/Redis benchmarks are separate opt-in workloads requiring Docker.
+These finite-window diagnostics alone do not justify changing defaults. The
+[arrival-rate evaluation](../../docs/evaluations/arrival-scheduling/README.md)
+adds paced and downstream comparisons; neither prototype validates production
+lifecycle semantics. PostgreSQL/Redis workloads require Docker.
