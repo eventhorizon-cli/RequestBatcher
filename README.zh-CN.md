@@ -203,7 +203,7 @@ public sealed class PricesController : ControllerBase
 static 匿名方法、static 局部函数或 static 方法组，可以将请求提交与处理逻辑放在一起，便于结合调用上下文阅读和修改。
 处理逻辑较复杂，或需要多处复用、独立组织测试时，更适合使用单独的 `IRequestBatchHandler` 类。
 
-**Handler 必须使用静态实现，不捕获局部变量或实例状态。**lambda、匿名方法和局部函数要显式加 `static`，
+**Handler 必须使用静态实现，不捕获局部变量或实例状态**。lambda、匿名方法和局部函数要显式加 `static`，
 方法组应指向普通或泛型静态方法；所需服务通过参数注入。
 委托可以直接传入，也可以通过变量、字段、参数、属性或工厂传递，支持显式创建、括号和类型转换。
 
@@ -549,7 +549,7 @@ Handler 返回前，必须为每个请求设置一次返回值，不能遗漏或
 Handler 调用中的每个不同商品 ID 查询一次存储层。`Distinct` 也支持匿名组合键、值元组和自定义相等比较器。存储层未
 返回的商品 ID 会映射为 `null`。
 
-**去重只发生在当前 Handler 批次内：**它不会合并不同处理批次或不同队列 Partition 中的条目。selector 重载会先按 key
+**去重只发生在当前 Handler 批次内**：它不会合并不同处理批次或不同队列 Partition 中的条目。selector 重载会先按 key
 为后端无序结果建立字典，再为每个条目的原始 request 计算一次结果，因此重复条目会得到相同返回值。
 
 所有返回值计算成功后才会统一赋值；factory 抛出异常不会留下部分赋值。引用类型结果会被共享，不会复制。
@@ -575,7 +575,7 @@ RequestBatcher 会先为请求序列创建快照，再统一提交给内部队�
 `MaxPendingRequests` 个请求，等待队列腾出足够空间后依次入队。`Fail` 模式下，如果队列剩余空间不足以容纳整组
 请求，就立即拒绝整组请求。
 
-返回的 `Task` 会等待本次提交中的所有请求。**一次提交不等于一次 Handler 调用：**请求仍可能按 `BatchSize` 或
+返回的 `Task` 会等待本次提交中的所有请求。**一次提交不等于一次 Handler 调用**：请求仍可能按 `BatchSize` 或
 Partition 路由拆成多个处理批次。
 
 > **显式批量提交不是 Partition 边界。** 配置多个 Partition 后，RequestBatcher 会逐项路由，并不会将整次提交
