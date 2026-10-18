@@ -1,0 +1,74 @@
+{
+  "campaign": {
+    "state": "complete",
+    "measurementLines": 160,
+    "configurationCount": 80,
+    "pairCount": 40,
+    "sources": [
+      "memory",
+      "fast",
+      "postgres-write",
+      "postgres-read",
+      "redis-write",
+      "redis-read"
+    ]
+  },
+  "sourceCommit": "4c4949159e9bed23fcac87b2cd2305e4f9254414",
+  "source": {
+    "snapshotSha256": "9a88fa7c235fe75426633f162fc836e85a2984f8bf589ee5e957aca4aa7e7f02"
+  },
+  "scratch": {
+    "snapshotSha256": "0797ea9888a2788cf09699c96b03baa867c464d1fc8e5064ccd138a79dbc395e",
+    "path": "<redacted>"
+  },
+  "prototype": {
+    "diffSha256": "3b02bdd6943118b5360910be76058f7f1f8d522c79f39a94b9c42a906a11c33a"
+  },
+  "runner": {
+    "sha256": "51b68519a55a6e04f932cfa6e1f793fc806267ac6e6ab5ae6b781d0fcdac31b5"
+  },
+  "settings": {
+    "tieredCompilation": false,
+    "maxConcurrency": 8,
+    "onePartition": true,
+    "isolation": "Copied src, analyzer, and benchmark project; hooks patched only in scratch"
+  },
+  "configurations": [
+    {
+      "name": "memory",
+      "database": "none",
+      "databaseOperation": "write",
+      "scratch": "<redacted>"
+    },
+    {
+      "name": "fast",
+      "database": "none",
+      "databaseOperation": "write",
+      "scratch": "<redacted>"
+    },
+    {
+      "name": "postgres-write",
+      "database": "postgres",
+      "databaseOperation": "write",
+      "scratch": "<redacted>"
+    },
+    {
+      "name": "postgres-read",
+      "database": "postgres",
+      "databaseOperation": "read",
+      "scratch": "<redacted>"
+    },
+    {
+      "name": "redis-write",
+      "database": "redis",
+      "databaseOperation": "write",
+      "scratch": "<redacted>"
+    },
+    {
+      "name": "redis-read",
+      "database": "redis",
+      "databaseOperation": "read",
+      "scratch": "<redacted>"
+    }
+  ]
+}

@@ -285,6 +285,10 @@ The implementation must add or adjust deterministic tests for:
 The [BufferQueue 2.0.3 evaluation](evaluations/bufferqueue-2.0.3/README.md) compares
 partition counts and handler offloading with controlled in-memory workloads.
 These measurements are evidence for tradeoffs, not throughput guarantees.
+The [paced-arrival evaluation](evaluations/arrival-scheduling/README.md) adds
+caller latency, occupied-slot wall time, batch formation, and PostgreSQL/Redis
+checks. It supports retaining direct dispatch for asynchronous workloads;
+bounded offloading does not show a consistent benefit in those cases.
 
 ## Acceptance Criteria
 
