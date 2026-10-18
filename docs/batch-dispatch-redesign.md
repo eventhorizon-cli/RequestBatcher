@@ -211,6 +211,28 @@ Primitive allocation measurements attribute the fixed per-group saving, while
 identical public-pipeline benchmarks compare small/large groups, success,
 failure, partial cancellation, capacity waits, and mixed single/group workloads.
 
+Error accounting records the first exception reference atomically. Repeated
+reports of that same object require neither a lock nor a set lookup. Only a
+different exception creates a reference-equality set; concurrent writers publish
+one shared set and lock it while adding distinct failures. The set itself is
+the lock, so successful groups and groups with one distinct failure do not
+allocate a separate synchronization object. Exceptions are never compared using
+user-defined equality. This changes no public contract or per-item state:
+every item still performs its terminal transition, remaining-count decrement,
+and capacity release exactly once. The last decrement observes all preceding
+error writes before publishing the complete set of original failures.
+
+Deterministic tests cover repeated failures, equal-valued but distinct exception
+objects, concurrent first-error publication and set creation, mixed cancellation
+and failure, and a final held item that prevents early publication. Identical
+before/after benchmarks isolate repeated and distinct error accounting and
+exercise the public success, failure, partial-cancellation, capacity-waiting,
+and mixed-submission paths for small and large groups. Timing and allocation
+results must both be reported; primitive wins alone do not establish an
+end-to-end throughput gain.
+The [error-accounting evaluation](evaluations/batch-error-aggregation/README.md)
+records the matched measurements and their limits.
+
 The permit is acquired before advancing the BufferQueue enumerator. With all
 handler slots occupied, the loop does not consume more work. The bounded
 BufferQueue then holds up to `MaxPendingRequests` queued requests and applies
