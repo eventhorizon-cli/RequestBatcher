@@ -220,6 +220,15 @@ mapping. At the call site, use a static lambda, static anonymous method, static 
 group. When the logic grows or needs to be reused and tested independently, use a separate `IRequestBatchHandler`
 class.
 
+**Delegate handlers are optimized for repeated execution**: signature inspection and expression-tree compilation of a
+strongly typed invoker happen once on first binding. Subsequent submissions use a reference-equality fast path, and
+dispatched batches reuse the cached invoker without reflection, `DynamicInvoke` or argument arrays. This automatic
+binding mode requires dynamic code and is not supported for NativeAOT or trimming.
+
+In-memory benchmarks using the same configuration show individual-submission means for delegate and typed handlers
+differing by about 1%, with similar allocations and no clear steady-state regression. These measurements exclude the
+initial compilation cost; see the [delegate-handler performance comparison](docs/evaluations/delegate-handlers/README.md).
+
 Use `AddDelegateRequestBatcher` to declare the request/response contract and options, then supply a static handler
 target at the call site:
 
@@ -306,15 +315,7 @@ each parameter. Resolved services are never cached in the singleton handler. Typ
 to honor their explicit handler lifetime.
 
 Each batch that injects services owns an async DI scope, and callers complete after scope disposal. A delegate
-without service parameters skips scope creation. Delegate handlers are optimized for repeated execution:
-signature inspection and expression-tree compilation of a strongly typed invoker happen once on first binding.
-Subsequent submissions use a reference-equality fast path, and dispatched batches reuse the cached invoker without
-reflection, `DynamicInvoke` or argument arrays. This automatic binding mode requires dynamic code and is not
-supported for NativeAOT or trimming.
-
-In-memory benchmarks using the same configuration show individual-submission means for delegate and typed handlers
-differing by about 1%, with similar allocations and no clear steady-state regression. These measurements exclude
-the initial compilation cost; see the [delegate-handler performance comparison](docs/evaluations/delegate-handlers/README.md).
+without service parameters skips scope creation.
 
 **The built-in analyzer provides basic compile-time checks.** Both diagnostics are errors by default:
 
