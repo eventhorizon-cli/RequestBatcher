@@ -3,7 +3,7 @@ namespace RequestBatcher.PendingRequests;
 internal sealed class BatchSubmissionCompletion : TaskCompletionSource, IRequestCompletion
 {
     private readonly CancellationToken _cancellationToken;
-    private readonly object _exceptionsLock = new();
+    private Exception? _firstException;
     private HashSet<Exception>? _exceptions;
     private int _remainingRequests;
     private int _wasCanceled;
@@ -25,10 +25,25 @@ internal sealed class BatchSubmissionCompletion : TaskCompletionSource, IRequest
     {
         ArgumentNullException.ThrowIfNull(exception);
 
-        lock (_exceptionsLock)
+        var firstException = Volatile.Read(ref _firstException);
+        if (firstException is null)
         {
-            _exceptions ??= new HashSet<Exception>(ReferenceEqualityComparer.Instance);
-            _exceptions.Add(exception);
+            firstException = Interlocked.CompareExchange(ref _firstException, exception, null);
+        }
+
+        if (firstException is not null && !ReferenceEquals(firstException, exception))
+        {
+            var exceptions = Volatile.Read(ref _exceptions);
+            if (exceptions is null)
+            {
+                var created = new HashSet<Exception>(ReferenceEqualityComparer.Instance) { firstException };
+                exceptions = Interlocked.CompareExchange(ref _exceptions, created, null) ?? created;
+            }
+
+            lock (exceptions)
+            {
+                exceptions.Add(exception);
+            }
         }
 
         CompleteRequest();
@@ -50,15 +65,14 @@ internal sealed class BatchSubmissionCompletion : TaskCompletionSource, IRequest
             return;
         }
 
-        HashSet<Exception>? exceptions;
-        lock (_exceptionsLock)
-        {
-            exceptions = _exceptions;
-        }
-
-        if (exceptions is not null)
+        // Error writers publish before decrementing, so the last item owns a stable exception set.
+        if (Volatile.Read(ref _exceptions) is { } exceptions)
         {
             TrySetException(exceptions);
+        }
+        else if (Volatile.Read(ref _firstException) is { } firstException)
+        {
+            TrySetException(firstException);
         }
         else if (Volatile.Read(ref _wasCanceled) != 0)
         {

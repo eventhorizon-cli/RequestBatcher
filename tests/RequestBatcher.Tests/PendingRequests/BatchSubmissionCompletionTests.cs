@@ -146,6 +146,63 @@ public sealed class BatchSubmissionCompletionTests
     }
 
     [Theory]
+    [InlineData(1)]
+    [InlineData(8)]
+    public async Task CompleteWithError_ConcurrentRepeatedFailures_WaitsForFinalItem(int distinctFailureCount)
+    {
+        const int workerCount = 3;
+        const int reportsPerWorker = 64;
+        var failures = Enumerable.Range(0, distinctFailureCount)
+            .Select(_ => new FirstTestException())
+            .ToArray();
+        var subject = new BatchSubmissionCompletion(workerCount * reportsPerWorker + 1, default);
+        using var start = new Barrier(workerCount + 1);
+
+        var workers = Enumerable.Range(0, workerCount).Select(worker => Task.Run(() =>
+        {
+            Assert.True(start.SignalAndWait(TimeSpan.FromSeconds(5)));
+            for (var report = 0; report < reportsPerWorker; report++)
+            {
+                subject.CompleteWithError(failures[(worker + report) % failures.Length]);
+            }
+        })).ToArray();
+
+        Assert.True(start.SignalAndWait(TimeSpan.FromSeconds(5)));
+        await Task.WhenAll(workers).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.False(subject.Task.IsCompleted);
+
+        subject.CompleteSuccessfully();
+
+        await Assert.ThrowsAsync<FirstTestException>(() => subject.Task);
+        var actual = subject.Task.Exception!.InnerExceptions;
+        Assert.Equal(distinctFailureCount, actual.Count);
+        foreach (var failure in failures)
+        {
+            Assert.Contains(actual, candidate => ReferenceEquals(candidate, failure));
+        }
+    }
+
+    [Fact]
+    public async Task CompleteWithError_EqualValuedDistinctExceptions_PreservesReferenceIdentity()
+    {
+        var first = new EqualValueTestException();
+        var second = new EqualValueTestException();
+        var subject = new BatchSubmissionCompletion(4, default);
+
+        subject.CompleteWithError(first);
+        subject.CompleteWithError(second);
+        subject.CompleteWithError(first);
+        subject.CompleteWithError(second);
+
+        var actual = await Assert.ThrowsAsync<EqualValueTestException>(() => subject.Task);
+        Assert.True(ReferenceEquals(actual, first) || ReferenceEquals(actual, second));
+        var failures = subject.Task.Exception!.InnerExceptions;
+        Assert.Equal(2, failures.Count);
+        Assert.Contains(failures, failure => ReferenceEquals(failure, first));
+        Assert.Contains(failures, failure => ReferenceEquals(failure, second));
+    }
+
+    [Theory]
     [InlineData(0)]
     [InlineData(-1)]
     public void Constructor_NonPositiveRequestCount_Throws(int requestCount)
@@ -157,4 +214,11 @@ public sealed class BatchSubmissionCompletionTests
     private sealed class FirstTestException : Exception;
 
     private sealed class SecondTestException : Exception;
+
+    private sealed class EqualValueTestException : Exception
+    {
+        public override bool Equals(object? obj) => obj is EqualValueTestException;
+
+        public override int GetHashCode() => 0;
+    }
 }
