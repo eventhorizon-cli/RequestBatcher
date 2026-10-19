@@ -80,6 +80,48 @@ public sealed class RequestResponseBatcherTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_SinglePartition_IgnoresStringSelector()
+    {
+        var handled = new ConcurrentQueue<int>();
+        var handler = new Mock<IRequestBatchHandler<int, string>>(MockBehavior.Strict);
+        handler
+            .Setup(subject => subject.HandleAsync(
+                It.Is<IReadOnlyList<RequestBatchEntry<int, string>>>(entries =>
+                    entries.Count == 1 && entries[0].Request >= 1 && entries[0].Request <= 3),
+                It.IsAny<CancellationToken>()))
+            .Returns((IReadOnlyList<RequestBatchEntry<int, string>> entries, CancellationToken _) =>
+            {
+                handled.Enqueue(entries[0].Request);
+                entries.SetResponses(static request => request.ToString());
+                return ValueTask.CompletedTask;
+            })
+            .Verifiable();
+
+        var services = new ServiceCollection();
+        AddResponseHandler<int, string>(services, handler.Object.HandleAsync, configure: options =>
+        {
+            options.BatchSize = 1;
+            options.UsePartitionKey(
+                (Func<int, string>)(static (int _) => throw new TestBatchException()),
+                partitionCount: 1);
+        });
+        await using var provider = services.BuildServiceProvider(
+            new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
+        var batcher = provider.GetRequiredService<IRequestBatcher<int, string>>();
+
+        Assert.Equal("1", await batcher.ExecuteAsync(1).WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Equal(
+            new[] { "2", "3" },
+            await batcher.ExecuteAsync([2, 3]).WaitAsync(TimeSpan.FromSeconds(5)));
+
+        Assert.Equal(new[] { 1, 2, 3 }, handled.Order());
+        handler.Verify(subject => subject.HandleAsync(
+            It.IsAny<IReadOnlyList<RequestBatchEntry<int, string>>>(),
+            It.IsAny<CancellationToken>()), Times.Exactly(3));
+        handler.VerifyNoOtherCalls();
+    }
+
+    [Fact]
     public async Task ExecuteAsync_ResponseHandlerFails_PropagatesOriginalException()
     {
         var expected = new TestBatchException();

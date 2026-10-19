@@ -40,7 +40,8 @@ public sealed class RequestBatchOptions<TRequest>
 
     /// <summary>
     /// Routes requests with equal finite, integer-valued numeric keys to the same queue partition.
-    /// The partition count must be greater than one and is independent of <see cref="MaxConcurrency"/>.
+    /// The partition count must be at least one and is independent of <see cref="MaxConcurrency"/>.
+    /// A count of one disables keyed routing and does not invoke the selector.
     /// Routing does not guarantee handler ordering or serial execution.
     /// </summary>
     /// <typeparam name="TNumber">The numeric key type.</typeparam>
@@ -50,18 +51,21 @@ public sealed class RequestBatchOptions<TRequest>
         where TNumber : INumber<TNumber>
     {
         ArgumentNullException.ThrowIfNull(partitionKeySelector);
-        if (partitionCount <= 1)
+        if (partitionCount < 1)
         {
             throw new ArgumentOutOfRangeException(
-                nameof(partitionCount), partitionCount, "Partition count must be greater than one.");
+                nameof(partitionCount), partitionCount, "Partition count must be at least one.");
         }
 
-        PartitionKey = RequestBatchPartitionKey<TRequest>.Create(partitionKeySelector, partitionCount);
+        PartitionKey = partitionCount == 1
+            ? null
+            : RequestBatchPartitionKey<TRequest>.Create(partitionKeySelector, partitionCount);
     }
 
     /// <summary>
     /// Routes requests with equal string keys to the same queue partition.
-    /// The partition count must be greater than one and is independent of <see cref="MaxConcurrency"/>.
+    /// The partition count must be at least one and is independent of <see cref="MaxConcurrency"/>.
+    /// A count of one disables keyed routing and does not invoke the selector.
     /// Routing does not guarantee handler ordering or serial execution.
     /// </summary>
     /// <param name="partitionKeySelector">
@@ -71,13 +75,15 @@ public sealed class RequestBatchOptions<TRequest>
     public void UsePartitionKey(Func<TRequest, string> partitionKeySelector, int partitionCount)
     {
         ArgumentNullException.ThrowIfNull(partitionKeySelector);
-        if (partitionCount <= 1)
+        if (partitionCount < 1)
         {
             throw new ArgumentOutOfRangeException(
-                nameof(partitionCount), partitionCount, "Partition count must be greater than one.");
+                nameof(partitionCount), partitionCount, "Partition count must be at least one.");
         }
 
-        PartitionKey = RequestBatchPartitionKey<TRequest>.Create(partitionKeySelector, partitionCount);
+        PartitionKey = partitionCount == 1
+            ? null
+            : RequestBatchPartitionKey<TRequest>.Create(partitionKeySelector, partitionCount);
     }
 
     internal RequestBatchOptions<TRequest> ValidateAndClone()

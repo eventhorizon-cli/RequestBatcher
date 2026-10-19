@@ -633,13 +633,15 @@ key. `MaxConcurrency = 1` limits handler concurrency but does not merge keyed pa
 | `MaxConcurrency` | `1` | Maximum concurrent handler batches. It is independent of the keyed partition count. |
 | `MaxPendingRequests` | `8192` | Internal BufferQueue capacity for requests that have not yet been pulled for execution. |
 | `FullMode` | `Wait` | Waits for capacity; `Fail` rejects immediately when capacity is unavailable. |
-| `UsePartitionKey(selector, partitionCount)` | Not set (one partition) | Enables keyed routing with the explicitly configured partition count; `partitionCount` must be greater than one and equal keys use one partition. |
+| `UsePartitionKey(selector, partitionCount)` | Not set (one partition) | Requires `partitionCount >= 1`; `1` disables keyed routing without invoking the selector, and larger counts route equal keys to one partition. |
 
 No ordering is guaranteed for handler execution, including when `MaxConcurrency = 1`.
 
 ### Partition Count and Concurrency
 
-**Without `UsePartitionKey`, all requests use one partition**, regardless of CPU count or `MaxConcurrency`.
+**Without `UsePartitionKey`, or with `partitionCount: 1`, all requests use one partition**, regardless of CPU count or
+`MaxConcurrency`. Setting the count to `1` clears any previously configured key and skips the selector. Counts below `1`
+throw `ArgumentOutOfRangeException`; the selector must still be non-null.
 A single partition can still supply several concurrent handler batches. Increase `MaxConcurrency` when you need more
 downstream concurrency.
 
@@ -790,8 +792,8 @@ or synchronously blocking work before that point can delay other batches even wh
 `MaxConcurrency` sets the global maximum number of concurrent handler batches.
 
 Without a partition key, the queue uses one internal partition to avoid fragmenting unrelated requests. With a finite
-integer numeric key or a non-null string key, it uses the explicit count supplied to `UsePartitionKey`, so equal keys
-retain locality while different keys can progress independently.
+integer numeric key or a non-null string key and a count greater than one, it uses the count supplied to
+`UsePartitionKey`, so equal keys retain locality while different keys can progress independently.
 
 Multiple batches from one partition can execute concurrently, and all partitions share the same execution slots. One
 `BatchDispatchLoop` owns them all. It acquires an execution slot before pulling an auto-committed batch, so there is no
@@ -801,8 +803,8 @@ of CPU count.
 
 | Configuration | Routing and dispatch |
 | --- | --- |
-| No `UsePartitionKey` | All requests use one queue partition; one partition can supply multiple asynchronous handler batches that compete for global execution slots. |
-| `UsePartitionKey(selector, partitionCount)` | The partition-key function runs for every item. Equal finite integer numeric keys or non-null string keys use one of the configured partitions; separate handler batches for an equal key can execute concurrently. |
+| No `UsePartitionKey`, or `partitionCount: 1` | All requests use one queue partition; one partition can supply multiple asynchronous handler batches that compete for global execution slots. |
+| `UsePartitionKey(selector, partitionCount)` with count > 1 | The partition-key function runs for every item. Equal finite integer numeric keys or non-null string keys use one of the configured partitions; separate handler batches for an equal key can execute concurrently. |
 
 RequestBatcher provides no global, partition-local, or partition-key handler execution ordering guarantee.
 

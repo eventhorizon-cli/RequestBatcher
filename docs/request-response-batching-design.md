@@ -222,12 +222,14 @@ application inspection and projected to
 `RequestBatchOptions<RequestBatchEntry<TRequest, TResponse>>` for the internal
 queue.
 
-`UsePartitionKey(selector, partitionCount)` always receives the original
+`UsePartitionKey(selector, partitionCount)` with a count greater than one receives the original
 `TRequest`. The projected queue selector reads `RequestBatchEntry.Request`
 before calculating the key and preserves the configured partition count. Equal
 keys route to the same queue partition but do not guarantee serialized handler
-execution or ordering. The partition count must be greater than one and is
-independent of `MaxConcurrency` and process CPU count.
+execution or ordering. The partition count must be at least one and is
+independent of `MaxConcurrency` and process CPU count. A count of one clears
+keyed routing and uses the default single queue partition without invoking the
+selector; the projected options preserve this mode. Counts below one are rejected.
 
 ## Typed Single-Request Completion
 
