@@ -53,6 +53,8 @@ You are an AI coding assistant for this repository.
 
 ## Documentation
 
+- When maintaining a single language version of a document, use English. Generate a separate `zh-CN` Chinese version
+  when needed, using a `.zh-CN.md` filename suffix (for example, `README.zh-CN.md`).
 - For a feature, public API, behavior, or architectural change, create or update the relevant design document before
   editing production code. The design must state the intended contract, internal flow, compatibility impact, and test
   coverage; implementation must follow that documented design.
@@ -67,6 +69,7 @@ You are an AI coding assistant for this repository.
 
 ## Testing and validation
 
+- For performance work, see the [benchmark index](tests/RequestBatcher.Benchmarks/README.md) and [evaluation index](docs/evaluations/README.md).
 - Add or update deterministic unit tests for behavior changes, especially batching, concurrency, cancellation,
   backpressure, exception fan-out, and shutdown.
 - Use strict Moq mocks for interaction boundaries. Prefer stateful test collaborators only when a mock would obscure
