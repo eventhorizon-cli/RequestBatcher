@@ -222,6 +222,50 @@ public sealed class RequestBatchCoordinatorTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_SinglePartition_IgnoresNumericSelector()
+    {
+        var handled = new ConcurrentQueue<int>();
+        var handler = new Mock<IRequestBatchHandler<int>>(MockBehavior.Strict);
+        handler
+            .Setup(subject => subject.HandleAsync(
+                It.Is<IReadOnlyList<int>>(requests =>
+                    requests.Count == 1 && requests[0] >= 1 && requests[0] <= 3),
+                It.IsAny<CancellationToken>()))
+            .Returns((IReadOnlyList<int> requests, CancellationToken _) =>
+            {
+                handled.Enqueue(requests[0]);
+                return ValueTask.CompletedTask;
+            })
+            .Verifiable();
+
+        var services = new ServiceCollection();
+        services.AddSingleton<Func<IReadOnlyList<int>, CancellationToken, ValueTask>>(
+            handler.Object.HandleAsync);
+        services.AddRequestBatcher<int, TestBatchHandler<int>>(
+            ServiceLifetime.Singleton,
+            options =>
+            {
+                options.BatchSize = 1;
+                options.UsePartitionKey<int>(
+                    static (int _) => throw new TestBatchException(),
+                    partitionCount: 1);
+            });
+
+        await using var provider = services.BuildServiceProvider(
+            new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
+        var batcher = provider.GetRequiredService<IRequestBatcher<int>>();
+
+        await batcher.ExecuteAsync(1).WaitAsync(TimeSpan.FromSeconds(5));
+        await batcher.ExecuteAsync([2, 3]).WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(new[] { 1, 2, 3 }, handled.Order());
+        handler.Verify(subject => subject.HandleAsync(
+            It.IsAny<IReadOnlyList<int>>(),
+            It.IsAny<CancellationToken>()), Times.Exactly(3));
+        handler.VerifyNoOtherCalls();
+    }
+
+    [Fact]
     public async Task ExecuteAsync_RequestCanceledBeforeDispatch_SkipsRequest()
     {
         var firstBatchStarted = NewSource();
@@ -622,8 +666,8 @@ public sealed class RequestBatchCoordinatorTests
 
     [Theory]
     [InlineData(0)]
-    [InlineData(1)]
-    public void UsePartitionKey_InvalidPartitionCount_Throws(int partitionCount)
+    [InlineData(-1)]
+    public void UsePartitionKey_PartitionCountLessThanOne_Throws(int partitionCount)
     {
         var options = new RequestBatchOptions<int>();
 
@@ -633,15 +677,41 @@ public sealed class RequestBatchCoordinatorTests
         Assert.Equal("partitionCount", exception.ParamName);
     }
 
-    [Fact]
-    public void UsePartitionKey_StringInvalidPartitionCount_Throws()
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void UsePartitionKey_StringPartitionCountLessThanOne_Throws(int partitionCount)
     {
         var options = new RequestBatchOptions<string>();
 
         var exception = Assert.Throws<ArgumentOutOfRangeException>(() =>
-            options.UsePartitionKey(static request => request, partitionCount: 1));
+            options.UsePartitionKey(static request => request, partitionCount));
 
         Assert.Equal("partitionCount", exception.ParamName);
+    }
+
+    [Fact]
+    public void UsePartitionKey_CountOne_ClearsExistingNumericAndStringKeys()
+    {
+        var numericOptions = new RequestBatchOptions<int>();
+        numericOptions.UsePartitionKey(static request => request, partitionCount: 2);
+        Assert.NotNull(numericOptions.PartitionKey);
+
+        numericOptions.UsePartitionKey<int>(
+            static (int _) => throw new TestBatchException(),
+            partitionCount: 1);
+
+        Assert.Null(numericOptions.PartitionKey);
+
+        var stringOptions = new RequestBatchOptions<int>();
+        stringOptions.UsePartitionKey(static request => request.ToString(), partitionCount: 2);
+        Assert.NotNull(stringOptions.PartitionKey);
+
+        stringOptions.UsePartitionKey(
+            (Func<int, string>)(static (int _) => throw new TestBatchException()),
+            partitionCount: 1);
+
+        Assert.Null(stringOptions.PartitionKey);
     }
 
     [Fact]

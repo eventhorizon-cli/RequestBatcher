@@ -42,9 +42,17 @@ effectivePartitionCount = PartitionKey is configured
     : 1
 ```
 
-`UsePartitionKey(selector, partitionCount)` requires `partitionCount` to be
-greater than one. The count is fixed for the coordinator lifetime; changing
-configuration at runtime does not reshape a live BufferQueue topic. A keyed
+`UsePartitionKey(selector, partitionCount)` requires `partitionCount` to be at
+least one. A count of one disables keyed routing, clears any previously configured
+partition key, and uses the same single queue partition as the default configuration.
+The selector must still be non-null, but it is not invoked in this mode. Counts below
+one throw `ArgumentOutOfRangeException` for both numeric and string selectors.
+Options cloning and request/response projection preserve this unpartitioned mode.
+Public signatures and routing for counts greater than one remain unchanged.
+Tests cover both selector overloads, invalid counts, resetting an existing key,
+and single and explicit batch submissions without selector invocation.
+
+The count is fixed for the coordinator lifetime; changing configuration at runtime does not reshape a live BufferQueue topic. A keyed
 partition count is independent of `MaxConcurrency` and process-visible CPU
 count so I/O-bound services can choose enough key-local queues for their
 workload.
