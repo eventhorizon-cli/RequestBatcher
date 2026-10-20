@@ -12,11 +12,13 @@ internal sealed class ConsumerTaskMonitor
         ArgumentException.ThrowIfNullOrWhiteSpace(requestTypeName);
         ArgumentNullException.ThrowIfNull(onFailure);
 
-        Completion = MonitorAsync(
-            consumers.ToArray(),
+        var consumerTasks = consumers.ToArray();
+        // Isolate supervision too: an already-completed consumer can invoke onFailure before the first await yields.
+        Completion = ExecutionContextIsolation.Run(() => MonitorAsync(
+            consumerTasks,
             stoppingToken,
             requestTypeName,
-            onFailure);
+            onFailure));
     }
 
     public Task Completion { get; }

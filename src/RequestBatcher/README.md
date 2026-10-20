@@ -843,6 +843,15 @@ product ID with `entries.SetResponses(id => pricesById.GetValueOrDefault(id)?.Pr
 prices, with `null` for missing products. Both single-ID and list submissions use this handler; list results retain
 input order and duplicates even when requests span several handler batches.
 
+## Execution Context and Tracing
+
+Background dispatch and consumer monitoring run without inheriting the initializing caller's execution context.
+Handlers do not inherit HTTP request activities (`Activity.Current`), logging scopes, or other `AsyncLocal` values
+from initialization or submission. The caller's context is preserved after resolution and after awaiting completion.
+Pass required application data, such as tenant identifiers, explicitly in requests. Activities created inside a
+handler flow normally across its awaits; RequestBatcher does not create batch spans or automatic trace links.
+Singleton constructors must not capture request-specific state; they follow the container's normal creation rules.
+
 ## Sample Application
 
 The [PostgreSQL Web API sample](https://github.com/eventhorizon-cli/RequestBatcher/tree/main/samples/RequestBatcher.Deduplication) demonstrates two pipelines in a Minimal API:

@@ -75,7 +75,8 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
             1)
             .Single();
 
-        _dispatchLoopTask = _batchDispatchLoop.RunAsync(consumer, _consumerCancellation.Token);
+        _dispatchLoopTask = ExecutionContextIsolation.Run(
+            () => _batchDispatchLoop.RunAsync(consumer, _consumerCancellation.Token));
 
         _logger.CoordinatorStarted(
             _requestTypeName,
