@@ -246,6 +246,35 @@ handler slots occupied, the loop does not consume more work. The bounded
 BufferQueue then holds up to `MaxPendingRequests` queued requests and applies
 the configured wait/fail admission behavior directly.
 
+## Background Execution Context
+
+The dispatch loop and consumer monitor start on the ThreadPool without capturing
+the execution context of the caller that constructs the coordinator. Startup
+suppresses execution-context flow only while scheduling each background task,
+restores the caller's original flow state synchronously, and supports callers
+that have already suppressed flow. The task boundary isolates even the
+synchronous prefix of consumer enumeration and monitoring. Normal context flow
+inside background tasks remains enabled, including across handler awaits.
+
+Consequently, handlers and consumer-failure supervision do not inherit the
+initializing HTTP request's `Activity.Current`, logging scopes, or other
+`AsyncLocal` state. Submissions do not transfer the submitting caller's ambient
+context either. Callers retain their own context after resolution and after
+awaiting completion. Application data such as tenant identifiers must travel
+explicitly in requests. Singleton services remain subject to normal DI creation
+semantics and must not capture request-specific state in their constructors.
+
+This adds one scheduling boundary per long-lived task, not per batch. Batch
+dispatch, handler scope ownership, admission, cancellation, and draining retain
+their existing contracts. Public APIs, target frameworks, and dependencies are
+unchanged. No batch Activity or automatic trace links are created.
+
+Deterministic regressions cover initialization under an Activity and AsyncLocal,
+later submissions under another Activity and without one, preservation of caller
+context, handler-owned context across awaits, already-suppressed startup, and
+consumer-failure monitoring after both immediate and deferred failures. Existing
+lifecycle tests cover disposal before background startup and subsequent drain.
+
 ## Lifecycle and Errors
 
 - A request cancelled before dispatch is finished as cancelled and is never

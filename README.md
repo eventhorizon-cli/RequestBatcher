@@ -929,6 +929,13 @@ nested service provider.
 Scoped and transient handlers are resolved once per handler batch in an asynchronous scope. A singleton handler is
 reused across batches and must be thread-safe when `MaxConcurrency > 1`.
 
+Background dispatch and consumer monitoring run without inheriting the initializing caller's execution context.
+Handlers do not inherit HTTP request activities (`Activity.Current`), logging scopes, or other `AsyncLocal` values
+from initialization or submission. The caller's context is preserved after resolution and after awaiting completion.
+Pass required application data, such as tenant identifiers, explicitly in requests. Activities created inside a
+handler flow normally across its awaits; RequestBatcher does not create batch spans or automatic trace links.
+Singleton constructors must not capture request-specific state; they follow the container's normal creation rules.
+
 Logs use the application's `Microsoft.Extensions.Logging` pipeline under the category
 `RequestBatchCoordinator<TRequest>`. Handler failures are logged with their original exception, and request payloads
 are not logged.

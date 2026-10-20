@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using BufferQueue;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -9,6 +10,51 @@ namespace RequestBatcher.Tests.Scheduling;
 
 public sealed class ConsumerFailureTests
 {
+    [Fact]
+    public async Task DisposeAsync_ConsumerFailsSynchronously_IsolatesStartupContextAndReportsFailure()
+    {
+        using var activity = new Activity("initializing-request").Start();
+        var ambient = new AsyncLocal<string?> { Value = "initializing-request" };
+        var expected = new TestConsumerException();
+        var observedActivity = activity;
+        var observedAmbient = ambient.Value;
+        var producer = new Mock<IBufferProducer<PendingBatchRequest<int>>>(MockBehavior.Strict);
+        var consumer = new Mock<IBufferPullConsumer<PendingBatchRequest<int>>>(MockBehavior.Strict);
+        consumer.Setup(candidate => candidate.ConsumeAsync(It.IsAny<CancellationToken>()))
+            .Callback(() =>
+            {
+                observedActivity = Activity.Current;
+                observedAmbient = ambient.Value;
+            })
+            .Throws(expected);
+        var bufferQueue = new Mock<IBufferQueue>(MockBehavior.Strict);
+        bufferQueue.Setup(candidate => candidate.GetProducer<PendingBatchRequest<int>>(
+                RequestBatchCoordinator<int>.TopicName))
+            .Returns(producer.Object);
+        bufferQueue.Setup(candidate => candidate.CreatePullConsumers<PendingBatchRequest<int>>(
+                It.IsAny<BufferPullConsumerOptions>(), 1))
+            .Returns([consumer.Object]);
+
+        var coordinator = new RequestBatchCoordinator<int>(
+            bufferQueue.Object,
+            (_, _) => ValueTask.CompletedTask,
+            Options.Create(new RequestBatchOptions<int>()),
+            NullLogger<RequestBatchCoordinator<int>>.Instance);
+
+        Assert.Same(activity, Activity.Current);
+        Assert.Equal("initializing-request", ambient.Value);
+        var actual = await Assert.ThrowsAsync<TestConsumerException>(
+            () => coordinator.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5)));
+
+        Assert.Same(expected, actual);
+        Assert.Null(observedActivity);
+        Assert.Null(observedAmbient);
+        Assert.Same(activity, Activity.Current);
+        Assert.Equal("initializing-request", ambient.Value);
+        bufferQueue.VerifyAll();
+        consumer.VerifyAll();
+    }
+
     [Fact]
     public async Task DisposeAsync_ConsumerEnumerationFails_ReportsFailureOnRepeatedCalls()
     {
