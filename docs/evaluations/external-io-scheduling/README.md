@@ -69,8 +69,8 @@ TLS, remote jitter, database locks, retries and rate limits. See the
 [single-call follow-up](../external-io-latency/README.md) for measured HTTP durations.
 
 ```bash
-python3 scripts/scheduling-evaluation/run_io.py --output /private/tmp/http-scheduling-evaluation
-python3 scripts/scheduling-evaluation/run_io.py --batch-control --output /private/tmp/http-batch-control
+dotnet run --file scripts/scheduling-evaluation/EvaluateHttpScheduling.cs -- --output /private/tmp/http-scheduling-evaluation
+dotnet run --file scripts/scheduling-evaluation/EvaluateHttpScheduling.cs -- --batch-control --output /private/tmp/http-batch-control
 ```
 
 The [probe instructions](../../../scripts/scheduling-evaluation/README.io.md) define metrics

@@ -13,32 +13,49 @@ disposal are outside the measured operation. No exporter, processor, network, or
 ## Results
 
 Measured 2026-10-21 on macOS 27.0.1 Arm64, SDK 10.0.100, .NET 8.0.25, concurrent workstation GC, and
-BenchmarkDotNet 0.15.8. Each case used one launch, three warmups, eight measured iterations, and a 150 ms target.
-Times and managed allocations are per 256-request wave; KB means 1,024 bytes.
+BenchmarkDotNet 0.15.8. Each case used two launches, five warmups, twelve measured iterations, and a 250 ms target.
+Times and managed allocations are per 256-request wave; KB means 1,024 bytes. Error is the 99.9% confidence
+interval margin reported by BenchmarkDotNet.
 
-| Submission | Source | Listener mode | Mean | 99.9% error | Allocated |
+| Submission | Source | Listener mode | Mean | Error | Allocated |
 | --- | --- | --- | ---: | ---: | ---: |
-| 256 singles | `7800065` baseline | Disabled | 144.19 us | 27.75 us | 89.54 KB |
-| 256 singles | current | Disabled | 120.02 us | 63.37 us | 95.34 KB |
-| 256 singles | current | Drop | 384.81 us | 209.46 us | 369.89 KB |
-| 256 singles | current | Recorded | 274.13 us | 11.89 us | 365.29 KB |
-| 8 explicit groups | `7800065` baseline | Disabled | 53.02 us | 11.18 us | 37.65 KB |
-| 8 explicit groups | current | Disabled | 45.96 us | 13.83 us | 37.58 KB |
-| 8 explicit groups | current | Drop | 89.16 us | 23.29 us | 63.50 KB |
-| 8 explicit groups | current | Recorded | 92.03 us | 19.73 us | 63.46 KB |
+| 256 singles | RequestBatcher 0.2.4 package | Disabled | 117.57 us | 7.556 us | 87.45 KB |
+| 256 singles | current source | Disabled | 119.07 us | 5.474 us | 87.84 KB |
+| 256 singles | current source | Drop | 300.70 us | 6.985 us | 366.35 KB |
+| 256 singles | current source | Recorded | 290.94 us | 4.263 us | 362.91 KB |
+| 8 explicit groups | RequestBatcher 0.2.4 package | Disabled | 42.15 us | 1.040 us | 37.77 KB |
+| 8 explicit groups | current source | Disabled | 43.94 us | 1.452 us | 37.71 KB |
+| 8 explicit groups | current source | Drop | 82.37 us | 9.898 us | 63.56 KB |
+| 8 explicit groups | current source | Recorded | 93.26 us | 8.906 us | 63.50 KB |
 
-The disabled baseline/current timing intervals overlap, so this run does not establish a throughput regression or
-improvement in the uninstrumented path. Current recorded tracing allocated about 3.8x the disabled allocation for
-single submissions and about 1.7x for explicit groups in this workload. The sampled-out listener still exercises
-context capture and completion handling, and its result was noisy; it should be treated as a workload measurement,
-not a universal cost estimate. Recorded single submissions were more stable than the other cases, but this is one
-launch on one machine and does not establish a production latency guarantee.
+The package and current Disabled results overlap at the reported 99.9% intervals, so this run does not establish a
+throughput regression or improvement in the uninstrumented path. The current source is about 1.3% slower for single
+submissions and 4.2% slower for explicit groups in this sample, with the same allocation range. Those small
+differences are below the confidence limits of this run.
 
-The baseline's `Drop` and `Recorded` rows are omitted because commit `780006523107423d3aa47bb0356dac3d0ed13847`
-contains no RequestBatcher tracing source or spans; installing the benchmark listener there is only a control for
-listener setup and cannot measure instrumentation behavior. The current rows measure the tracing implementation committed as `179ac45`, before the
-optional `requestbatcher.name` tag was added. All measured registrations are unnamed; named
-registration tagging has not been benchmarked. Both snapshots use the same benchmark source, options, request count, handler, and BenchmarkDotNet job.
+Relative to current Disabled, current Drop adds about 181.63 us and 278.51 KB for single submissions, and about
+38.43 us and 25.85 KB for explicit groups. Current Recorded adds about 171.87 us and 275.07 KB for single
+submissions, and about 49.32 us and 25.79 KB for explicit groups. These are workload measurements for Activity
+creation and completion handling. Recorded uses in-memory Activities only; there is no processor, exporter, or
+telemetry storage in the measured process. The explicit-group tracing intervals are visibly multimodal, so the
+incremental values should not be treated as a production latency guarantee.
+
+The raw BenchmarkDotNet reports are retained as [current.csv](current.csv) and [baseline.csv](baseline.csv). Both
+contain all six listener combinations; the table uses only the package Disabled rows as the old-version comparison.
+
+The current library source was commit `969102cd853a237780c3744795b8ad55e978b674`. The package comparison
+includes both context isolation and instrumentation changes; the current Disabled/Recorded comparison isolates
+the incremental cost of enabling this instrumentation.
+
+## Package evidence
+
+The baseline project was restored from the default NuGet source with `PackageReference Include="RequestBatcher"
+Version="0.2.4"`. Its assets file contains `RequestBatcher/0.2.4`, and the downloaded package was verified at:
+
+```text
+/private/tmp/requestbatcher-tracing-overhead/nuget-package-024/requestbatcher/0.2.4/requestbatcher.0.2.4.nupkg
+SHA-512: 16784b16f17d1af2315161d0df1e81aedfb0a56bd1028fba49b5493050bed3a78f9da0681862bb8c1c3a0557fabe5c6943309f9e31ede8b96329b1f76099da32
+```
 
 ## Observability
 
@@ -57,32 +74,18 @@ It listens only to the `RequestBatcher` ActivitySource. `Disabled` installs no l
 `PropagationData`, and `Recorded` returns `AllDataAndRecorded`; Recorded creates Activities in memory but installs no
 processor or exporter. No `Task.Run` or additional benchmark worker is introduced.
 
-The baseline was created with `git archive` from commit
-`780006523107423d3aa47bb0356dac3d0ed13847` into `/private/tmp/requestbatcher-baseline`, then the identical benchmark
-source was copied into that snapshot. The raw reports are retained as [current.csv](current.csv) and [baseline.csv](baseline.csv).
-
-Run the current benchmark from the repository root:
-
-```bash
-NUGET_PACKAGES=/private/tmp/requestbatcher-nuget-current NuGetAudit=false \
-dotnet run --project tests/RequestBatcher.Benchmarks/RequestBatcher.Benchmarks.csproj \
-  --configuration Release -- \
-  --filter '*TracingOverheadBenchmarks*' \
-  --artifacts /private/tmp/requestbatcher-tracing-current
-```
-
-Run the matched baseline from its archived snapshot after copying the same benchmark source:
+The reproducible runner is [CompareTracingOverhead.cs](../../../scripts/CompareTracingOverhead.cs).
+It creates a fresh run directory beneath the specified artifact directory, copies the benchmark project and pinned SDK configuration there, replaces only its core project reference with the published
+`RequestBatcher 0.2.4` package reference, verifies `project.assets.json`, then runs the package and current projects
+with the same source, options, runtime, job, and validation. It does not modify the Git worktree.
 
 ```bash
-NUGET_PACKAGES=/private/tmp/requestbatcher-nuget-baseline NuGetAudit=false \
-dotnet run --project /private/tmp/requestbatcher-baseline/tests/RequestBatcher.Benchmarks/RequestBatcher.Benchmarks.csproj \
-  --configuration Release -- \
-  --filter '*TracingOverheadBenchmarks*' \
-  --artifacts /private/tmp/requestbatcher-tracing-baseline
+dotnet run --file scripts/CompareTracingOverhead.cs -- /private/tmp/requestbatcher-tracing-overhead
 ```
 
-These are short, gated in-process waves rather than sustained service throughput or tail-latency tests. Queue
-scheduling, thread-pool state, batch formation, asynchronous completion, and benchmark coordination can dominate
-small cases. One launch per case and overlapping confidence intervals limit the strength of timing conclusions.
-Allocations are managed allocations reported by BenchmarkDotNet and include caller task aggregation and tracing state;
-they do not include native exporter buffers or telemetry backend costs.
+The runner uses two launches, five warmups, twelve measured iterations, and a 250 ms target. BenchmarkDotNet emitted
+high-priority permission warnings in this environment and reported multimodal distributions for some cases; neither
+changes correctness, but both increase uncertainty. Queue scheduling, thread-pool state, batch formation, asynchronous
+completion, and benchmark coordination can dominate these small in-process waves. Allocations are managed allocations
+reported by BenchmarkDotNet and include caller task aggregation and tracing state; they do not include native exporter
+buffers or telemetry backend costs.

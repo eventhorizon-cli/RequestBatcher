@@ -15,11 +15,11 @@ namespace RequestBatcher.Benchmarks.InMemory;
 [Orderer(SummaryOrderPolicy.FastestToSlowest)]
 [SimpleJob(
     RunStrategy.Throughput,
-    launchCount: 1,
-    warmupCount: 3,
-    iterationCount: 8,
+    launchCount: 2,
+    warmupCount: 5,
+    iterationCount: 12,
     id: "TracingOverhead")]
-[IterationTime(150)]
+[IterationTime(250)]
 public class TracingOverheadBenchmarks
 {
     private const int RequestCount = 256;

@@ -67,7 +67,7 @@ Allocation includes the instrumented pipeline; occupancy includes asynchronous w
 No old/new BufferQueue package speedup was measured.
 
 ```bash
-python3 scripts/scheduling-evaluation/run.py --output /private/tmp/scheduling-evaluation
+dotnet run --file scripts/scheduling-evaluation/EvaluateScheduling.cs -- --output /private/tmp/scheduling-evaluation
 ```
 
 The [current probe](../../../scripts/scheduling-evaluation/README.md) uses public routing

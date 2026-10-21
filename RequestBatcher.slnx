@@ -5,6 +5,8 @@
     <Project Path="src/RequestBatcher.Analyzers/RequestBatcher.Analyzers.csproj" />
   </Folder>
   <Folder Name="/samples/">
+    <Project Path="samples/RequestBatcher.Observability/Cart/RequestBatcher.Observability.Cart.csproj" />
+    <Project Path="samples/RequestBatcher.Observability/Pricing/RequestBatcher.Observability.Pricing.csproj" />
     <Project Path="samples/RequestBatcher.Deduplication/RequestBatcher.Deduplication.csproj" />
     <Project Path="samples/RequestBatcher.Delegates/RequestBatcher.Delegates.csproj" />
   </Folder>

@@ -907,6 +907,10 @@ Handler 会在分发调用链上执行，直到完成或遇到尚未完成的异
 
 ## 示例应用
 
+[持续读取可观测性示例](samples/RequestBatcher.Observability/README.md)通过 Docker Compose 启动 Cart、Pricing 两个 Web API、C# 流量生成器、
+PostgreSQL 和 Grafana OTel LGTM。生成器持续查询含 1 条或 32 条商品的购物车报价，展示调用总耗时、独立批次的 ActivityLink
+以及下游数据库 span。
+
 [PostgreSQL Web API 示例](samples/RequestBatcher.Deduplication)包含三个价格操作：
 
 - `POST /prices` 使用未命名的 `IRequestBatcher<PriceUpdate>`，提交完整的结构化 `PriceUpdate` 并写入价格。

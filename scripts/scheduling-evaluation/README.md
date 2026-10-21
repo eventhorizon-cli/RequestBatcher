@@ -8,7 +8,7 @@ PostgreSQL/Redis comparisons, see the [arrival-rate probe](README.arrival.md).
 Run from the repository root with the SDK selected by `global.json`:
 
 ```bash
-python3 scripts/scheduling-evaluation/run.py --output artifacts/scheduling-evaluation
+dotnet run --file scripts/scheduling-evaluation/EvaluateScheduling.cs -- --output artifacts/scheduling-evaluation
 ```
 
 The script builds an isolated copy of the current library in a temporary directory.
@@ -24,7 +24,7 @@ A production design needs to resolve that boundary and scheduling-failure cleanu
 Run the deterministic scheduling self-check without the matrix:
 
 ```bash
-python3 scripts/scheduling-evaluation/run.py --self-check --output artifacts/scheduling-self-check
+dotnet run --file scripts/scheduling-evaluation/EvaluateScheduling.cs -- --self-check --output artifacts/scheduling-self-check
 ```
 
 The check gates the scheduled delegate until after submission returns and fails if

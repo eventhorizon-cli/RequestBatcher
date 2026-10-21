@@ -55,7 +55,7 @@ These controlled loopback results do not predict rare production tails, variable
 TLS, retries, rate limits or database locks. One call per handler batch is assumed.
 
 ```bash
-python3 scripts/scheduling-evaluation/run_io.py \
+dotnet run --file scripts/scheduling-evaluation/EvaluateHttpScheduling.cs -- \
   --latency-sweep --delays 10 100 500 --launches 2 \
   --measured-requests 2048 --warmup-requests 1024 --iterations 3 \
   --output /private/tmp/http-latency-evaluation

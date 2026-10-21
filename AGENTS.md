@@ -8,6 +8,10 @@ You are an AI coding assistant for this repository.
 - Follow [`.editorconfig`](.editorconfig) and nearby code before introducing a new style or abstraction.
 - Keep changes focused, maintainable, and production-ready. Preserve unrelated user changes.
 - Use the SDK selected by [`global.json`](global.json); do not change the SDK or target-framework policy incidentally.
+- Implement necessary repository automation and evaluation scripts as file-based C# applications, run with
+  `dotnet run --file path/to/script.cs -- ...` using the repository SDK. Do not introduce Python scripts or require
+  a separate scripting runtime. Name these files with descriptive PascalCase names, such as `EvaluateScheduling.cs`.
+  Keep script dependencies minimal and document their arguments and validation.
 
 ## Architecture
 

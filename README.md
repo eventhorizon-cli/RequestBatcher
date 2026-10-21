@@ -989,6 +989,10 @@ are not logged.
 
 ## Sample Application
 
+The [continuous-read observability sample](samples/RequestBatcher.Observability/README.md) starts the Cart and Pricing Web APIs, a C# traffic generator, PostgreSQL,
+and Grafana OTel LGTM with Docker Compose. It shows complete call spans, independent linked batch spans,
+and downstream database spans while continuously pricing shopping carts with 1 or 32 items.
+
 The [PostgreSQL Web API sample](samples/RequestBatcher.Deduplication) demonstrates two pipelines in a Minimal API:
 
 - `POST /prices` submits a structured `PriceUpdate` to the unnamed write batcher. The handler merges updates by

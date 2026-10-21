@@ -902,6 +902,10 @@ the library does not promise zero overhead for enabled tracing.
 
 ## Sample Application
 
+The [continuous-read observability sample](https://github.com/eventhorizon-cli/RequestBatcher/blob/main/samples/RequestBatcher.Observability/README.md) starts the Cart and Pricing Web APIs, a C# traffic generator, PostgreSQL,
+and Grafana OTel LGTM with Docker Compose. It shows complete call spans, independent linked batch spans,
+and downstream database spans while continuously pricing shopping carts with 1 or 32 items.
+
 The [PostgreSQL Web API sample](https://github.com/eventhorizon-cli/RequestBatcher/tree/main/samples/RequestBatcher.Deduplication) demonstrates two pipelines in a Minimal API:
 
 - `POST /prices` submits a structured `PriceUpdate` to the unnamed write batcher. The handler merges updates by
