@@ -75,3 +75,8 @@ python3 scripts/scheduling-evaluation/run_io.py --batch-control --output /privat
 
 The [probe instructions](../../../scripts/scheduling-evaluation/README.io.md) define metrics
 and setup. A local HTTP listener is required; the runner stops it automatically.
+
+## Observability
+
+The recorded HTTP scheduling comparison does not include the optional `RequestBatcher.OpenTelemetry` instrumentation.
+See the [observability design](../../observability-design.md) for the production trace model.

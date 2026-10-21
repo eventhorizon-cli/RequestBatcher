@@ -120,3 +120,11 @@ successful update and waits for the applicable handler batch before completing e
 
 Database failures propagate to the HTTP request as a server error; RequestBatcher does not retry them automatically.
 RequestBatcher is in-process, so pending requests are not recovered after a process failure.
+
+## Observability
+
+For OpenTelemetry in this Web API, install `RequestBatcher.OpenTelemetry` with your OpenTelemetry hosting and exporter
+packages, then call `AddRequestBatcherInstrumentation()` from `WithTracing`. `RequestBatcher.Execute` covers the
+caller's full wait; each `RequestBatcher.ProcessBatch` span is an independent Consumer trace linked to the calls that
+entered that batch. See the [observability guide](../../docs/observability-design.md) and
+[correlation diagram](../../docs/diagrams/observability.svg).

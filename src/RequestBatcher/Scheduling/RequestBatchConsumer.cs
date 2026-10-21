@@ -20,27 +20,30 @@ internal sealed class RequestBatchConsumer<TRequest>(
         }
 
         var requests = CreateHandlerInput(activeRequests);
+        using var activity = RequestBatcherTracing.StartBatch(requestTypeName, activeRequests);
 
         try
         {
             logger.BatchStarted(requestTypeName, requests.Length);
             await handler(requests, cancellationToken).ConfigureAwait(false);
 
+            logger.BatchCompleted(requestTypeName, requests.Length);
+            // Publish completion only after the handler scope and its batch span have ended.
+            activity?.Stop();
             for (var i = 0; i < activeRequests.Count; i++)
             {
                 activeRequests[i].CompleteSuccessfully();
             }
-
-            logger.BatchCompleted(requestTypeName, requests.Length);
         }
         catch (Exception exception)
         {
-            CompleteWithError(activeRequests, exception);
-
+            RequestBatcherTracing.RecordFailure(activity, exception);
             logger.BatchFailed(
                 exception,
                 requestTypeName,
                 requests.Length);
+            activity?.Stop();
+            CompleteWithError(activeRequests, exception);
         }
     }
 

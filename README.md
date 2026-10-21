@@ -111,6 +111,46 @@ Use `Microsoft.Extensions.DependencyInjection` and `RequestBatcher`. The [Reques
 section below defines `PriceQuery`, `PriceQuote`, `PriceQueryHandler`, and the `IPriceStore` dependency. In application
 services, constructor-inject `IRequestBatcher<PriceQuery, PriceQuote?>` instead of resolving it manually.
 
+## Observability
+
+RequestBatcher exposes optional OpenTelemetry tracing without adding an OpenTelemetry SDK dependency to the core
+package. Install the adapter and your application's OpenTelemetry hosting and exporter packages:
+
+```bash
+dotnet add package RequestBatcher.OpenTelemetry
+dotnet add package OpenTelemetry.Extensions.Hosting
+dotnet add package OpenTelemetry.Instrumentation.AspNetCore
+dotnet add package OpenTelemetry.Exporter.OpenTelemetryProtocol
+```
+
+Register the `RequestBatcher` source with the provider you already use in the Web API:
+
+```csharp
+using Microsoft.Extensions.DependencyInjection;
+using OpenTelemetry.Trace;
+
+builder.Services.AddOpenTelemetry()
+    .WithTracing(tracing => tracing
+        .AddAspNetCoreInstrumentation()
+        .AddRequestBatcherInstrumentation()
+        .AddOtlpExporter());
+```
+
+The caller span, `RequestBatcher.Execute` (`Internal`), measures the complete call: admission and capacity wait,
+queue residence, handler execution, scope disposal, and response materialization. Each non-empty dispatched batch has
+an independent `RequestBatcher.ProcessBatch` (`Consumer`) span. It links to the distinct caller spans that contributed
+requests, while handler database or HTTP spans are children of the batch span. A single explicit submission can be
+split across multiple batches, so several batch spans can link to the same call span.
+
+![RequestBatcher observability model](docs/diagrams/observability.svg)
+
+Only `ActivityContext` is transported. HTTP request activities, logging scopes, baggage, tenant values, and other
+`AsyncLocal` state are not copied into background processing; pass application data explicitly in the request. Links
+are causal and do not imply a shared trace ID or ordering. The application controls sampling and exporter retention;
+large batches may exceed an SDK or exporter link limit, so configure that limit when complete correlation matters.
+Tracing is best effort and does not recover in-process pending work after a process failure. With no listeners, the
+library keeps its normal path and does not claim zero overhead when tracing is enabled.
+
 ## Named Batchers and Primitive Requests
 
 A request can be a primitive ID. Use the `batcherName` overload when several operations accept the same request type:
@@ -933,7 +973,7 @@ Background dispatch and consumer monitoring run without inheriting the initializ
 Handlers do not inherit HTTP request activities (`Activity.Current`), logging scopes, or other `AsyncLocal` values
 from initialization or submission. The caller's context is preserved after resolution and after awaiting completion.
 Pass required application data, such as tenant identifiers, explicitly in requests. Activities created inside a
-handler flow normally across its awaits; RequestBatcher does not create batch spans or automatic trace links.
+handler flow normally across its awaits. See [Observability](#observability) for the optional batch spans and links.
 Singleton constructors must not capture request-specific state; they follow the container's normal creation rules.
 
 Logs use the application's `Microsoft.Extensions.Logging` pipeline under the category

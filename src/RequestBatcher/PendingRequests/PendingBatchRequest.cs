@@ -1,6 +1,6 @@
 namespace RequestBatcher.PendingRequests;
 
-internal sealed class PendingBatchRequest<TRequest>
+internal class PendingBatchRequest<TRequest>
 {
     private const int Queued = 0;
     private const int Processing = 1;

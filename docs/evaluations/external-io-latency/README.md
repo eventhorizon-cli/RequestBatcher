@@ -64,3 +64,8 @@ python3 scripts/scheduling-evaluation/run_io.py \
 See the [probe instructions](../../../scripts/scheduling-evaluation/README.io.md) for timing
 boundaries and cache settings, and the [previous comparison](../external-io-scheduling/README.md)
 for the individual-submission workloads. The local server stops automatically.
+
+## Observability
+
+This historical HTTP latency evaluation does not measure the optional `RequestBatcher.OpenTelemetry` instrumentation.
+See the [observability design](../../observability-design.md) for caller spans, batch links, and downstream children.

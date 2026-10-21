@@ -76,3 +76,9 @@ These finite-window diagnostics alone do not justify changing defaults. The
 [arrival-rate evaluation](../../docs/evaluations/arrival-scheduling/README.md)
 adds paced and downstream comparisons; neither prototype validates production
 lifecycle semantics. PostgreSQL/Redis workloads require Docker.
+
+## Observability
+
+These scheduling probes use their own diagnostic counters and are not measurements of the optional
+`RequestBatcher.OpenTelemetry` spans. Applications can register those spans with
+`AddRequestBatcherInstrumentation()`; see the [observability design](../../docs/observability-design.md).

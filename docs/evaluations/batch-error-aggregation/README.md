@@ -92,3 +92,8 @@ dotnet run --project tests/RequestBatcher.Benchmarks/RequestBatcher.Benchmarks.c
   --filter '*MixedSinglesAndExplicitGroupAsync*' '*ExplicitGroupPartialCancellationAsync*' \
   --artifacts /private/tmp/error-accounting-repeat
 ```
+
+## Observability
+
+This allocation and failure-accounting evaluation does not measure the optional `RequestBatcher.OpenTelemetry`
+instrumentation. See the [observability design](../../observability-design.md) for tracing integration and link limits.

@@ -50,3 +50,8 @@ dotnet run --project tests/RequestBatcher.Benchmarks/RequestBatcher.Benchmarks.c
   --configuration Release -- \
   --filter '*BatchCompletionBenchmarks.SharedBatchCompletion*' '*ExplicitCompletionBenchmarks*' --artifacts /private/tmp/shared-completion-results
 ```
+
+## Observability
+
+The recorded completion-source comparison does not include the optional `RequestBatcher.OpenTelemetry` instrumentation.
+See the [observability design](../../observability-design.md) for call duration and batch correlation.

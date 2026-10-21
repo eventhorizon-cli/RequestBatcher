@@ -100,6 +100,43 @@ var quote = await batcher.ExecuteAsync(new PriceQuery(ProductId: 101));
 `PriceQuery`、`PriceQuote`、`PriceQueryHandler` 以及 `IPriceStore` 依赖。应用服务中推荐通过构造函数注入
 `IRequestBatcher<PriceQuery, PriceQuote?>`。
 
+## 可观测性
+
+RequestBatcher 的核心包不依赖 OpenTelemetry SDK。需要追踪时，安装适配包、OpenTelemetry Hosting 集成包以及你
+选择的 Exporter：
+
+```bash
+dotnet add package RequestBatcher.OpenTelemetry
+dotnet add package OpenTelemetry.Extensions.Hosting
+dotnet add package OpenTelemetry.Instrumentation.AspNetCore
+dotnet add package OpenTelemetry.Exporter.OpenTelemetryProtocol
+```
+
+在 Web API 的现有 OpenTelemetry Provider 中注册 RequestBatcher 的 ActivitySource：
+
+```csharp
+using Microsoft.Extensions.DependencyInjection;
+using OpenTelemetry.Trace;
+
+builder.Services.AddOpenTelemetry()
+    .WithTracing(tracing => tracing
+        .AddAspNetCoreInstrumentation()
+        .AddRequestBatcherInstrumentation()
+        .AddOtlpExporter());
+```
+
+调用方 span `RequestBatcher.Execute`（`Internal`）覆盖完整调用过程：准入和容量等待、队列停留、Handler 执行、作用域
+释放、响应物化以及结果可用。每个实际分发的非空批次都会创建独立的 `RequestBatcher.ProcessBatch`（`Consumer`）span，
+通过 links 关联真正进入该批次的调用方 span；Handler 内的数据库或 HTTP span 会成为批次 span 的子 span。一次显式
+批量提交可能拆成多个 Handler 批次，因此多个批次 span 可能通过 link 关联同一个调用方 span。
+
+![RequestBatcher 可观测性模型](https://raw.githubusercontent.com/eventhorizon-cli/RequestBatcher/main/docs/diagrams/observability.svg)
+
+后台只传递 `ActivityContext`，不会复制 HTTP 请求 Activity、日志 scope、baggage、租户值或其他 `AsyncLocal` 状态；需要的
+业务数据应显式放入请求。Link 表示因果关系，不表示共享 Trace ID 或执行顺序。采样和 Exporter 保留策略由应用控制；
+大批次可能超过 SDK 或 Exporter 的 link 数量限制，需要完整关联时请相应配置。Tracing 是尽力而为的诊断能力，进程崩溃
+后不会恢复内存中的待处理请求；没有 listener 时仍走普通路径，也不对启用 tracing 的场景宣称零开销。
+
 ## 命名批处理与基础类型请求
 
 请求可以直接使用商品 ID。多种操作使用相同请求类型时，通过 `batcherName` 重载区分，例如 `"price"` 和

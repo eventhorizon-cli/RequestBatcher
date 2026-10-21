@@ -164,3 +164,10 @@ are not resolved by this sample.
 
 RequestBatcher is in-process and does not recover accepted requests after a process failure. Database errors propagate
 to the HTTP request; the sample does not add automatic retries.
+
+## Observability
+
+The sample can use the optional `RequestBatcher.OpenTelemetry` adapter with the application's OpenTelemetry hosting
+and exporter packages. Register it with `WithTracing(tracing => tracing.AddRequestBatcherInstrumentation())`.
+`RequestBatcher.Execute` measures the full caller wait, while `RequestBatcher.ProcessBatch` is an independent Consumer
+span linked to contributing calls. See the [observability guide](../../docs/observability-design.md).

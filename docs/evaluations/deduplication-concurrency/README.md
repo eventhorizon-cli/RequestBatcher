@@ -182,3 +182,8 @@ query, splitting it solely to introduce WhenAll adds work and allocation. When
 query-size limits require splitting, deduplicate before splitting to preserve
 the larger batch's deduplication scope. Real query cost and arrival patterns must
 determine the final batch size and concurrency.
+
+## Observability
+
+The recorded comparison does not include the optional `RequestBatcher.OpenTelemetry` instrumentation or its tracing
+overhead. See the [observability design](../../observability-design.md) for span correlation in this workload.

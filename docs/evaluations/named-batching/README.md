@@ -68,3 +68,8 @@ dotnet run --project tests/RequestBatcher.Benchmarks/RequestBatcher.Benchmarks.c
 The benchmark uses two launches, five warmups and twelve measured iterations per case with a
 300 ms iteration target. BenchmarkDotNet reports time and managed allocation per 256-request
 wave, with named/unnamed ratios within each submission group and handler lifetime.
+
+## Observability
+
+This historical named-batching comparison does not measure the optional `RequestBatcher.OpenTelemetry` instrumentation.
+See the [observability design](../../observability-design.md) for integration guidance.

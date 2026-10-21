@@ -266,8 +266,10 @@ semantics and must not capture request-specific state in their constructors.
 
 This adds one scheduling boundary per long-lived task, not per batch. Batch
 dispatch, handler scope ownership, admission, cancellation, and draining retain
-their existing contracts. Public APIs, target frameworks, and dependencies are
-unchanged. No batch Activity or automatic trace links are created.
+their existing contracts. Public APIs and target frameworks are unchanged. The
+optional tracing contract is defined in [Observability](observability-design.md):
+each dispatched batch may create an independent `RequestBatcher.ProcessBatch`
+Consumer span with links to the submission spans that contributed requests.
 
 Deterministic regressions cover initialization under an Activity and AsyncLocal,
 later submissions under another Activity and without one, preservation of caller

@@ -74,3 +74,8 @@ The [current probe](../../../scripts/scheduling-evaluation/README.md) uses publi
 configuration. Historical unkeyed multi-partition cases above required an experimental
 override; current production deliberately uses one unkeyed partition. The original matrix
 had 40 configurations and 12 bursts; the current probe uses 33 configurations and six bursts.
+
+## Observability
+
+The historical BufferQueue comparison does not include the optional `RequestBatcher.OpenTelemetry` instrumentation.
+See the [observability design](../../observability-design.md) for the current `Execute` and `ProcessBatch` spans.

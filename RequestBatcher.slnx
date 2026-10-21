@@ -1,6 +1,7 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/RequestBatcher/RequestBatcher.csproj" />
+    <Project Path="src/RequestBatcher.OpenTelemetry/RequestBatcher.OpenTelemetry.csproj" />
     <Project Path="src/RequestBatcher.Analyzers/RequestBatcher.Analyzers.csproj" />
   </Folder>
   <Folder Name="/samples/">

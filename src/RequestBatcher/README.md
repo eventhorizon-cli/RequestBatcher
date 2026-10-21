@@ -849,8 +849,50 @@ Background dispatch and consumer monitoring run without inheriting the initializ
 Handlers do not inherit HTTP request activities (`Activity.Current`), logging scopes, or other `AsyncLocal` values
 from initialization or submission. The caller's context is preserved after resolution and after awaiting completion.
 Pass required application data, such as tenant identifiers, explicitly in requests. Activities created inside a
-handler flow normally across its awaits; RequestBatcher does not create batch spans or automatic trace links.
-Singleton constructors must not capture request-specific state; they follow the container's normal creation rules.
+handler flow normally across its awaits. The optional `RequestBatcher.OpenTelemetry` package adds an
+`AddRequestBatcherInstrumentation()` extension for OpenTelemetry SDK integration; the core package itself has no SDK
+dependency. Singleton constructors must not capture request-specific state; they follow the container's normal creation
+rules.
+
+## Observability
+
+Install the adapter and the hosting/exporter packages in the application:
+
+```bash
+dotnet add package RequestBatcher.OpenTelemetry
+dotnet add package OpenTelemetry.Extensions.Hosting
+dotnet add package OpenTelemetry.Instrumentation.AspNetCore
+dotnet add package OpenTelemetry.Exporter.OpenTelemetryProtocol
+```
+
+Register the source with the application's provider:
+
+```csharp
+using Microsoft.Extensions.DependencyInjection;
+using OpenTelemetry.Trace;
+
+services.AddOpenTelemetry()
+    .WithTracing(tracing => tracing
+        .AddAspNetCoreInstrumentation()
+        .AddRequestBatcherInstrumentation()
+        .AddOtlpExporter());
+```
+
+`RequestBatcher.Execute` is an `Internal` call span under the caller's current Activity. It measures admission,
+capacity waiting, queue residence, handler execution, handler-scope disposal, and response materialization until the
+returned task's outcome is available. Each non-empty dispatched batch creates an independent root
+`RequestBatcher.ProcessBatch` `Consumer` span and links the distinct submission contexts that contributed requests.
+Handler database and HTTP spans are children of that batch span. Links express causality across the in-process queue;
+they do not share a trace ID or imply ordering. A submission may contribute to multiple batches after splitting, and a
+batch may link to many submissions.
+
+Only `ActivityContext` is transported. HTTP activities, logging scopes, baggage, and other `AsyncLocal` values are not
+copied into the consumer. Sampling is controlled by the application's provider; parent-based sampling does not
+automatically follow links, and SDK/exporter link limits can drop links from large batches. Tracing is best effort and
+does not recover pending requests after process failure. When no listener is registered, the normal path is retained;
+the library does not promise zero overhead for enabled tracing.
+
+![RequestBatcher observability model](https://raw.githubusercontent.com/eventhorizon-cli/RequestBatcher/main/docs/diagrams/observability.svg)
 
 ## Sample Application
 

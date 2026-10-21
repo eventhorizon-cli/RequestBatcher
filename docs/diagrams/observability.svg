@@ -1,0 +1,77 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="620" viewBox="0 0 1400 620" role="img" aria-labelledby="title desc">
+  <title id="title">RequestBatcher observability model</title>
+  <desc id="desc">An independent batch consumer span links to two caller execution spans. The batch span owns the handler and downstream child spans.</desc>
+  <defs>
+    <marker id="solid-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#596773"/>
+    </marker>
+    <marker id="link-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10" fill="none" stroke="#3567a7" stroke-width="1.5"/>
+    </marker>
+    <style>
+      .label { font-family: sans-serif; font-size: 16px; fill: #303b44; }
+      .small { font-family: sans-serif; font-size: 14px; fill: #596773; }
+      .node-title { font-family: sans-serif; font-size: 17px; font-weight: 600; fill: #173f35; }
+      .node-text { font-family: sans-serif; font-size: 14px; fill: #303b44; }
+      .edge-label { font-family: sans-serif; font-size: 14px; fill: #3567a7; }
+    </style>
+  </defs>
+  <rect width="1400" height="620" fill="#ffffff"/>
+
+
+  <rect x="48" y="96" width="420" height="150" rx="8" fill="#eaf2ff" stroke="#3567a7" stroke-width="2"/>
+  <text x="72" y="130" class="node-title" fill="#1d3b66">Caller A / HTTP request</text>
+  <text x="72" y="160" class="node-text">RequestBatcher.Execute</text>
+  <text x="72" y="184" class="node-text">Internal span</text>
+  <text x="72" y="216" class="small">capacity wait + queue + handler + result</text>
+
+  <rect x="48" y="330" width="420" height="150" rx="8" fill="#eaf2ff" stroke="#3567a7" stroke-width="2"/>
+  <text x="72" y="364" class="node-title" fill="#1d3b66">Caller B / HTTP request</text>
+  <text x="72" y="394" class="node-text">RequestBatcher.Execute</text>
+  <text x="72" y="418" class="node-text">Internal span</text>
+  <text x="72" y="450" class="small">capacity wait + queue + handler + result</text>
+
+  <rect x="535" y="190" width="240" height="200" rx="8" fill="#edf1f5" stroke="#596773" stroke-width="2"/>
+  <text x="559" y="227" class="node-title" fill="#303b44">In-process queue</text>
+  <text x="559" y="260" class="node-text">admission / capacity</text>
+  <text x="559" y="284" class="node-text">queue residence</text>
+  <text x="559" y="332" class="small">requests may form</text>
+  <text x="559" y="354" class="small">one or more batches</text>
+
+  <rect x="860" y="190" width="300" height="200" rx="8" fill="#edf1f5" stroke="#596773" stroke-width="2"/>
+  <text x="884" y="227" class="node-title" fill="#303b44">RequestBatcher.ProcessBatch</text>
+  <text x="884" y="260" class="node-text">Consumer root span</text>
+  <text x="884" y="300" class="small">independent background trace</text>
+  <text x="884" y="332" class="small">links to contributing calls</text>
+  <text x="884" y="364" class="small">batch size + error status</text>
+
+  <rect x="1220" y="90" width="150" height="145" rx="8" fill="#f4edfb" stroke="#75529b" stroke-width="2"/>
+  <text x="1242" y="124" class="node-title" fill="#422d59">Handler</text>
+  <text x="1242" y="157" class="node-text">scoped</text>
+  <text x="1242" y="180" class="node-text">application</text>
+  <text x="1242" y="203" class="node-text">handler</text>
+
+  <rect x="1220" y="300" width="150" height="145" rx="8" fill="#fff4d6" stroke="#8a6a1d" stroke-width="2"/>
+  <text x="1242" y="334" class="node-title" fill="#4d3b0e">Downstream</text>
+  <text x="1242" y="367" class="node-text">DB / HTTP</text>
+  <text x="1242" y="400" class="small">child spans</text>
+
+  <path d="M 468 171 C 495 171, 505 220, 535 240" fill="none" stroke="#596773" stroke-width="2" marker-end="url(#solid-arrow)"/>
+  <path d="M 468 405 C 495 405, 505 360, 535 340" fill="none" stroke="#596773" stroke-width="2" marker-end="url(#solid-arrow)"/>
+  <path d="M 775 290 L 860 290" fill="none" stroke="#596773" stroke-width="2" marker-end="url(#solid-arrow)"/>
+  <path d="M 1160 254 C 1185 230, 1195 190, 1220 170" fill="none" stroke="#596773" stroke-width="2" marker-end="url(#solid-arrow)"/>
+  <path d="M 1295 235 L 1295 300" fill="none" stroke="#596773" stroke-width="2" marker-end="url(#solid-arrow)"/>
+
+  <path d="M 1010 190 L 1010 70 L 258 70 L 258 96" fill="none" stroke="#3567a7" stroke-width="2" stroke-dasharray="8 6" marker-end="url(#link-arrow)"/>
+  <path d="M 1010 390 L 1010 510 L 258 510 L 258 480" fill="none" stroke="#3567a7" stroke-width="2" stroke-dasharray="8 6" marker-end="url(#link-arrow)"/>
+  <rect x="625" y="42" width="165" height="28" rx="4" fill="#ffffff"/>
+  <text x="650" y="62" class="edge-label">ActivityLink on batch</text>
+  <rect x="632" y="478" width="165" height="28" rx="4" fill="#ffffff"/>
+  <text x="657" y="498" class="edge-label">ActivityLink on batch</text>
+
+  <line x1="48" y1="555" x2="94" y2="555" stroke="#596773" stroke-width="2" marker-end="url(#solid-arrow)"/>
+  <text x="108" y="560" class="small">request / execution flow</text>
+  <line x1="315" y1="555" x2="361" y2="555" stroke="#3567a7" stroke-width="2" stroke-dasharray="8 6" marker-end="url(#link-arrow)"/>
+  <text x="375" y="560" class="small">causal link; no shared parent or ordering</text>
+  <text x="930" y="555" class="small">Batch owns handler and downstream child spans.</text>
+</svg>

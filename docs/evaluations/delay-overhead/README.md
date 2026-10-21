@@ -90,3 +90,8 @@ dotnet run --project tests/RequestBatcher.Benchmarks/RequestBatcher.Benchmarks.c
 ```
 
 原始日志和完整导出仅保留在 `/private/tmp`。
+
+## Observability
+
+This historical delay and overhead evaluation does not measure the optional `RequestBatcher.OpenTelemetry`
+instrumentation. See the [observability design](../../observability-design.md) for the production tracing contract.

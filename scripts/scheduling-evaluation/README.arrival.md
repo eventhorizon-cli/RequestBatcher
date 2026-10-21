@@ -73,3 +73,9 @@ Percentiles select sorted latency at zero-based index `ceil(count * p) - 1`.
 `ExactOnce` verifies that each logical ID reaches the in-process handler once.
 Database checks verify final key/row counts and values; they do not prove
 exactly-once execution of external side effects.
+
+## Observability
+
+This historical diagnostic uses temporary probe hooks; its results do not represent runs with the optional
+`RequestBatcher.OpenTelemetry` instrumentation enabled. For production tracing, use
+`AddRequestBatcherInstrumentation()` and follow the [observability design](../../docs/observability-design.md).

@@ -111,3 +111,8 @@ This run shows no clear steady-state regression from delegate binding checks or
 the cached invoker. It does not measure the first-call compilation cost or prove
 that performance is identical for every workload. Benchmark processes used normal
 priority because raising priority was unavailable on this machine.
+
+## Observability
+
+The delegate-handler measurements do not include the optional `RequestBatcher.OpenTelemetry` instrumentation. See the
+[observability design](../../observability-design.md) for OpenTelemetry setup and span boundaries.

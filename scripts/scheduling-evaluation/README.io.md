@@ -108,3 +108,9 @@ measured requests, and three measured iterations. Use `--measured-requests`,
 `--warmup-requests`, and `--iterations` to change those counts; request counts must be
 positive multiples of 1,024. `environment.json` records the sweep flag, effective delay
 list, and the actual counts and iteration count used.
+
+## Observability
+
+The HTTP probe's timing hooks are separate from the optional `RequestBatcher.OpenTelemetry` instrumentation; reported
+historical results do not claim to include those spans. See the [observability design](../../docs/observability-design.md)
+for the `Execute` call span and linked `ProcessBatch` Consumer span.
