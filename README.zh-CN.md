@@ -130,6 +130,12 @@ builder.Services.AddOpenTelemetry()
 通过 links 关联真正进入该批次的调用方 span；Handler 内的数据库或 HTTP span 会成为批次 span 的子 span。一次显式
 批量提交可能拆成多个 Handler 批次，因此多个批次 span 可能通过 link 关联同一个调用方 span。
 
+span 操作名固定为 `RequestBatcher.Execute` 和 `RequestBatcher.ProcessBatch`。命名注册时，两类 span 都会写入
+`requestbatcher.name`，其值就是公开的 `batcherName` 原值；未命名注册省略此 tag，不会使用内部 topic 或 pipeline key。
+要从一次调用追踪到实际执行，先从调用方 span 通过 tracing 后端的反向 link 视图定位关联的批次 span，再查看该批次
+span 下 Handler 创建的数据库或 HTTP 子 span。Activity link 表示因果引用而不是共享父子边，因此反向导航取决于后端
+能力，也不保证显示在同一棵 trace 树中。
+
 ![RequestBatcher 可观测性模型](https://raw.githubusercontent.com/eventhorizon-cli/RequestBatcher/main/docs/diagrams/observability.svg)
 
 后台只传递 `ActivityContext`，不会复制 HTTP 请求 Activity、日志 scope、baggage、租户值或其他 `AsyncLocal` 状态；需要的

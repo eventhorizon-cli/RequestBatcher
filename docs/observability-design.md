@@ -43,7 +43,11 @@ No valid context means no link. Links and batch attributes are supplied at span
 creation, so samplers can inspect them. The application's sampler governs batch
 root sampling; parent-based sampling does not automatically follow links.
 
-Span names are fixed. Tags use `requestbatcher.request.type`,
+Span names are fixed. Both call and batch spans include `requestbatcher.name` for named
+registrations; unnamed registrations omit it. The name is the exact public DI registration
+name, never an internal topic or pipeline key. It is available at Activity creation for
+sampling and carried once on the coordinator through dispatch and response/delegate adapters,
+without adding per-request state. Tags also use `requestbatcher.request.type`,
 `requestbatcher.batch.size`, and `requestbatcher.canceled`. Faults set Error and
 `error.type`; payloads, tenant keys, exception messages and stacks are not emitted.
 Expected task cancellation sets the cancellation tag without Error; a faulted
@@ -84,7 +88,9 @@ restoration, downstream children, scope disposal and response materialization,
 queue/capacity waiting, cancellation before/after dispatch, faults (including
 faulted OperationCanceledException), duplicate links, no-context calls, rejected
 and empty submissions, sampled-out tracing, named/delegate/response forms, and
-adapter registration/null validation. Tests with global listeners are isolated
+adapter registration/null validation. Named and unnamed class/delegate registrations,
+with and without responses, must expose the correct name on both spans without mixing
+concurrent pipelines. Tests with global listeners are isolated
 from unrelated Activity-sensitive tests.
 
 Matched measurements compare the previous release implementation plus context

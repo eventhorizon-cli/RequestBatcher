@@ -47,8 +47,10 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
         RequestBatchHandler<TRequest> handler,
         IOptions<RequestBatchOptions<TRequest>> options,
         ILogger<RequestBatchCoordinator<TRequest>> logger,
-        string topicName = TopicName)
+        string topicName = TopicName,
+        string? batcherName = null)
     {
+        BatcherName = batcherName;
         _logger = logger;
         _options = options.Value.ValidateAndClone();
         _onRequestFinished = OnRequestFinished;
@@ -64,7 +66,8 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
             handler,
             _options.MaxConcurrency,
             _logger,
-            _requestTypeName);
+            _requestTypeName,
+            batcherName);
         var consumer = bufferQueue.CreatePullConsumers<PendingBatchRequest<TRequest>>(
             new BufferPullConsumerOptions
             {
@@ -93,13 +96,16 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
             HandleConsumerFailure);
     }
 
+    internal string? BatcherName { get; }
+
     /// <inheritdoc />
     public Task ExecuteAsync(TRequest request, CancellationToken cancellationToken = default) =>
         RequestBatcherTracing.Source.HasListeners()
             ? RequestBatcherTracing.TraceCall(
                 _requestTypeName,
                 (Batcher: this, Request: request, Token: cancellationToken),
-                static (state, context) => state.Batcher.ExecuteCoreAsync(state.Request, null, state.Token, context))
+                static (state, context) => state.Batcher.ExecuteCoreAsync(state.Request, null, state.Token, context),
+                BatcherName)
             : ExecuteCoreAsync(request, null, cancellationToken);
 
     internal Task ExecuteCoreAsync(
@@ -131,7 +137,8 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
             ? RequestBatcherTracing.TraceCall(
                 _requestTypeName,
                 (Batcher: this, Requests: requests, Token: cancellationToken),
-                static (state, context) => state.Batcher.ExecuteCoreAsync(state.Requests, state.Token, context))
+                static (state, context) => state.Batcher.ExecuteCoreAsync(state.Requests, state.Token, context),
+                BatcherName)
             : ExecuteCoreAsync(requests, cancellationToken);
     }
 

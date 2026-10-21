@@ -24,14 +24,15 @@ internal sealed class BatchDispatchLoop<TRequest> : IDisposable
         RequestBatchHandler<TRequest> handler,
         int maxConcurrency,
         ILogger logger,
-        string requestTypeName)
+        string requestTypeName,
+        string? batcherName = null)
     {
         ArgumentNullException.ThrowIfNull(handler);
         ArgumentOutOfRangeException.ThrowIfLessThan(maxConcurrency, 1);
         ArgumentNullException.ThrowIfNull(logger);
         ArgumentException.ThrowIfNullOrWhiteSpace(requestTypeName);
 
-        _batchConsumer = new RequestBatchConsumer<TRequest>(handler, logger, requestTypeName);
+        _batchConsumer = new RequestBatchConsumer<TRequest>(handler, logger, requestTypeName, batcherName);
         _executionSlots = new SemaphoreSlim(maxConcurrency, maxConcurrency);
         _logger = logger;
         _requestTypeName = requestTypeName;

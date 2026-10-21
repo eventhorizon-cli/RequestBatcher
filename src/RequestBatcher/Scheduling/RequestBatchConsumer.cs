@@ -7,7 +7,8 @@ namespace RequestBatcher.Scheduling;
 internal sealed class RequestBatchConsumer<TRequest>(
     RequestBatchHandler<TRequest> handler,
     ILogger logger,
-    string requestTypeName)
+    string requestTypeName,
+    string? batcherName = null)
 {
     internal async ValueTask ExecuteAsync(
         IReadOnlyList<PendingBatchRequest<TRequest>> bufferedRequests,
@@ -20,7 +21,7 @@ internal sealed class RequestBatchConsumer<TRequest>(
         }
 
         var requests = CreateHandlerInput(activeRequests);
-        using var activity = RequestBatcherTracing.StartBatch(requestTypeName, activeRequests);
+        using var activity = RequestBatcherTracing.StartBatch(requestTypeName, activeRequests, batcherName);
 
         try
         {

@@ -24,7 +24,8 @@ internal sealed class DelegateRequestBatcher<TRequest>(
                 _requestTypeName,
                 (Batcher: this, Request: request, Callback: callback, Token: cancellationToken),
                 static (state, context) => state.Batcher.SubmitCoreAsync(
-                    state.Request, state.Callback, state.Token, context))
+                    state.Request, state.Callback, state.Token, context),
+                coordinator.BatcherName)
             : SubmitCoreAsync(request, callback, cancellationToken);
 
     [RequiresDynamicCode("Delegate handlers compile a typed invoker on first use.")]
@@ -55,7 +56,8 @@ internal sealed class DelegateRequestBatcher<TRequest>(
                 _requestTypeName,
                 (Batcher: this, Request: requests, Callback: callback, Token: cancellationToken),
                 static (state, context) => state.Batcher.SubmitCoreAsync(
-                    state.Request, state.Callback, state.Token, context))
+                    state.Request, state.Callback, state.Token, context),
+                coordinator.BatcherName)
             : SubmitCoreAsync(requests, callback, cancellationToken);
 
     [RequiresDynamicCode("Delegate handlers compile a typed invoker on first use.")]

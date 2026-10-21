@@ -36,6 +36,12 @@ operation, including queue and capacity waiting. Each dispatched nonempty handle
 that contributed requests, so one submission can be linked to multiple batches and one batch can link to multiple
 submissions. Downstream database and HTTP spans created by the handler are children of the batch span.
 
+The span operation names are fixed as `RequestBatcher.Execute` and `RequestBatcher.ProcessBatch`. Both spans include
+`requestbatcher.name` for a named registration, using the exact public `batcherName`; unnamed registrations omit the tag.
+To follow a call through execution, use the tracing backend's reverse-link view to locate the batch span linked to the
+call, then inspect the handler's downstream database or HTTP child spans. Activity links are causal references, so this
+navigation depends on backend support and does not guarantee one shared trace tree.
+
 Tracing remains best effort: sampling and exporter retention are controlled by the application's OpenTelemetry
 configuration. RequestBatcher is in-process and does not recover queued requests after process failure.
 

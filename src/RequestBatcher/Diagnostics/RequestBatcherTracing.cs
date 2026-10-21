@@ -13,10 +13,11 @@ internal static class RequestBatcherTracing
     public static Task TraceCall<TState>(
         string requestTypeName,
         TState state,
-        Func<TState, ActivityContext, Task> submit)
+        Func<TState, ActivityContext, Task> submit,
+        string? batcherName = null)
     {
         var parent = Activity.Current;
-        var activity = StartCall(requestTypeName);
+        var activity = StartCall(requestTypeName, batcherName);
         try
         {
             var task = submit(state, activity?.Context ?? parent?.Context ?? default);
@@ -51,10 +52,11 @@ internal static class RequestBatcherTracing
     public static Task<TResult> TraceCall<TState, TResult>(
         string requestTypeName,
         TState state,
-        Func<TState, ActivityContext, Task<TResult>> submit)
+        Func<TState, ActivityContext, Task<TResult>> submit,
+        string? batcherName = null)
     {
         var parent = Activity.Current;
-        var activity = StartCall(requestTypeName);
+        var activity = StartCall(requestTypeName, batcherName);
         try
         {
             var task = submit(state, activity?.Context ?? parent?.Context ?? default);
@@ -87,7 +89,8 @@ internal static class RequestBatcherTracing
 
     public static Activity? StartBatch<TRequest>(
         string requestTypeName,
-        IReadOnlyList<PendingBatchRequest<TRequest>> requests)
+        IReadOnlyList<PendingBatchRequest<TRequest>> requests,
+        string? batcherName = null)
     {
         if (!Source.HasListeners())
         {
@@ -111,16 +114,15 @@ internal static class RequestBatcherTracing
             }
         }
 
+        var tags = CreateTags(requestTypeName, batcherName);
+        tags.Add("requestbatcher.batch.size", requests.Count);
+
         // Dispatch runs in an isolated context. Links describe the many-to-many relationship with calls.
         return Source.StartActivity(
             BatchName,
             ActivityKind.Consumer,
             parentContext: default,
-            tags: new ActivityTagsCollection
-            {
-                { "requestbatcher.request.type", requestTypeName },
-                { "requestbatcher.batch.size", requests.Count },
-            },
+            tags: tags,
             links: links);
     }
 
@@ -130,11 +132,22 @@ internal static class RequestBatcherTracing
         activity?.SetTag("error.type", exception.GetType().FullName);
     }
 
-    private static Activity? StartCall(string requestTypeName) => Source.StartActivity(
+    private static Activity? StartCall(string requestTypeName, string? batcherName) => Source.StartActivity(
         CallName,
         ActivityKind.Internal,
         parentContext: Activity.Current?.Context ?? default,
-        tags: new ActivityTagsCollection { { "requestbatcher.request.type", requestTypeName } });
+        tags: CreateTags(requestTypeName, batcherName));
+
+    private static ActivityTagsCollection CreateTags(string requestTypeName, string? batcherName)
+    {
+        var tags = new ActivityTagsCollection { { "requestbatcher.request.type", requestTypeName } };
+        if (batcherName is not null)
+        {
+            tags.Add("requestbatcher.name", batcherName);
+        }
+
+        return tags;
+    }
 
     private static void EndCall(Activity activity, Task task)
     {

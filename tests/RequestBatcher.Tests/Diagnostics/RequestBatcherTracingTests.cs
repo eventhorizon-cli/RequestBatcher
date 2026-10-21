@@ -228,31 +228,35 @@ public sealed class RequestBatcherTracingTests
     [InlineData(true)]
     public async Task ExecuteAsync_NamedDelegateResponse_HasOneCallSpanIncludingResult(bool batchSubmission)
     {
-        using var capture = new TraceCapture();
-        var services = new ServiceCollection();
-        services.AddDelegateRequestBatcher<int, string>("lookup");
-        await using var provider = services.BuildServiceProvider();
-        var batcher = provider.GetRequiredKeyedService<IRequestBatcher<int, string>>("lookup");
-        using var parent = new Activity("HTTP").Start();
-        if (batchSubmission)
+        // Repeat with a fresh provider to prove cached tracing callbacks use the current batcher.
+        for (var attempt = 0; attempt < 2; attempt++)
         {
-            var result = await batcher.ExecuteAsync(new[] { 1, 2 },
-                static (IReadOnlyList<RequestBatchEntry<int, string>> entries) =>
-                    entries.SetResponses(static value => value.ToString()));
-            Assert.Equal(new[] { "1", "2" }, result);
-        }
-        else
-        {
-            var result = await batcher.ExecuteAsync(1,
-                static (IReadOnlyList<RequestBatchEntry<int, string>> entries) =>
-                    entries.SetResponses(static value => value.ToString()));
-            Assert.Equal("1", result);
-        }
+            using var capture = new TraceCapture();
+            var services = new ServiceCollection();
+            services.AddDelegateRequestBatcher<int, string>("lookup");
+            await using var provider = services.BuildServiceProvider();
+            var batcher = provider.GetRequiredKeyedService<IRequestBatcher<int, string>>("lookup");
+            using var parent = new Activity("HTTP").Start();
+            if (batchSubmission)
+            {
+                var result = await batcher.ExecuteAsync(new[] { 1, 2 },
+                    static (IReadOnlyList<RequestBatchEntry<int, string>> entries) =>
+                        entries.SetResponses(static value => value.ToString()));
+                Assert.Equal(new[] { "1", "2" }, result);
+            }
+            else
+            {
+                var result = await batcher.ExecuteAsync(1,
+                    static (IReadOnlyList<RequestBatchEntry<int, string>> entries) =>
+                        entries.SetResponses(static value => value.ToString()));
+                Assert.Equal("1", result);
+            }
 
-        Assert.Same(parent, Activity.Current);
-        var call = Assert.Single(capture.Calls);
-        Assert.Equal(parent.SpanId, call.ParentSpanId);
-        Assert.All(capture.Batches, batch => Assert.Equal(call.Context, Assert.Single(batch.Links).Context));
+            Assert.Same(parent, Activity.Current);
+            var call = Assert.Single(capture.Calls);
+            Assert.Equal(parent.SpanId, call.ParentSpanId);
+            Assert.All(capture.Batches, batch => Assert.Equal(call.Context, Assert.Single(batch.Links).Context));
+        }
     }
 
     [Theory]
@@ -260,21 +264,25 @@ public sealed class RequestBatcherTracingTests
     [InlineData(true)]
     public async Task ExecuteAsync_DelegateWithoutResponse_HasOneCallSpan(bool batchSubmission)
     {
-        using var capture = new TraceCapture();
-        var services = new ServiceCollection();
-        services.AddDelegateRequestBatcher<int>();
-        await using var provider = services.BuildServiceProvider();
-        var batcher = provider.GetRequiredService<IRequestBatcher<int>>();
-        if (batchSubmission)
+        // Repeat with a fresh provider to prove cached tracing callbacks use the current batcher.
+        for (var attempt = 0; attempt < 2; attempt++)
         {
-            await batcher.ExecuteAsync(new[] { 1, 2 }, static (IReadOnlyList<int> _) => { });
-        }
-        else
-        {
-            await batcher.ExecuteAsync(1, static (IReadOnlyList<int> _) => { });
-        }
+            using var capture = new TraceCapture();
+            var services = new ServiceCollection();
+            services.AddDelegateRequestBatcher<int>();
+            await using var provider = services.BuildServiceProvider();
+            var batcher = provider.GetRequiredService<IRequestBatcher<int>>();
+            if (batchSubmission)
+            {
+                await batcher.ExecuteAsync(new[] { 1, 2 }, static (IReadOnlyList<int> _) => { });
+            }
+            else
+            {
+                await batcher.ExecuteAsync(1, static (IReadOnlyList<int> _) => { });
+            }
 
-        Assert.Single(capture.Calls);
+            Assert.Single(capture.Calls);
+        }
     }
 
     [Theory]
@@ -282,29 +290,33 @@ public sealed class RequestBatcherTracingTests
     [InlineData(true)]
     public async Task ExecuteAsync_ScopedResponseHandlerDisposal_WaitsToEndCallAndBatch(bool batchSubmission)
     {
-        using var capture = new TraceCapture();
-        var probe = new DisposalProbe();
-        var services = new ServiceCollection();
-        services.AddSingleton(probe);
-        services.AddRequestBatcher<int, string, ScopedResponseHandler>(ServiceLifetime.Scoped);
-        await using var provider = services.BuildServiceProvider();
-        var batcher = provider.GetRequiredService<IRequestBatcher<int, string>>();
-        Task task = batchSubmission ? batcher.ExecuteAsync(new[] { 1, 2 }) : batcher.ExecuteAsync(1);
-        await probe.Disposing.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        try
+        // Repeat with a fresh provider to prove cached tracing callbacks use the current batcher.
+        for (var attempt = 0; attempt < 2; attempt++)
         {
-            Assert.False(task.IsCompleted);
-            Assert.Empty(capture.Stopped);
-        }
-        finally
-        {
-            probe.Release.TrySetResult();
-        }
+            using var capture = new TraceCapture();
+            var probe = new DisposalProbe();
+            var services = new ServiceCollection();
+            services.AddSingleton(probe);
+            services.AddRequestBatcher<int, string, ScopedResponseHandler>(ServiceLifetime.Scoped);
+            await using var provider = services.BuildServiceProvider();
+            var batcher = provider.GetRequiredService<IRequestBatcher<int, string>>();
+            Task task = batchSubmission ? batcher.ExecuteAsync(new[] { 1, 2 }) : batcher.ExecuteAsync(1);
+            await probe.Disposing.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            try
+            {
+                Assert.False(task.IsCompleted);
+                Assert.Empty(capture.Stopped);
+            }
+            finally
+            {
+                probe.Release.TrySetResult();
+            }
 
-        await task.WaitAsync(TimeSpan.FromSeconds(5));
-        Assert.Single(capture.Calls);
-        var batch = Assert.Single(capture.Batches);
-        Assert.Equal(batch.Context, probe.Context);
+            await task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Single(capture.Calls);
+            var batch = Assert.Single(capture.Batches);
+            Assert.Equal(batch.Context, probe.Context);
+        }
     }
 
     [Fact]

@@ -142,6 +142,13 @@ an independent `RequestBatcher.ProcessBatch` (`Consumer`) span. It links to the 
 requests, while handler database or HTTP spans are children of the batch span. A single explicit submission can be
 split across multiple batches, so several batch spans can link to the same call span.
 
+The span operation names are fixed as `RequestBatcher.Execute` and `RequestBatcher.ProcessBatch`. For a named
+registration, both spans include `requestbatcher.name` with the exact public `batcherName`; unnamed registrations omit
+the tag. The name is never an internal topic or pipeline key. To follow a request into its work, start at the call span,
+use the tracing backend's reverse-link view to find the batch span that links to it, then inspect the handler's downstream
+database or HTTP child spans. Activity links are causal references rather than shared parent edges, so reverse-link
+navigation depends on backend support and is not guaranteed to appear in one trace tree.
+
 ![RequestBatcher observability model](docs/diagrams/observability.svg)
 
 Only `ActivityContext` is transported. HTTP request activities, logging scopes, baggage, tenant values, and other

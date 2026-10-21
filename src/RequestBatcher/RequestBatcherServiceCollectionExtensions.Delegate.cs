@@ -88,7 +88,7 @@ public static partial class RequestBatcherServiceCollectionExtensions
         Action<RequestBatchOptions<TRequest>>? configure)
     {
         var options = RegisterDelegateOptions(services, batcherName, configure);
-        var pipelineKey = RegisterDelegatePipeline(services, options);
+        var pipelineKey = RegisterDelegatePipeline(services, options, batcherName);
 
         DelegateRequestBatcher<TRequest> CreateBatcher(IServiceProvider provider) => new(
             provider.GetRequiredKeyedService<RequestBatchCoordinator<TRequest>>(pipelineKey),
@@ -113,7 +113,7 @@ public static partial class RequestBatcherServiceCollectionExtensions
     {
         var options = RegisterDelegateOptions(services, batcherName, configure);
         var entryOptions = options.Project<RequestBatchEntry<TRequest, TResponse>>(static entry => entry.Request);
-        var pipelineKey = RegisterDelegatePipeline(services, entryOptions, ValidateResponses<TRequest, TResponse>);
+        var pipelineKey = RegisterDelegatePipeline(services, entryOptions, batcherName, ValidateResponses<TRequest, TResponse>);
 
         DelegateRequestBatcher<TRequest, TResponse> CreateBatcher(IServiceProvider provider) => new(
             new ResponseRequestBatcher<TRequest, TResponse>(
@@ -172,6 +172,7 @@ public static partial class RequestBatcherServiceCollectionExtensions
     private static object RegisterDelegatePipeline<TRequest>(
         IServiceCollection services,
         RequestBatchOptions<TRequest> options,
+        string? batcherName,
         Action<IReadOnlyList<TRequest>>? validateResponses = null)
     {
         var pipelineKey = new object();
@@ -182,7 +183,7 @@ public static partial class RequestBatcherServiceCollectionExtensions
         services.AddKeyedSingleton<IRequestBatchHandler<TRequest>>(
             pipelineKey,
             (provider, key) => provider.GetRequiredKeyedService<DelegateRequestBatchHandler<TRequest>>(key));
-        AddKeyedCoordinator(services, pipelineKey, ServiceLifetime.Singleton, options);
+        AddKeyedCoordinator(services, pipelineKey, ServiceLifetime.Singleton, options, batcherName);
         return pipelineKey;
     }
 

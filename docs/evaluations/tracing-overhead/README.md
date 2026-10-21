@@ -36,8 +36,9 @@ launch on one machine and does not establish a production latency guarantee.
 
 The baseline's `Drop` and `Recorded` rows are omitted because commit `780006523107423d3aa47bb0356dac3d0ed13847`
 contains no RequestBatcher tracing source or spans; installing the benchmark listener there is only a control for
-listener setup and cannot measure instrumentation behavior. The current rows use the tracing implementation in the
-working tree. Both snapshots use the same benchmark source, options, request count, handler, and BenchmarkDotNet job.
+listener setup and cannot measure instrumentation behavior. The current rows measure the tracing implementation committed as `179ac45`, before the
+optional `requestbatcher.name` tag was added. All measured registrations are unnamed; named
+registration tagging has not been benchmarked. Both snapshots use the same benchmark source, options, request count, handler, and BenchmarkDotNet job.
 
 ## Observability
 

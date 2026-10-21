@@ -886,6 +886,12 @@ Handler database and HTTP spans are children of that batch span. Links express c
 they do not share a trace ID or imply ordering. A submission may contribute to multiple batches after splitting, and a
 batch may link to many submissions.
 
+Span operation names are fixed as `RequestBatcher.Execute` and `RequestBatcher.ProcessBatch`. Both spans include
+`requestbatcher.name` for a named registration, using the exact public `batcherName`; unnamed registrations omit the tag.
+To follow a call through execution, use the tracing backend's reverse-link view to locate the batch span linked to the
+call, then inspect the handler's downstream database or HTTP child spans. Activity links are causal references, so this
+navigation depends on backend support and does not guarantee one shared trace tree.
+
 Only `ActivityContext` is transported. HTTP activities, logging scopes, baggage, and other `AsyncLocal` values are not
 copied into the consumer. Sampling is controlled by the application's provider; parent-based sampling does not
 automatically follow links, and SDK/exporter link limits can drop links from large batches. Tracing is best effort and
