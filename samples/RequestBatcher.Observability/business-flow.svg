@@ -40,7 +40,7 @@
     <line x1="265" y1="220" x2="345" y2="220" stroke="#536574" stroke-width="2.5" marker-end="url(#arrow)"/>
     <text x="278" y="205" font-size="14" fill="#536574">HTTP</text>
     <line x1="610" y1="220" x2="690" y2="220" stroke="#536574" stroke-width="2.5" marker-end="url(#arrow)"/>
-    <text x="630" y="205" font-size="14" fill="#536574">batched HTTP</text>
+    <text x="650" y="205" text-anchor="middle" font-size="13" fill="#536574">batch HTTP</text>
     <line x1="955" y1="220" x2="1035" y2="220" stroke="#536574" stroke-width="2.5" marker-end="url(#arrow)"/>
     <text x="981" y="205" font-size="14" fill="#536574">SQL</text>
 

@@ -1,0 +1,20 @@
+flowchart LR
+    client["External client<br/>traffic-generator<br/>32 concurrent workers<br/>2-10 item carts"]
+    cart["Cart API<br/>POST /cart/quote<br/>RequestBatcher<br/>one Execute for 2-10 IDs<br/>BatchSize 20 product requests<br/>dedupe IDs + one Pricing call"]
+    pricing["Pricing API<br/>GET /prices?ids=...<br/>direct PostgreSQL query<br/>ASP.NET Core HTTP span<br/>Npgsql database span<br/>Npgsql metrics"]
+    postgres["PostgreSQL<br/>products 1..100<br/>parameterized SELECT<br/>database telemetry"]
+
+    client -->|HTTP| cart
+    cart -->|batched HTTP| pricing
+    pricing -->|SQL| postgres
+
+    flow["N caller traces -> HandleBatch links -> Pricing HTTP span -> Npgsql database span"]
+
+    classDef clientStyle fill:#e8f3ea,stroke:#2f7d4a,stroke-width:2px,color:#173042
+    classDef apiStyle fill:#e8f0fb,stroke:#2f68b2,stroke-width:2px,color:#173042
+    classDef dataStyle fill:#fff4d8,stroke:#a37a13,stroke-width:2px,color:#173042
+    classDef noteStyle fill:#f5f7f8,stroke:#b8c2c9,color:#536574
+    class client clientStyle
+    class cart,pricing apiStyle
+    class postgres dataStyle
+    class flow noteStyle

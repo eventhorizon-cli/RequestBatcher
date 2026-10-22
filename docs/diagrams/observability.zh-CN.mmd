@@ -1,0 +1,23 @@
+flowchart LR
+    %% Execute and HandleBatch link in both directions; neither is the other's parent.
+    %% Execute collects batch contexts at dispatch and adds links before it ends.
+    subgraph A[服务 A：调用方与 RequestBatcher]
+        HTTPA[调用方 HTTP span] --> EXEC[RequestBatcher.Execute<br/>内部操作 span]
+        EXEC -. "请求入队" .-> BATCH[RequestBatcher.HandleBatch<br/>消费者根 span]
+        BATCH --> HANDLER[Handler / HTTP 客户端<br/>子 span]
+        BATCH -. "链接到 Execute 的 ActivityLink<br/>因果关联；无共同父 span" .-> EXEC
+        EXEC -. "链接到批次的 ActivityLink<br/>在 Execute 结束前添加" .-> BATCH
+    end
+
+    subgraph B[服务 B：下游服务]
+        HTTPB[HTTP 服务端 span] --> DB[数据库子 span]
+    end
+
+    HANDLER --> HTTPB
+
+    classDef caller fill:#eaf2ff,stroke:#3567a7,color:#1d3b66
+    classDef batch fill:#edf1f5,stroke:#596773,color:#303b44
+    classDef downstream fill:#f4edfb,stroke:#75529b,color:#422d59
+    class HTTPA,EXEC caller
+    class BATCH,HANDLER batch
+    class HTTPB,DB downstream
