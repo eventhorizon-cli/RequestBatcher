@@ -40,3 +40,6 @@ separately; its results are the reference for instrumentation cost.
 
 The [observability-overhead evaluation](observability-overhead/README.md) measures disabled, metrics-only, and
 tracing-plus-metrics OpenTelemetry providers around an asynchronous 20 ms pricing workload.
+
+The [tracing I/O evaluation](tracing-io-overhead/README.md) compares the published 0.2.4 baseline with 0.3.2 tracing
+disabled and SDK sampling at 0%, 1%, 10%, and 100%, using simulated 20 ms calls and exactly-once item validation.

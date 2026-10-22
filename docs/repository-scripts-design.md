@@ -22,6 +22,14 @@ The tracing package comparison script also uses C# and downloads the published b
 NuGet cache. Both builds run with the repository SDK. Each execution creates a fresh artifact directory and retains
 raw BenchmarkDotNet results and package SHA-512 evidence.
 
+`CompareTracingIoOverhead.cs` isolates the 20 ms tracing benchmark in two temporary projects referencing published
+RequestBatcher 0.2.4 and 0.3.2 packages. Both use identical benchmark source, runtime, and dependencies, including
+the OpenTelemetry SDK. The old package runs its two `Disabled` cases; 0.3.2 runs `Disabled`, `Sample0`, `Sample1`,
+`Sample10`, and `Sample100`, using the real SDK sampler without an exporter. The runner verifies resolved package
+versions, retains package hashes and complete reports, requires exactly two CSV data rows for 0.2.4 and ten for 0.3.2,
+rejects `NA` results, and fails on child-process errors. It neither changes the checkout's package references nor
+exports telemetry.
+
 The observability sample's traffic generator is a file-based C# application. Docker publishes it using the pinned
 SDK and runs the resulting assembly on .NET 8. Cart and Pricing remain the only business project files.
 
