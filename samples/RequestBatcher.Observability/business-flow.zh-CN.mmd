@@ -1,0 +1,20 @@
+flowchart LR
+    client["外部调用方<br/>traffic-generator<br/>32 个并发工作任务<br/>2–10 个商品的购物车"]
+    cart["Cart API<br/>POST /cart/quote<br/>RequestBatcher<br/>每 2–10 个 ID 一个 Execute<br/>BatchSize 20 个商品请求<br/>ID 去重 + 一次 Pricing 调用"]
+    pricing["Pricing API<br/>GET /prices?ids=...<br/>直接查询 PostgreSQL<br/>ASP.NET Core HTTP span<br/>Npgsql 数据库 span<br/>Npgsql 指标"]
+    postgres["PostgreSQL<br/>商品 1..100<br/>参数化 SELECT<br/>数据库遥测数据"]
+
+    client -->|HTTP| cart
+    cart -->|批量 HTTP| pricing
+    pricing -->|SQL| postgres
+
+    flow["N 条调用方追踪 -> HandleBatch 链接 -> Pricing HTTP span -> Npgsql 数据库 span"]
+
+    classDef clientStyle fill:#e8f3ea,stroke:#2f7d4a,stroke-width:2px,color:#173042
+    classDef apiStyle fill:#e8f0fb,stroke:#2f68b2,stroke-width:2px,color:#173042
+    classDef dataStyle fill:#fff4d8,stroke:#a37a13,stroke-width:2px,color:#173042
+    classDef noteStyle fill:#f5f7f8,stroke:#b8c2c9,color:#536574
+    class client clientStyle
+    class cart,pricing apiStyle
+    class postgres dataStyle
+    class flow noteStyle

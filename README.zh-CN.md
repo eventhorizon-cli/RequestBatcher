@@ -924,7 +924,7 @@ link 关联真正贡献请求的 `Execute` span；Handler 创建的数据库或 
 Link 表示跨队列的因果关系，不代表共享父 span、Trace ID 或执行顺序；队列只传递 span context 和共享的回链收集状态，需要的请求 scope、baggage
 和其他 `AsyncLocal` 状态应显式传递。
 
-![RequestBatcher 可观测性模型](docs/diagrams/observability.svg)
+![RequestBatcher 可观测性模型](docs/diagrams/observability.zh-CN.svg)
 
 对应的 `MeterProviderBuilder` 扩展会注册 `RequestBatcher` meter，记录已接收请求、已处理请求、已处理批次数、批次大小和批次
 耗时。Metrics 只使用请求类型和配置的 batcher name 作为维度，不记录请求内容、租户值或 Partition Key；只有 meter provider 监听

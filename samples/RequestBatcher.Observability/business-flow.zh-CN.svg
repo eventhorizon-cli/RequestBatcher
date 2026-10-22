@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1320" height="500" viewBox="0 0 1320 500" role="img" aria-labelledby="title desc">
+  <title id="title">Cart 与 Pricing 业务流程</title>
+  <desc id="desc">多个并发外部调用方向 Cart 发送包含 2 到 10 个商品的购物车请求。每个 Cart 请求创建一个 Execute span；Cart 将最多 20 个商品请求合并为 HandleBatch 操作，然后调用读取 PostgreSQL 的 Pricing。</desc>
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#536574"/>
+    </marker>
+  </defs>
+  <rect width="1320" height="500" fill="#ffffff"/>
+
+  <g font-family="Arial, 'Noto Sans CJK SC', 'Microsoft YaHei', sans-serif" fill="#173042">
+    <rect x="35" y="145" width="230" height="150" rx="8" fill="#e8f3ea" stroke="#2f7d4a" stroke-width="2"/>
+    <text x="55" y="180" font-size="21" font-weight="700">外部调用方</text>
+    <text x="55" y="215" font-size="16">traffic-generator</text>
+    <text x="55" y="246" font-size="15" fill="#536574">32 个并发工作任务</text>
+    <text x="55" y="271" font-size="15" fill="#536574">2–10 个商品的购物车</text>
+
+    <rect x="345" y="115" width="265" height="210" rx="8" fill="#e8f0fb" stroke="#2f68b2" stroke-width="2"/>
+    <text x="370" y="153" font-size="21" font-weight="700">Cart API</text>
+    <text x="370" y="188" font-size="16">POST /cart/quote</text>
+    <text x="370" y="224" font-size="16">RequestBatcher</text>
+    <text x="370" y="252" font-size="15" fill="#536574">每 2–10 个 ID 一个 Execute</text>
+    <text x="370" y="280" font-size="15" fill="#536574">BatchSize 20 个商品请求</text>
+    <text x="370" y="306" font-size="15" fill="#536574">ID 去重 + 一次 Pricing 调用</text>
+
+    <rect x="690" y="115" width="265" height="210" rx="8" fill="#e8f0fb" stroke="#2f68b2" stroke-width="2"/>
+    <text x="715" y="153" font-size="21" font-weight="700">Pricing API</text>
+    <text x="715" y="188" font-size="16">GET /prices?ids=...</text>
+    <text x="715" y="224" font-size="16">直接查询 PostgreSQL</text>
+    <text x="715" y="252" font-size="15" fill="#536574">ASP.NET Core HTTP span</text>
+    <text x="715" y="280" font-size="15" fill="#536574">Npgsql 数据库 span</text>
+    <text x="715" y="306" font-size="15" fill="#536574">Npgsql 指标</text>
+
+    <rect x="1035" y="145" width="215" height="150" rx="8" fill="#fff4d8" stroke="#a37a13" stroke-width="2"/>
+    <text x="1055" y="180" font-size="21" font-weight="700">PostgreSQL</text>
+    <text x="1055" y="215" font-size="16">商品 1..100</text>
+    <text x="1055" y="246" font-size="15" fill="#536574">参数化 SELECT</text>
+    <text x="1055" y="271" font-size="15" fill="#536574">数据库遥测数据</text>
+
+    <line x1="265" y1="220" x2="345" y2="220" stroke="#536574" stroke-width="2.5" marker-end="url(#arrow)"/>
+    <text x="278" y="205" font-size="14" fill="#536574">HTTP</text>
+    <line x1="610" y1="220" x2="690" y2="220" stroke="#536574" stroke-width="2.5" marker-end="url(#arrow)"/>
+    <text x="650" y="205" text-anchor="middle" font-size="13" fill="#536574">批量 HTTP</text>
+    <line x1="955" y1="220" x2="1035" y2="220" stroke="#536574" stroke-width="2.5" marker-end="url(#arrow)"/>
+    <text x="981" y="205" font-size="14" fill="#536574">SQL</text>
+
+    <rect x="240" y="380" width="840" height="52" rx="6" fill="#f5f7f8" stroke="#b8c2c9"/>
+    <text x="660" y="412" text-anchor="middle" font-size="16" fill="#536574">N 条调用方追踪 → HandleBatch 链接 → Pricing HTTP span → Npgsql 数据库 span</text>
+  </g>
+</svg>

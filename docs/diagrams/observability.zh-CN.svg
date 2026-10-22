@@ -1,0 +1,78 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="620" viewBox="0 0 1280 620" role="img" aria-labelledby="title desc">
+  <title id="title">RequestBatcher 在服务 A 与服务 B 之间的追踪流程</title>
+  <desc id="desc">服务 A 包含调用方的 Execute span，以及通过双向链接关联的独立 HandleBatch 消费者根 span。Execute 结束前添加链接。批次处理器创建 HTTP 子 span 调用服务 B，下游服务端与数据库 span 延续该追踪。</desc>
+  <defs>
+    <marker id="solid-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#596773"/>
+    </marker>
+    <marker id="link-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10" fill="none" stroke="#3567a7" stroke-width="1.5"/>
+    </marker>
+    <style>
+      .title { font-family: sans-serif; font-size: 24px; font-weight: 600; fill: #20303a; }
+      .boundary-title { font-family: sans-serif; font-size: 18px; font-weight: 600; fill: #303b44; }
+      .node-title { font-family: sans-serif; font-size: 17px; font-weight: 600; fill: #173f35; }
+      .node-text { font-family: sans-serif; font-size: 14px; fill: #303b44; }
+      .small { font-family: sans-serif; font-size: 13px; fill: #596773; }
+      .edge-label { font-family: sans-serif; font-size: 13px; fill: #3567a7; }
+    </style>
+  </defs>
+
+  <rect width="1280" height="620" fill="#ffffff"/>
+  <text x="40" y="44" class="title">批量调用的追踪流程</text>
+
+  <rect x="30" y="82" width="810" height="485" rx="10" fill="#f8fbff" stroke="#3567a7" stroke-width="2"/>
+  <text x="55" y="118" class="boundary-title">服务 A：调用方与 RequestBatcher</text>
+
+  <rect x="65" y="175" width="220" height="110" rx="8" fill="#eaf2ff" stroke="#3567a7" stroke-width="2"/>
+  <text x="89" y="211" class="node-title" fill="#1d3b66">调用方 HTTP span</text>
+  <text x="89" y="240" class="node-text">接收请求</text>
+  <text x="89" y="264" class="small">Execute 的父 span</text>
+
+  <rect x="350" y="175" width="280" height="110" rx="8" fill="#eaf2ff" stroke="#3567a7" stroke-width="2"/>
+  <text x="374" y="211" class="node-title" fill="#1d3b66">RequestBatcher.Execute</text>
+  <text x="374" y="240" class="node-text">内部操作 span</text>
+  <text x="374" y="264" class="small">调用方感知的耗时</text>
+
+  <rect x="350" y="350" width="280" height="110" rx="8" fill="#edf1f5" stroke="#596773" stroke-width="2"/>
+  <text x="374" y="386" class="node-title" fill="#303b44">RequestBatcher.HandleBatch</text>
+  <text x="374" y="415" class="node-text">消费者根 span</text>
+  <text x="374" y="439" class="small">一个批次关联多次提交</text>
+
+  <rect x="665" y="350" width="135" height="110" rx="8" fill="#edf1f5" stroke="#596773" stroke-width="2"/>
+  <text x="683" y="386" class="node-title" fill="#303b44">Handler /</text>
+  <text x="683" y="412" class="node-title" fill="#303b44">HTTP 客户端</text>
+  <text x="683" y="439" class="small">子 span</text>
+
+  <rect x="865" y="82" width="385" height="485" rx="10" fill="#fcf9ff" stroke="#75529b" stroke-width="2"/>
+  <text x="890" y="118" class="boundary-title">服务 B：下游服务</text>
+
+  <rect x="925" y="350" width="265" height="110" rx="8" fill="#f4edfb" stroke="#75529b" stroke-width="2"/>
+  <text x="949" y="386" class="node-title" fill="#422d59">HTTP 服务端 span</text>
+  <text x="949" y="415" class="node-text">接收传播上下文的请求</text>
+  <text x="949" y="439" class="small">客户端调用的子 span</text>
+
+  <rect x="925" y="175" width="265" height="110" rx="8" fill="#fff4d6" stroke="#8a6a1d" stroke-width="2"/>
+  <text x="949" y="211" class="node-title" fill="#4d3b0e">数据库子 span</text>
+  <text x="949" y="240" class="node-text">数据库埋点</text>
+  <text x="949" y="264" class="small">服务端 span 的子 span</text>
+  <text x="890" y="515" class="small">命名格式：操作名 batcherName</text>
+
+  <path d="M 285 230 L 350 230" fill="none" stroke="#596773" stroke-width="2" marker-end="url(#solid-arrow)"/>
+  <path d="M 490 285 L 490 350" fill="none" stroke="#596773" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#solid-arrow)"/>
+  <text x="505" y="323" class="small">请求入队</text>
+  <path d="M 630 405 L 665 405" fill="none" stroke="#596773" stroke-width="2" marker-end="url(#solid-arrow)"/>
+  <path d="M 800 405 L 925 405" fill="none" stroke="#596773" stroke-width="2" marker-end="url(#solid-arrow)"/>
+  <text x="806" y="389" class="small">HTTP</text>
+  <path d="M 1058 350 L 1058 285" fill="none" stroke="#596773" stroke-width="2" marker-end="url(#solid-arrow)"/>
+
+  <path d="M 630 350 C 735 320, 735 140, 630 230" fill="none" stroke="#3567a7" stroke-width="2" stroke-dasharray="8 6" marker-start="url(#link-arrow)" marker-end="url(#link-arrow)"/>
+  <rect x="650" y="145" width="155" height="42" rx="4" fill="#ffffff"/>
+  <text x="665" y="163" class="edge-label">span 双向链接</text>
+  <text x="665" y="180" class="small">因果关联；无共同父 span</text>
+
+  <line x1="55" y1="595" x2="101" y2="595" stroke="#596773" stroke-width="2" marker-end="url(#solid-arrow)"/>
+  <text x="115" y="600" class="small">父子关系或网络调用</text>
+  <line x1="395" y1="595" x2="441" y2="595" stroke="#3567a7" stroke-width="2" stroke-dasharray="8 6" marker-end="url(#link-arrow)"/>
+  <text x="455" y="600" class="small">因果链接；不共享追踪树，不保证顺序</text>
+</svg>

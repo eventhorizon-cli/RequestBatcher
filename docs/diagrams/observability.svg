@@ -63,7 +63,7 @@
   <text x="505" y="323" class="small">queued work</text>
   <path d="M 630 405 L 665 405" fill="none" stroke="#596773" stroke-width="2" marker-end="url(#solid-arrow)"/>
   <path d="M 800 405 L 925 405" fill="none" stroke="#596773" stroke-width="2" marker-end="url(#solid-arrow)"/>
-  <text x="822" y="389" class="small">HTTP propagation</text>
+  <text x="806" y="389" class="small">HTTP</text>
   <path d="M 1058 350 L 1058 285" fill="none" stroke="#596773" stroke-width="2" marker-end="url(#solid-arrow)"/>
 
   <path d="M 630 350 C 735 320, 735 140, 630 230" fill="none" stroke="#3567a7" stroke-width="2" stroke-dasharray="8 6" marker-start="url(#link-arrow)" marker-end="url(#link-arrow)"/>

@@ -93,9 +93,11 @@ handler link 则指向独立的 `HandleBatch` trace。这里的 parent 条目并
 当前固定版本的 Tempo 在查询字段中会去掉前导零；替换上面的 ID 前，请删除复制结果开头的 `0`。选择包含原始批次的时间范围；
 当 tracing backend 没有在 span 详情中提供可点击 link 时，可以使用上面的 TraceQL 查询。
 
-![RequestBatcher 可观测性流转](../../docs/diagrams/observability.svg)
+![Cart 与 Pricing 业务流程](business-flow.zh-CN.svg)
 
-业务流程图和示例设计分别见 [business-flow.svg](business-flow.svg) 与 [示例设计](../../docs/observability-sample-design.md)。
+![RequestBatcher 可观测性流转](../../docs/diagrams/observability.zh-CN.svg)
+
+业务流程图和示例设计分别见 [business-flow.zh-CN.svg](business-flow.zh-CN.svg) 与 [示例设计](../../docs/observability-sample-design.md)。
 RequestBatcher 在进程内运行，进程故障后不会恢复待处理请求。
 
 如需执行可选的端到端验证，请查看[集成测试说明](../../tests/it/README.zh-CN.md)（[English](../../tests/it/README.md)）。测试复用
