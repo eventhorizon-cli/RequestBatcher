@@ -78,5 +78,5 @@ and setup. A local HTTP listener is required; the runner stops it automatically.
 
 ## Observability
 
-The recorded HTTP scheduling comparison does not include the optional `RequestBatcher.OpenTelemetry` instrumentation.
+The recorded HTTP scheduling comparison does not include the built-in RequestBatcher instrumentation.
 See the [observability design](../../observability-design.md) for the production trace model.

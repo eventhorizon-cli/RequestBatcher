@@ -1,7 +1,3 @@
-#:property TargetFramework=net8.0
-#:property PublishAot=false
-#:property LangVersion=12.0
-
 using System.Diagnostics;
 using System.Globalization;
 using System.Net.Http.Json;
@@ -13,7 +9,7 @@ internal static class GenerateTraffic
     {
         if (args is ["--help"])
         {
-            Console.WriteLine("Continuously query Cart. Configure CART_URL, TRAFFIC_CONCURRENCY (1–64, default 8), and TRAFFIC_DELAY_SECONDS (at least 0.05, default 0.25). Ctrl+C stops the generator.");
+            Console.WriteLine("Continuously query Cart. Configure CART_URL, TRAFFIC_CONCURRENCY (1–64, default 32), and TRAFFIC_DELAY_SECONDS (at least 0.05, default 0.25). Ctrl+C stops the generator.");
             return 0;
         }
 
@@ -23,7 +19,7 @@ internal static class GenerateTraffic
             return 2;
         }
 
-        if (!int.TryParse(Environment.GetEnvironmentVariable("TRAFFIC_CONCURRENCY") ?? "8", out var concurrency)
+        if (!int.TryParse(Environment.GetEnvironmentVariable("TRAFFIC_CONCURRENCY") ?? "32", out var concurrency)
             || concurrency is < 1 or > 64
             || !double.TryParse(Environment.GetEnvironmentVariable("TRAFFIC_DELAY_SECONDS") ?? "0.25",
                 NumberStyles.Float, CultureInfo.InvariantCulture, out var delaySeconds)
@@ -60,9 +56,10 @@ internal static class GenerateTraffic
         var iteration = 0;
         while (!stopping.IsCancellationRequested)
         {
-            var count = iteration % 2 == 0 ? 1 : 32;
+            var count = Random.Shared.Next(2, 11);
             var items = Enumerable.Range(0, count)
-                .Select(index => new CartItem((worker * 7 + iteration + index) % 100 + 1, index % 3 + 1)).ToArray();
+                .Select(_ => new CartItem(Random.Shared.Next(1, 101), Random.Shared.Next(1, 4)))
+                .ToArray();
             var started = Stopwatch.GetTimestamp();
             try
             {
@@ -72,7 +69,7 @@ internal static class GenerateTraffic
                     ?? throw new InvalidOperationException("The quote is empty.");
                 ValidateQuote(items, quote);
                 Console.WriteLine(FormattableString.Invariant(
-                    $"worker={worker} items={count} total={quote.Total:F2} duration_ms={Stopwatch.GetElapsedTime(started).TotalMilliseconds:F2}"));
+                    $"worker={worker} items={items.Length} total={quote.Total:F2} duration_ms={Stopwatch.GetElapsedTime(started).TotalMilliseconds:F2}"));
             }
             catch (OperationCanceledException) when (stopping.IsCancellationRequested)
             {

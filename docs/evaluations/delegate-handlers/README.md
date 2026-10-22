@@ -114,5 +114,5 @@ priority because raising priority was unavailable on this machine.
 
 ## Observability
 
-The delegate-handler measurements do not include the optional `RequestBatcher.OpenTelemetry` instrumentation. See the
+The delegate-handler measurements do not include the built-in RequestBatcher instrumentation. See the
 [observability design](../../observability-design.md) for OpenTelemetry setup and span boundaries.

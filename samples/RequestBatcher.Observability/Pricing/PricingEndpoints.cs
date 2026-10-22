@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Npgsql;
 
 namespace RequestBatcher.Observability.Pricing;
 
@@ -7,20 +8,20 @@ internal static class PricingEndpoints
     internal static void MapPricingEndpoints(this WebApplication app)
     {
         app.MapGet("/prices/{id:int}", async (int id,
-            [FromKeyedServices("product-reads")] IRequestBatcher<int, Product?> batcher,
+            NpgsqlDataSource dataSource,
             CancellationToken cancellationToken) =>
         {
-            var product = await batcher.ExecuteAsync(id, cancellationToken);
+            var product = (await QueryProductsAsync(dataSource, [id], cancellationToken).ConfigureAwait(false))[0];
             return product is null ? Results.NotFound() : Results.Ok(product);
         });
         app.MapGet("/prices", async ([FromQuery] string ids,
-            [FromKeyedServices("product-reads")] IRequestBatcher<int, Product?> batcher,
+            NpgsqlDataSource dataSource,
             CancellationToken cancellationToken) =>
         {
             var parts = ids.Split(',');
-            if (parts.Length is < 1 or > 64)
+            if (parts.Length is < 1 or > 20)
             {
-                return Results.BadRequest("Provide between 1 and 64 comma-separated product IDs.");
+                return Results.BadRequest("Provide between 1 and 20 comma-separated product IDs.");
             }
 
             var parsed = new int[parts.Length];
@@ -32,8 +33,26 @@ internal static class PricingEndpoints
                 }
             }
 
-            return Results.Ok(await batcher.ExecuteAsync(parsed, cancellationToken));
+            return Results.Ok(await QueryProductsAsync(dataSource, parsed, cancellationToken).ConfigureAwait(false));
         });
     }
 
+    private static async Task<Product?[]> QueryProductsAsync(
+        NpgsqlDataSource dataSource,
+        IReadOnlyList<int> ids,
+        CancellationToken cancellationToken)
+    {
+        await using var command = dataSource.CreateCommand(
+            "SELECT id, name, price FROM products WHERE id = ANY($1)");
+        command.Parameters.AddWithValue(ids.ToArray());
+        var products = new Dictionary<int, Product>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken).ConfigureAwait(false);
+        while (await reader.ReadAsync(cancellationToken).ConfigureAwait(false))
+        {
+            var product = new Product(reader.GetInt32(0), reader.GetString(1), reader.GetDecimal(2));
+            products[product.Id] = product;
+        }
+
+        return ids.Select(id => products.GetValueOrDefault(id)).ToArray();
+    }
 }

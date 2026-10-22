@@ -101,7 +101,7 @@ services:
     init: true
     environment:
       CART_URL: http://cart:8080
-      TRAFFIC_CONCURRENCY: "${TRAFFIC_CONCURRENCY:-8}"
+      TRAFFIC_CONCURRENCY: "${TRAFFIC_CONCURRENCY:-32}"
       TRAFFIC_DELAY_SECONDS: "${TRAFFIC_DELAY_SECONDS:-0.25}"
     depends_on:
       cart:

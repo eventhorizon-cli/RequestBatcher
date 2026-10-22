@@ -53,5 +53,5 @@ dotnet run --project tests/RequestBatcher.Benchmarks/RequestBatcher.Benchmarks.c
 
 ## Observability
 
-The recorded completion-source comparison does not include the optional `RequestBatcher.OpenTelemetry` instrumentation.
+The recorded completion-source comparison does not include the built-in RequestBatcher instrumentation.
 See the [observability design](../../observability-design.md) for call duration and batch correlation.

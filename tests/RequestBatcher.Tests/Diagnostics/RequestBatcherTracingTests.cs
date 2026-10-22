@@ -441,8 +441,10 @@ public sealed class RequestBatcherTracingTests
     {
         private readonly ActivityListener _listener;
         public ConcurrentQueue<Activity> Stopped { get; } = new();
-        public IEnumerable<Activity> Calls => Stopped.Where(span => span.OperationName == RequestBatcherTracing.CallName);
-        public IEnumerable<Activity> Batches => Stopped.Where(span => span.OperationName == RequestBatcherTracing.BatchName);
+        public IEnumerable<Activity> Calls => Stopped.Where(span => span.OperationName.StartsWith(
+            RequestBatcherTracing.CallName, StringComparison.Ordinal));
+        public IEnumerable<Activity> Batches => Stopped.Where(span => span.OperationName.StartsWith(
+            RequestBatcherTracing.BatchName, StringComparison.Ordinal));
 
         public TraceCapture(Func<ActivityCreationOptions<ActivityContext>, ActivitySamplingResult>? sample = null)
         {

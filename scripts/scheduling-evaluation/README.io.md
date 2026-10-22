@@ -111,6 +111,6 @@ list, and the actual counts and iteration count used.
 
 ## Observability
 
-The HTTP probe's timing hooks are separate from the optional `RequestBatcher.OpenTelemetry` instrumentation; reported
+The HTTP probe's timing hooks are separate from the built-in RequestBatcher instrumentation; reported
 historical results do not claim to include those spans. See the [observability design](../../docs/observability-design.md)
 for the `Execute` call span and linked `ProcessBatch` Consumer span.

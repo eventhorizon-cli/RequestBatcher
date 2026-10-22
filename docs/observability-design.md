@@ -2,12 +2,11 @@
 
 ## Contract
 
-RequestBatcher exposes the `RequestBatcher` ActivitySource. An optional
-`RequestBatcher.OpenTelemetry` package supplies
+RequestBatcher exposes the `RequestBatcher` ActivitySource. The `RequestBatcher` package supplies
 `TracerProviderBuilder.AddRequestBatcherInstrumentation()`, registering that
 source with the application's provider. The core package uses only .NET tracing
 APIs; it neither creates an OpenTelemetry provider nor selects exporters or
-sampling policy. The adapter depends on OpenTelemetry.Api.ProviderBuilderExtensions
+sampling policy. The core package depends on OpenTelemetry.Api.ProviderBuilderExtensions
 1.20.1 and supports the same net8.0/net10.0 targets.
 
 Each public submission creates at most one `RequestBatcher.Execute` Internal
@@ -34,6 +33,29 @@ The call span is not a messaging send span, whose duration would imply enqueue
 latency only. RequestBatcher remains in-process and cannot recover pending work
 after process failure. Links model causality, not shared trace IDs or ordering.
 
+RequestBatcher also exposes a `RequestBatcher` meter. The
+`MeterProviderBuilder.AddRequestBatcherInstrumentation()` extension registers
+that meter with the application's provider. The package does not create a
+meter provider or choose an exporter. The metrics are deliberately low
+cardinality and use only the request type and optional public batcher name as
+dimensions:
+
+- `requestbatcher.requests.submitted` counts requests accepted by a coordinator.
+- `requestbatcher.requests.processed` counts requests completed by a handler.
+- `requestbatcher.batches.processed` counts non-empty dispatched batches.
+- `requestbatcher.batch.size` records the number of requests in each batch.
+- `requestbatcher.batch.duration` records handler duration in milliseconds.
+
+Batch measurements finish alongside the batch span, before request completions are
+published. Processed counts include failed handler attempts and exclude requests
+canceled before dispatch. Duration includes handler scope disposal, but excludes
+publishing results to callers.
+
+Metrics are emitted only when a meter listener is subscribed. With no listener,
+the instruments return immediately and do not allocate metric tags or timing
+state. Payload values, tenant identifiers, partition keys, and exception text
+are never metric dimensions.
+
 ## Context and outcomes
 
 Only ActivityContext is transported. ExecutionContext, Activity instances,
@@ -43,9 +65,11 @@ No valid context means no link. Links and batch attributes are supplied at span
 creation, so samplers can inspect them. The application's sampler governs batch
 root sampling; parent-based sampling does not automatically follow links.
 
-Span names are fixed. Both call and batch spans include `requestbatcher.name` for named
-registrations; unnamed registrations omit it. The name is the exact public DI registration
-name, never an internal topic or pipeline key. It is available at Activity creation for
+Span names use stable base names. For a named registration, the public name follows the operation,
+separated by a space, such as `RequestBatcher.Execute pricing-queries` and
+`RequestBatcher.ProcessBatch pricing-queries`; both spans also include
+`requestbatcher.name`. Unnamed registrations keep the base name and omit the tag. The name is
+the exact public DI registration name, never an internal topic or pipeline key. It is available at Activity creation for
 sampling and carried once on the coordinator through dispatch and response/delegate adapters,
 without adding per-request state. Tags also use `requestbatcher.request.type`,
 `requestbatcher.batch.size`, and `requestbatcher.canceled`. Faults set Error and
@@ -98,4 +122,26 @@ isolation with the new implementation without listeners, and compare disabled,
 dropped, and recorded tracing for single and explicit submissions. Validate
 processed counts, report time and allocations, and do not claim zero overhead.
 README guidance and simplified SVG diagrams explain lifetime and correlation.
-Both NuGet packages are built, packaged, and published in the same release.
+Tracing and metrics registration extensions ship in the core RequestBatcher package.
+
+## Live integration coverage
+
+The opt-in `tests/it/RequestBatcher.Observability.IntegrationTests` project targets .NET 10 and uses the existing sample
+Compose stack. Ordinary unit tests remain independent of Docker and network access. The integration suite does not
+start or stop containers; its README documents startup and environment overrides. It uses real Cart HTTP requests,
+Grafana's Tempo and Prometheus data-source proxies, and unique W3C trace IDs to isolate its evidence from continuous
+sample traffic. No production dependency or public API changes are required.
+
+Concurrent Cart requests each submit 2–10 product IDs through the native enumerable API. The suite verifies ordered
+prices including duplicates, exactly one Execute span per HTTP request, its HTTP parent, and independent ProcessBatch
+roots linked to the corresponding Execute contexts. Links must be unique per caller context, every submitted caller
+must be represented, and a concurrent burst must demonstrate a batch containing multiple callers. Batch size counts
+product items and stays within 1–20; the test does not require full batches or one handler invocation per submission.
+Each related batch must contain the Cart HTTP client → Pricing HTTP server → Npgsql query parent chain, without a
+Pricing batcher or error spans. Repeated fresh bursts also detect accidental reuse of an earlier request's context.
+
+Telemetry assertions poll for complete evidence with a bounded deadline, accounting for asynchronous export and
+indexing. Failures identify missing trace IDs, links, or metrics rather than passing on partial data. Prometheus checks
+verify all five RequestBatcher instruments for the configured name and positive post-request increments for submitted,
+processed, and batch counters. Histogram counts and sums must also advance. Integration runs are explicitly enabled;
+without the opt-in environment variable, tests are reported as skipped.

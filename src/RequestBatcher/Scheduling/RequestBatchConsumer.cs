@@ -22,6 +22,8 @@ internal sealed class RequestBatchConsumer<TRequest>(
 
         var requests = CreateHandlerInput(activeRequests);
         using var activity = RequestBatcherTracing.StartBatch(requestTypeName, activeRequests, batcherName);
+        var metrics = RequestBatcherMetrics.StartBatch(requestTypeName, batcherName, requests.Length);
+        Exception? failure = null;
 
         try
         {
@@ -29,22 +31,32 @@ internal sealed class RequestBatchConsumer<TRequest>(
             await handler(requests, cancellationToken).ConfigureAwait(false);
 
             logger.BatchCompleted(requestTypeName, requests.Length);
-            // Publish completion only after the handler scope and its batch span have ended.
-            activity?.Stop();
-            for (var i = 0; i < activeRequests.Count; i++)
-            {
-                activeRequests[i].CompleteSuccessfully();
-            }
         }
         catch (Exception exception)
         {
             RequestBatcherTracing.RecordFailure(activity, exception);
+            failure = exception;
             logger.BatchFailed(
                 exception,
                 requestTypeName,
                 requests.Length);
+        }
+        finally
+        {
+            // End both measurements before publishing results, so caller continuations see a complete batch.
             activity?.Stop();
-            CompleteWithError(activeRequests, exception);
+            metrics.Dispose();
+        }
+
+        if (failure is not null)
+        {
+            CompleteWithError(activeRequests, failure);
+            return;
+        }
+
+        for (var i = 0; i < activeRequests.Count; i++)
+        {
+            activeRequests[i].CompleteSuccessfully();
         }
     }
 

@@ -80,5 +80,5 @@ lifecycle semantics. PostgreSQL/Redis workloads require Docker.
 ## Observability
 
 These scheduling probes use their own diagnostic counters and are not measurements of the optional
-`RequestBatcher.OpenTelemetry` spans. Applications can register those spans with
+`RequestBatcher` spans. Applications can register those spans with
 `AddRequestBatcherInstrumentation()`; see the [observability design](../../docs/observability-design.md).

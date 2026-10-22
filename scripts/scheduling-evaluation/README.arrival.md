@@ -77,5 +77,5 @@ exactly-once execution of external side effects.
 ## Observability
 
 This historical diagnostic uses temporary probe hooks; its results do not represent runs with the optional
-`RequestBatcher.OpenTelemetry` instrumentation enabled. For production tracing, use
+`RequestBatcher` instrumentation enabled. For production tracing, use
 `AddRequestBatcherInstrumentation()` and follow the [observability design](../../docs/observability-design.md).

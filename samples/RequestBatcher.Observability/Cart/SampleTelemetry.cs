@@ -17,10 +17,12 @@ internal static class SampleTelemetry
                 .AddAspNetCoreInstrumentation(options =>
                     options.Filter = context => !context.Request.Path.StartsWithSegments("/health"))
                 .AddHttpClientInstrumentation()
+                .AddRequestBatcherInstrumentation()
                 .AddOtlpExporter())
             .WithMetrics(metrics => metrics
                 .AddAspNetCoreInstrumentation()
                 .AddHttpClientInstrumentation()
+                .AddRequestBatcherInstrumentation()
                 .AddOtlpExporter());
         builder.Logging.AddOpenTelemetry(logging =>
         {

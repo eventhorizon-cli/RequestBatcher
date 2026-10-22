@@ -224,6 +224,7 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
             _pendingRequests.TryAdd(pendingRequest, 0);
         }
 
+        RequestBatcherMetrics.RecordSubmitted(_requestTypeName, BatcherName, 1);
         return _producer.ProduceAsync(pendingRequest, cancellationToken);
     }
 
@@ -251,6 +252,7 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
             }
         }
 
+        RequestBatcherMetrics.RecordSubmitted(_requestTypeName, BatcherName, requests.Length);
         return _producer.ProduceAsync(pendingRequests, cancellationToken);
     }
 

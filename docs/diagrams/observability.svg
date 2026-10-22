@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="620" viewBox="0 0 1400 620" role="img" aria-labelledby="title desc">
-  <title id="title">RequestBatcher observability model</title>
-  <desc id="desc">An independent batch consumer span links to two caller execution spans. The batch span owns the handler and downstream child spans.</desc>
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="620" viewBox="0 0 1280 620" role="img" aria-labelledby="title desc">
+  <title id="title">RequestBatcher trace flow between Service A and Service B</title>
+  <desc id="desc">Service A contains the caller Execute span and an independent ProcessBatch consumer root linked back to it. The batch handler creates a child HTTP span that calls Service B, where the server and database spans continue the downstream trace.</desc>
   <defs>
     <marker id="solid-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
       <path d="M 0 0 L 10 5 L 0 10 z" fill="#596773"/>
@@ -9,69 +9,70 @@
       <path d="M 0 0 L 10 5 L 0 10" fill="none" stroke="#3567a7" stroke-width="1.5"/>
     </marker>
     <style>
-      .label { font-family: sans-serif; font-size: 16px; fill: #303b44; }
-      .small { font-family: sans-serif; font-size: 14px; fill: #596773; }
+      .title { font-family: sans-serif; font-size: 24px; font-weight: 600; fill: #20303a; }
+      .boundary-title { font-family: sans-serif; font-size: 18px; font-weight: 600; fill: #303b44; }
       .node-title { font-family: sans-serif; font-size: 17px; font-weight: 600; fill: #173f35; }
       .node-text { font-family: sans-serif; font-size: 14px; fill: #303b44; }
-      .edge-label { font-family: sans-serif; font-size: 14px; fill: #3567a7; }
+      .small { font-family: sans-serif; font-size: 13px; fill: #596773; }
+      .edge-label { font-family: sans-serif; font-size: 13px; fill: #3567a7; }
     </style>
   </defs>
-  <rect width="1400" height="620" fill="#ffffff"/>
 
+  <rect width="1280" height="620" fill="#ffffff"/>
+  <text x="40" y="44" class="title">Trace flow across a batched call</text>
 
-  <rect x="48" y="96" width="420" height="150" rx="8" fill="#eaf2ff" stroke="#3567a7" stroke-width="2"/>
-  <text x="72" y="130" class="node-title" fill="#1d3b66">Caller A / HTTP request</text>
-  <text x="72" y="160" class="node-text">RequestBatcher.Execute</text>
-  <text x="72" y="184" class="node-text">Internal span</text>
-  <text x="72" y="216" class="small">capacity wait + queue + handler + result</text>
+  <rect x="30" y="82" width="810" height="485" rx="10" fill="#f8fbff" stroke="#3567a7" stroke-width="2"/>
+  <text x="55" y="118" class="boundary-title">Service A: caller and RequestBatcher</text>
 
-  <rect x="48" y="330" width="420" height="150" rx="8" fill="#eaf2ff" stroke="#3567a7" stroke-width="2"/>
-  <text x="72" y="364" class="node-title" fill="#1d3b66">Caller B / HTTP request</text>
-  <text x="72" y="394" class="node-text">RequestBatcher.Execute</text>
-  <text x="72" y="418" class="node-text">Internal span</text>
-  <text x="72" y="450" class="small">capacity wait + queue + handler + result</text>
+  <rect x="65" y="175" width="220" height="110" rx="8" fill="#eaf2ff" stroke="#3567a7" stroke-width="2"/>
+  <text x="89" y="211" class="node-title" fill="#1d3b66">Caller HTTP span</text>
+  <text x="89" y="240" class="node-text">incoming request</text>
+  <text x="89" y="264" class="small">parent of Execute</text>
 
-  <rect x="535" y="190" width="240" height="200" rx="8" fill="#edf1f5" stroke="#596773" stroke-width="2"/>
-  <text x="559" y="227" class="node-title" fill="#303b44">In-process queue</text>
-  <text x="559" y="260" class="node-text">admission / capacity</text>
-  <text x="559" y="284" class="node-text">queue residence</text>
-  <text x="559" y="332" class="small">requests may form</text>
-  <text x="559" y="354" class="small">one or more batches</text>
+  <rect x="350" y="175" width="280" height="110" rx="8" fill="#eaf2ff" stroke="#3567a7" stroke-width="2"/>
+  <text x="374" y="211" class="node-title" fill="#1d3b66">RequestBatcher.Execute</text>
+  <text x="374" y="240" class="node-text">Internal span</text>
+  <text x="374" y="264" class="small">caller-visible duration</text>
 
-  <rect x="860" y="190" width="300" height="200" rx="8" fill="#edf1f5" stroke="#596773" stroke-width="2"/>
-  <text x="884" y="227" class="node-title" fill="#303b44">RequestBatcher.ProcessBatch</text>
-  <text x="884" y="260" class="node-text">Consumer root span</text>
-  <text x="884" y="300" class="small">independent background trace</text>
-  <text x="884" y="332" class="small">links to contributing calls</text>
-  <text x="884" y="364" class="small">batch size + error status</text>
+  <rect x="350" y="350" width="280" height="110" rx="8" fill="#edf1f5" stroke="#596773" stroke-width="2"/>
+  <text x="374" y="386" class="node-title" fill="#303b44">RequestBatcher.ProcessBatch</text>
+  <text x="374" y="415" class="node-text">Consumer root span</text>
+  <text x="374" y="439" class="small">one batch; many linked calls</text>
 
-  <rect x="1220" y="90" width="150" height="145" rx="8" fill="#f4edfb" stroke="#75529b" stroke-width="2"/>
-  <text x="1242" y="124" class="node-title" fill="#422d59">Handler</text>
-  <text x="1242" y="157" class="node-text">scoped</text>
-  <text x="1242" y="180" class="node-text">application</text>
-  <text x="1242" y="203" class="node-text">handler</text>
+  <rect x="665" y="350" width="135" height="110" rx="8" fill="#edf1f5" stroke="#596773" stroke-width="2"/>
+  <text x="683" y="386" class="node-title" fill="#303b44">Handler /</text>
+  <text x="683" y="412" class="node-title" fill="#303b44">HTTP client</text>
+  <text x="683" y="439" class="small">child span</text>
 
-  <rect x="1220" y="300" width="150" height="145" rx="8" fill="#fff4d6" stroke="#8a6a1d" stroke-width="2"/>
-  <text x="1242" y="334" class="node-title" fill="#4d3b0e">Downstream</text>
-  <text x="1242" y="367" class="node-text">DB / HTTP</text>
-  <text x="1242" y="400" class="small">child spans</text>
+  <rect x="865" y="82" width="385" height="485" rx="10" fill="#fcf9ff" stroke="#75529b" stroke-width="2"/>
+  <text x="890" y="118" class="boundary-title">Service B: downstream</text>
 
-  <path d="M 468 171 C 495 171, 505 220, 535 240" fill="none" stroke="#596773" stroke-width="2" marker-end="url(#solid-arrow)"/>
-  <path d="M 468 405 C 495 405, 505 360, 535 340" fill="none" stroke="#596773" stroke-width="2" marker-end="url(#solid-arrow)"/>
-  <path d="M 775 290 L 860 290" fill="none" stroke="#596773" stroke-width="2" marker-end="url(#solid-arrow)"/>
-  <path d="M 1160 254 C 1185 230, 1195 190, 1220 170" fill="none" stroke="#596773" stroke-width="2" marker-end="url(#solid-arrow)"/>
-  <path d="M 1295 235 L 1295 300" fill="none" stroke="#596773" stroke-width="2" marker-end="url(#solid-arrow)"/>
+  <rect x="925" y="350" width="265" height="110" rx="8" fill="#f4edfb" stroke="#75529b" stroke-width="2"/>
+  <text x="949" y="386" class="node-title" fill="#422d59">HTTP server span</text>
+  <text x="949" y="415" class="node-text">propagated request</text>
+  <text x="949" y="439" class="small">child of the client call</text>
 
-  <path d="M 1010 190 L 1010 70 L 258 70 L 258 96" fill="none" stroke="#3567a7" stroke-width="2" stroke-dasharray="8 6" marker-end="url(#link-arrow)"/>
-  <path d="M 1010 390 L 1010 510 L 258 510 L 258 480" fill="none" stroke="#3567a7" stroke-width="2" stroke-dasharray="8 6" marker-end="url(#link-arrow)"/>
-  <rect x="625" y="42" width="165" height="28" rx="4" fill="#ffffff"/>
-  <text x="650" y="62" class="edge-label">ActivityLink on batch</text>
-  <rect x="632" y="478" width="165" height="28" rx="4" fill="#ffffff"/>
-  <text x="657" y="498" class="edge-label">ActivityLink on batch</text>
+  <rect x="925" y="175" width="265" height="110" rx="8" fill="#fff4d6" stroke="#8a6a1d" stroke-width="2"/>
+  <text x="949" y="211" class="node-title" fill="#4d3b0e">Database child span</text>
+  <text x="949" y="240" class="node-text">database instrumentation</text>
+  <text x="949" y="264" class="small">child of the server span</text>
+  <text x="890" y="515" class="small">Named spans: Operation batcherName</text>
 
-  <line x1="48" y1="555" x2="94" y2="555" stroke="#596773" stroke-width="2" marker-end="url(#solid-arrow)"/>
-  <text x="108" y="560" class="small">request / execution flow</text>
-  <line x1="315" y1="555" x2="361" y2="555" stroke="#3567a7" stroke-width="2" stroke-dasharray="8 6" marker-end="url(#link-arrow)"/>
-  <text x="375" y="560" class="small">causal link; no shared parent or ordering</text>
-  <text x="930" y="555" class="small">Batch owns handler and downstream child spans.</text>
+  <path d="M 285 230 L 350 230" fill="none" stroke="#596773" stroke-width="2" marker-end="url(#solid-arrow)"/>
+  <path d="M 490 285 L 490 350" fill="none" stroke="#596773" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#solid-arrow)"/>
+  <text x="505" y="323" class="small">queued work</text>
+  <path d="M 630 405 L 665 405" fill="none" stroke="#596773" stroke-width="2" marker-end="url(#solid-arrow)"/>
+  <path d="M 800 405 L 925 405" fill="none" stroke="#596773" stroke-width="2" marker-end="url(#solid-arrow)"/>
+  <text x="822" y="389" class="small">HTTP propagation</text>
+  <path d="M 1058 350 L 1058 285" fill="none" stroke="#596773" stroke-width="2" marker-end="url(#solid-arrow)"/>
+
+  <path d="M 630 350 C 735 320, 735 140, 630 230" fill="none" stroke="#3567a7" stroke-width="2" stroke-dasharray="8 6" marker-end="url(#link-arrow)"/>
+  <rect x="650" y="145" width="155" height="42" rx="4" fill="#ffffff"/>
+  <text x="665" y="163" class="edge-label">ActivityLink to Execute</text>
+  <text x="665" y="180" class="small">causal; no shared parent</text>
+
+  <line x1="55" y1="595" x2="101" y2="595" stroke="#596773" stroke-width="2" marker-end="url(#solid-arrow)"/>
+  <text x="115" y="600" class="small">parent / child or network flow</text>
+  <line x1="395" y1="595" x2="441" y2="595" stroke="#3567a7" stroke-width="2" stroke-dasharray="8 6" marker-end="url(#link-arrow)"/>
+  <text x="455" y="600" class="small">causal link; no shared trace tree or ordering</text>
 </svg>

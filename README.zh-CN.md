@@ -100,49 +100,6 @@ var quote = await batcher.ExecuteAsync(new PriceQuery(ProductId: 101));
 `PriceQuery`、`PriceQuote`、`PriceQueryHandler` 以及 `IPriceStore` 依赖。应用服务中推荐通过构造函数注入
 `IRequestBatcher<PriceQuery, PriceQuote?>`。
 
-## 可观测性
-
-RequestBatcher 的核心包不依赖 OpenTelemetry SDK。需要追踪时，安装适配包、OpenTelemetry Hosting 集成包以及你
-选择的 Exporter：
-
-```bash
-dotnet add package RequestBatcher.OpenTelemetry
-dotnet add package OpenTelemetry.Extensions.Hosting
-dotnet add package OpenTelemetry.Instrumentation.AspNetCore
-dotnet add package OpenTelemetry.Exporter.OpenTelemetryProtocol
-```
-
-在 Web API 的现有 OpenTelemetry Provider 中注册 RequestBatcher 的 ActivitySource：
-
-```csharp
-using Microsoft.Extensions.DependencyInjection;
-using OpenTelemetry.Trace;
-
-builder.Services.AddOpenTelemetry()
-    .WithTracing(tracing => tracing
-        .AddAspNetCoreInstrumentation()
-        .AddRequestBatcherInstrumentation()
-        .AddOtlpExporter());
-```
-
-调用方 span `RequestBatcher.Execute`（`Internal`）覆盖完整调用过程：准入和容量等待、队列停留、Handler 执行、作用域
-释放、响应物化以及结果可用。每个实际分发的非空批次都会创建独立的 `RequestBatcher.ProcessBatch`（`Consumer`）span，
-通过 links 关联真正进入该批次的调用方 span；Handler 内的数据库或 HTTP span 会成为批次 span 的子 span。一次显式
-批量提交可能拆成多个 Handler 批次，因此多个批次 span 可能通过 link 关联同一个调用方 span。
-
-span 操作名固定为 `RequestBatcher.Execute` 和 `RequestBatcher.ProcessBatch`。命名注册时，两类 span 都会写入
-`requestbatcher.name`，其值就是公开的 `batcherName` 原值；未命名注册省略此 tag，不会使用内部 topic 或 pipeline key。
-要从一次调用追踪到实际执行，先从调用方 span 通过 tracing 后端的反向 link 视图定位关联的批次 span，再查看该批次
-span 下 Handler 创建的数据库或 HTTP 子 span。Activity link 表示因果引用而不是共享父子边，因此反向导航取决于后端
-能力，也不保证显示在同一棵 trace 树中。
-
-![RequestBatcher 可观测性模型](https://raw.githubusercontent.com/eventhorizon-cli/RequestBatcher/main/docs/diagrams/observability.svg)
-
-后台只传递 `ActivityContext`，不会复制 HTTP 请求 Activity、日志 scope、baggage、租户值或其他 `AsyncLocal` 状态；需要的
-业务数据应显式放入请求。Link 表示因果关系，不表示共享 Trace ID 或执行顺序。采样和 Exporter 保留策略由应用控制；
-大批次可能超过 SDK 或 Exporter 的 link 数量限制，需要完整关联时请相应配置。Tracing 是尽力而为的诊断能力，进程崩溃
-后不会恢复内存中的待处理请求；没有 listener 时仍走普通路径，也不对启用 tracing 的场景宣称零开销。
-
 ## 命名批处理与基础类型请求
 
 请求可以直接使用商品 ID。多种操作使用相同请求类型时，通过 `batcherName` 重载区分，例如 `"price"` 和
@@ -908,7 +865,7 @@ Handler 会在分发调用链上执行，直到完成或遇到尚未完成的异
 ## 示例应用
 
 [持续读取可观测性示例](samples/RequestBatcher.Observability/README.md)通过 Docker Compose 启动 Cart、Pricing 两个 Web API、C# 流量生成器、
-PostgreSQL 和 Grafana OTel LGTM。生成器持续查询含 1 条或 32 条商品的购物车报价，展示调用总耗时、独立批次的 ActivityLink
+PostgreSQL 和 Grafana OTel LGTM。生成器并发提交含 2 到 10 条商品的购物车报价，展示调用总耗时、独立批次的 ActivityLink
 以及下游数据库 span。
 
 [PostgreSQL Web API 示例](samples/RequestBatcher.Deduplication)包含三个价格操作：
@@ -932,3 +889,45 @@ PostgreSQL 和 Grafana OTel LGTM。生成器持续查询含 1 条或 32 条商�
 ## 许可证
 
 RequestBatcher 采用 [MIT License](LICENSE)。
+
+## 可观测性
+
+RequestBatcher 核心包内置 OpenTelemetry 注册扩展，但不依赖完整 SDK。安装应用使用的 Hosting 和 Exporter：
+
+```bash
+dotnet add package OpenTelemetry.Extensions.Hosting
+dotnet add package OpenTelemetry.Instrumentation.AspNetCore
+dotnet add package OpenTelemetry.Exporter.OpenTelemetryProtocol
+```
+
+在现有 OpenTelemetry Provider 中同时注册 tracing 和 metrics：
+
+```csharp
+using Microsoft.Extensions.DependencyInjection;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Trace;
+
+builder.Services.AddOpenTelemetry()
+    .WithTracing(tracing => tracing
+        .AddAspNetCoreInstrumentation()
+        .AddRequestBatcherInstrumentation()
+        .AddOtlpExporter())
+    .WithMetrics(metrics => metrics
+        .AddRequestBatcherInstrumentation()
+        .AddOtlpExporter());
+```
+
+`RequestBatcher.Execute` 是调用方当前 span 下的 `Internal` span，覆盖调用方可见的完整过程，包括准入、容量等待、队列停留、
+Handler 执行和结果完成。每个实际分发的非空批次都会创建独立的 `RequestBatcher.ProcessBatch` `Consumer` 根 span，并通过
+link 关联真正贡献请求的 `Execute` span；Handler 创建的数据库或 HTTP span 是该批次 span 的子 span。
+
+命名注册会在 span 基础名后追加一个空格和公开名称，例如 `RequestBatcher.Execute pricing-queries` 和
+`RequestBatcher.ProcessBatch pricing-queries`，同时写入 `requestbatcher.name`。未命名注册保留基础名称并省略此 tag。
+Link 表示跨队列的因果关系，不代表共享父 span、Trace ID 或执行顺序；队列只传递 `ActivityContext`，需要的请求 scope、baggage
+和其他 `AsyncLocal` 状态应显式传递。
+
+![RequestBatcher 可观测性模型](https://raw.githubusercontent.com/eventhorizon-cli/RequestBatcher/main/docs/diagrams/observability.svg)
+
+对应的 `MeterProviderBuilder` 扩展会注册 `RequestBatcher` meter，记录已接收请求、已处理请求、已处理批次数、批次大小和批次
+耗时。Metrics 只使用请求类型和配置的 batcher name 作为维度，不记录请求内容、租户值或 Partition Key；只有 meter provider 监听
+该 meter 时才会输出数据。Tracing 和内存中的待处理请求都是尽力而为，进程故障后不会恢复请求。

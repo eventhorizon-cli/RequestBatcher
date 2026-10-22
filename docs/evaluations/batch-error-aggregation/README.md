@@ -95,5 +95,5 @@ dotnet run --project tests/RequestBatcher.Benchmarks/RequestBatcher.Benchmarks.c
 
 ## Observability
 
-This allocation and failure-accounting evaluation does not measure the optional `RequestBatcher.OpenTelemetry`
+This allocation and failure-accounting evaluation does not measure the built-in RequestBatcher
 instrumentation. See the [observability design](../../observability-design.md) for tracing integration and link limits.

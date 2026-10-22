@@ -71,5 +71,5 @@ wave, with named/unnamed ratios within each submission group and handler lifetim
 
 ## Observability
 
-This historical named-batching comparison does not measure the optional `RequestBatcher.OpenTelemetry` instrumentation.
+This historical named-batching comparison does not measure the built-in RequestBatcher instrumentation.
 See the [observability design](../../observability-design.md) for integration guidance.

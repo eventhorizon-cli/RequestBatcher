@@ -1,3 +1,4 @@
+using RequestBatcher;
 using RequestBatcher.Observability.Cart;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -8,6 +9,14 @@ builder.Services.AddHttpClient("pricing", client =>
     client.BaseAddress = new Uri(baseAddress.EndsWith('/') ? baseAddress : $"{baseAddress}/");
     client.Timeout = TimeSpan.FromSeconds(15);
 });
+builder.Services.AddDelegateRequestBatcher<int, Product?>(
+    "pricing-queries",
+    options =>
+    {
+        options.BatchSize = 20;
+        options.MaxConcurrency = 2;
+        options.MaxPendingRequests = 1024;
+    });
 
 var app = builder.Build();
 app.MapGet("/health", () => Results.Ok(new { status = "ready" }));

@@ -849,62 +849,16 @@ Background dispatch and consumer monitoring run without inheriting the initializ
 Handlers do not inherit HTTP request activities (`Activity.Current`), logging scopes, or other `AsyncLocal` values
 from initialization or submission. The caller's context is preserved after resolution and after awaiting completion.
 Pass required application data, such as tenant identifiers, explicitly in requests. Activities created inside a
-handler flow normally across its awaits. The optional `RequestBatcher.OpenTelemetry` package adds an
-`AddRequestBatcherInstrumentation()` extension for OpenTelemetry SDK integration; the core package itself has no SDK
-dependency. Singleton constructors must not capture request-specific state; they follow the container's normal creation
+handler flow normally across its awaits. The `RequestBatcher` package includes an
+`AddRequestBatcherInstrumentation()` extension for OpenTelemetry SDK integration; the core package depends only on the
+lightweight provider-builder API and does not include the full SDK or an exporter. Singleton constructors must not capture request-specific state; they follow the container's normal creation
 rules.
-
-## Observability
-
-Install the adapter and the hosting/exporter packages in the application:
-
-```bash
-dotnet add package RequestBatcher.OpenTelemetry
-dotnet add package OpenTelemetry.Extensions.Hosting
-dotnet add package OpenTelemetry.Instrumentation.AspNetCore
-dotnet add package OpenTelemetry.Exporter.OpenTelemetryProtocol
-```
-
-Register the source with the application's provider:
-
-```csharp
-using Microsoft.Extensions.DependencyInjection;
-using OpenTelemetry.Trace;
-
-services.AddOpenTelemetry()
-    .WithTracing(tracing => tracing
-        .AddAspNetCoreInstrumentation()
-        .AddRequestBatcherInstrumentation()
-        .AddOtlpExporter());
-```
-
-`RequestBatcher.Execute` is an `Internal` call span under the caller's current Activity. It measures admission,
-capacity waiting, queue residence, handler execution, handler-scope disposal, and response materialization until the
-returned task's outcome is available. Each non-empty dispatched batch creates an independent root
-`RequestBatcher.ProcessBatch` `Consumer` span and links the distinct submission contexts that contributed requests.
-Handler database and HTTP spans are children of that batch span. Links express causality across the in-process queue;
-they do not share a trace ID or imply ordering. A submission may contribute to multiple batches after splitting, and a
-batch may link to many submissions.
-
-Span operation names are fixed as `RequestBatcher.Execute` and `RequestBatcher.ProcessBatch`. Both spans include
-`requestbatcher.name` for a named registration, using the exact public `batcherName`; unnamed registrations omit the tag.
-To follow a call through execution, use the tracing backend's reverse-link view to locate the batch span linked to the
-call, then inspect the handler's downstream database or HTTP child spans. Activity links are causal references, so this
-navigation depends on backend support and does not guarantee one shared trace tree.
-
-Only `ActivityContext` is transported. HTTP activities, logging scopes, baggage, and other `AsyncLocal` values are not
-copied into the consumer. Sampling is controlled by the application's provider; parent-based sampling does not
-automatically follow links, and SDK/exporter link limits can drop links from large batches. Tracing is best effort and
-does not recover pending requests after process failure. When no listener is registered, the normal path is retained;
-the library does not promise zero overhead for enabled tracing.
-
-![RequestBatcher observability model](https://raw.githubusercontent.com/eventhorizon-cli/RequestBatcher/main/docs/diagrams/observability.svg)
 
 ## Sample Application
 
 The [continuous-read observability sample](https://github.com/eventhorizon-cli/RequestBatcher/blob/main/samples/RequestBatcher.Observability/README.md) starts the Cart and Pricing Web APIs, a C# traffic generator, PostgreSQL,
 and Grafana OTel LGTM with Docker Compose. It shows complete call spans, independent linked batch spans,
-and downstream database spans while continuously pricing shopping carts with 1 or 32 items.
+and downstream database spans while concurrent Cart requests submit 2–10 item carts that share RequestBatcher batches.
 
 The [PostgreSQL Web API sample](https://github.com/eventhorizon-cli/RequestBatcher/tree/main/samples/RequestBatcher.Deduplication) demonstrates two pipelines in a Minimal API:
 
@@ -930,3 +884,44 @@ handler-class version. The delegate sample has its own HTTP and database ports; 
 ## License
 
 [MIT](https://github.com/eventhorizon-cli/RequestBatcher/blob/main/LICENSE)
+
+## Observability
+
+Install the OpenTelemetry hosting and exporter packages in the application, then register both providers:
+
+```bash
+dotnet add package OpenTelemetry.Extensions.Hosting
+dotnet add package OpenTelemetry.Instrumentation.AspNetCore
+dotnet add package OpenTelemetry.Exporter.OpenTelemetryProtocol
+```
+
+```csharp
+using Microsoft.Extensions.DependencyInjection;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Trace;
+
+services.AddOpenTelemetry()
+    .WithTracing(tracing => tracing
+        .AddAspNetCoreInstrumentation()
+        .AddRequestBatcherInstrumentation()
+        .AddOtlpExporter())
+    .WithMetrics(metrics => metrics
+        .AddRequestBatcherInstrumentation()
+        .AddOtlpExporter());
+```
+
+`RequestBatcher.Execute` is an `Internal` span under the caller's current span and measures the complete caller-visible
+duration. Each non-empty batch creates an independent `RequestBatcher.ProcessBatch` `Consumer` root linked to the
+distinct `Execute` spans that contributed requests. Handler database and HTTP spans are children of that batch span.
+
+Named registrations append the public name after a space, for example `RequestBatcher.Execute pricing-queries` and
+`RequestBatcher.ProcessBatch pricing-queries`; both spans also include `requestbatcher.name`. Unnamed registrations
+keep the base names and omit the tag. Links are causal references across the queue, not shared parent edges, trace IDs,
+or ordering guarantees. Only `ActivityContext` is transported; request scopes, baggage, and other `AsyncLocal` values
+must be passed explicitly when needed.
+
+![RequestBatcher observability model](https://raw.githubusercontent.com/eventhorizon-cli/RequestBatcher/main/docs/diagrams/observability.svg)
+
+The matching metrics extension registers the `RequestBatcher` meter. It records accepted requests, processed requests
+and batches, batch size, and batch duration. Dimensions contain only request type and configured batcher name; payloads,
+tenant values, and partition keys are excluded. Metrics are emitted when a meter provider listens to the meter.

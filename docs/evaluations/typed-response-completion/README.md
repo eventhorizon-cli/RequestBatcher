@@ -42,5 +42,5 @@ dotnet run --project tests/RequestBatcher.Benchmarks/RequestBatcher.Benchmarks.c
 
 ## Observability
 
-This historical response-completion evaluation does not measure the optional `RequestBatcher.OpenTelemetry`
+This historical response-completion evaluation does not measure the built-in RequestBatcher
 instrumentation. See the [observability design](../../observability-design.md) for the current tracing contract.

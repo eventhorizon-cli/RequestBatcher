@@ -185,5 +185,5 @@ determine the final batch size and concurrency.
 
 ## Observability
 
-The recorded comparison does not include the optional `RequestBatcher.OpenTelemetry` instrumentation or its tracing
+The recorded comparison does not include the built-in RequestBatcher instrumentation or its tracing
 overhead. See the [observability design](../../observability-design.md) for span correlation in this workload.

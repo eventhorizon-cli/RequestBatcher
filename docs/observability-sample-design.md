@@ -2,11 +2,11 @@
 
 ## Contract and compatibility
 
-`samples/RequestBatcher.Observability` is a local Docker Compose demonstration of two independent .NET 8 Web APIs.
-`Cart/RequestBatcher.Observability.Cart.csproj` accepts product quantities and calculates price quotes.
-`Pricing/RequestBatcher.Observability.Pricing.csproj` exposes price lookup endpoints and uses the named
-`product-reads` RequestBatcher pipeline to batch PostgreSQL reads. Cart references HTTP and OpenTelemetry packages
-only; Pricing references the local RequestBatcher OpenTelemetry adapter and Npgsql. Neither project references the
+`samples/RequestBatcher.Observability` is a local Docker Compose demonstration of two independent .NET 10 Web APIs.
+`Cart/RequestBatcher.Observability.Cart.csproj` accepts small carts with product quantities and calculates price quotes.
+`Pricing/RequestBatcher.Observability.Pricing.csproj` exposes price lookup endpoints and reads PostgreSQL directly.
+Cart references RequestBatcher, HTTP, and OpenTelemetry packages; Pricing references Npgsql and its official
+OpenTelemetry integration. Neither project references the
 other. HTTP DTOs are small local contracts. No orders or payments are created, and normal operation is read-only.
 The library API and SDK policy remain unchanged.
 
@@ -16,44 +16,54 @@ and dashboard provisioning). Host ports bind to loopback and are configurable. E
 
 ## Internal flow
 
-Cart exposes `POST /cart/quote`, accepting an array of `{ productId, quantity }` entries. It validates 1–64 entries,
-positive IDs, and quantities from 1 to 100, fetches products through Pricing's `GET /prices?ids=...` batch API, and
-returns quote lines with product ID, name, unit price, quantity, and line total plus the total price. Missing products
+Cart exposes `POST /cart/quote`, accepting an array of 2–10 `{ productId, quantity }` entries. It validates the item count,
+positive IDs, and quantities from 1 to 100, then submits the complete ID sequence once through the native
+`IRequestBatcher<int, Product?>` enumerable overload. The batch handler receives up to 20 product requests, which can be
+mixed across multiple Cart HTTP requests, deduplicates their IDs, fetches products through Pricing's `GET /prices?ids=...`
+batch API, and maps each response back in its original request order. `BatchSize=20` counts product requests, not Cart
+submissions; a single 2–10 item Cart submission may be split across multiple handler batches. It returns quote lines with
+product ID, name, unit price, quantity, and line total plus the total price. Missing products
 return 404; invalid carts return 400. Pricing failures produce a failed HTTP response, never a partial successful quote.
-Pricing also exposes `GET /prices/{id}` for inspecting a single lookup. Both services expose untraced `/health` routes.
+Pricing also exposes `GET /prices/{id}` and `GET /prices?ids=...` for inspecting lookups; the grouped endpoint accepts the
+up to 20 IDs sent by one batch handler. Both services expose untraced `/health` routes.
 A separate `CheckHealth.cs` file-based application probes these routes for Docker; it checks HTTP availability, not
 database readiness. Business routes live in `CartEndpoints.cs` and `PricingEndpoints.cs`; each `Program.cs` only
 composes and starts its host.
 
-A separate `traffic-generator` container simulates external clients using the `GenerateTraffic.cs` single-file C# application.
-It starts after Cart is healthy, uses eight bounded asynchronous HTTP loops, alternates requests of
-1 and 32 entries, validates response IDs, quantities, and totals, and waits 250 ms between requests. Failures are logged
-and retried at the same bounded rate. Stopping this container leaves both APIs available for manual requests. Neither
-Web API owns a synthetic workload. Shutdown stops the generator; accepted Pricing requests follow RequestBatcher
+A separate `traffic-generator` container simulates external clients using the
+`RequestBatcher.Observability.TrafficGenerator` console project.
+It starts after Cart is healthy, uses 32 bounded asynchronous HTTP loops, sends a random 2–10 item cart on each iteration,
+validates response IDs, quantities, and totals, and waits 250 ms between requests. Failures are logged and retried at the
+same bounded rate. Neither Web API owns a synthetic workload. Accepted Cart batcher requests follow RequestBatcher
 completion semantics.
 
-Cart's ASP.NET Core request span is the root for each simulated user request. HttpClient propagates context from Cart
-to Pricing's ASP.NET Core request span. Pricing submits to `product-reads` (batch size 16, maximum concurrency 1,
-bounded pending capacity). Its handler deduplicates IDs within each batch and runs one parameterized PostgreSQL SELECT,
-assigning a response to every entry. Missing product responses are explicit nulls. The database initialization script
+Cart's ASP.NET Core request span is the root for each simulated user request. Each request enters the
+`pricing-queries` RequestBatcher once with its complete ID sequence (batch size 20 product requests, maximum concurrency 2,
+bounded pending capacity). Its static delegate handler combines and deduplicates IDs across requests, makes one HTTP
+request to Pricing, then maps each Pricing result back to every original request. Pricing's ASP.NET Core handler
+runs one parameterized PostgreSQL SELECT. Missing product responses are explicit nulls. The database initialization script
 seeds IDs 1–100 once. The generator logs request duration and outcomes but does not export its own spans.
 
-`RequestBatcher.Execute` stays in the HTTP trace and measures caller-visible submission duration. Independent
-`RequestBatcher.ProcessBatch` Consumer roots link to participating Execute spans and own Npgsql query child spans.
-Explicit submissions can split across batches; concurrent calls can share batches. Both spans carry
-`requestbatcher.name=product-reads`. Only context identifiers cross the queue; ambient request state is isolated.
+`RequestBatcher.Execute pricing-queries` stays in the Cart HTTP trace and measures caller-visible submission duration.
+Independent `RequestBatcher.ProcessBatch pricing-queries` Consumer roots link to the distinct Cart `Execute` spans that
+contributed product requests and contain the Cart-to-Pricing HTTP child span. One Cart `Execute` span may link to multiple
+batch roots when its 2–10 product requests are split, while a batch can mix requests from concurrent caller traces. Npgsql
+creates the database span under Pricing's HTTP span. Both
+RequestBatcher spans carry `requestbatcher.name=pricing-queries`. Only context identifiers cross the queue; ambient
+request state is isolated.
 
-OTLP/HTTP exports traces, framework HTTP metrics, and logs. Service names are `requestbatcher-cart` and
-`requestbatcher-pricing`. Always-on sampling and a 256-link limit keep the demonstration visible; these are not
-production sampling recommendations. Grafana provisions Tempo, Prometheus, and Loki and searches both RequestBatcher
-span types. TraceQL link lookup connects a caller trace to its batch traces without implying a single trace tree.
-RequestBatcher provides spans and existing logs, not a new library metrics contract. It is in-process and cannot recover
-pending requests after process failure. Explicit teardown commands distinguish preserving and deleting volumes.
+OTLP/HTTP exports traces, framework HTTP metrics, RequestBatcher metrics, Npgsql metrics, and logs. Service names are
+`requestbatcher-cart` and `requestbatcher-pricing`. Always-on sampling and a 256-link limit keep the demonstration
+visible; these are not production sampling recommendations. Grafana provisions Tempo, Prometheus, and Loki and
+searches both RequestBatcher span types. TraceQL link lookup connects a caller trace to its batch traces without
+implying a single trace tree. RequestBatcher metrics cover accepted and processed product requests, processed batches,
+batch size in product requests, and batch duration. It is in-process and
+cannot recover pending requests after process failure.
 
 ## Validation
 
 Build and format both projects and run the full existing library test project. Validate Compose and provisioning.
-Run the stack and verify healthy services, valid single/grouped products, quote totals, invalid query rejection, and
+Run the stack and verify healthy services, valid 2–10 item carts, quote totals, invalid cart rejection, and
 missing-product handling. Observe successful continuous quotes. Query Tempo to prove Cart-to-Pricing propagation,
 Execute-to-batch links, and Npgsql children of batch spans. Check HTTP metrics and log ingestion. Leave the environment
 running for review; do not merge or publish yet. Run performance benchmarks separately from the sample workload.

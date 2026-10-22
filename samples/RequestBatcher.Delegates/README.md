@@ -1,5 +1,7 @@
 # Delegate Handler PostgreSQL Sample
 
+**English** | [简体中文](README.zh-CN.md)
+
 Delegate handlers let you keep short batch-processing logic next to the code that submits requests, so both can be
 read and updated together. This sample puts batch deduplication and response mapping in static lambdas at the
 endpoints, with database operations in `PriceStore`. For more complex logic that needs reuse or independent tests,
@@ -167,7 +169,11 @@ to the HTTP request; the sample does not add automatic retries.
 
 ## Observability
 
-The sample can use the optional `RequestBatcher.OpenTelemetry` adapter with the application's OpenTelemetry hosting
+The sample can use the `RequestBatcher` package with the application's OpenTelemetry hosting
 and exporter packages. Register it with `WithTracing(tracing => tracing.AddRequestBatcherInstrumentation())`.
 `RequestBatcher.Execute` measures the full caller wait, while `RequestBatcher.ProcessBatch` is an independent Consumer
 span linked to contributing calls. See the [observability guide](../../docs/observability-design.md).
+
+For optional end-to-end validation of the Compose observability sample, see the [integration test guide](../../tests/it/README.md)
+([中文](../../tests/it/README.zh-CN.md)). It reuses the running stack and verifies one Cart `Execute` per HTTP request,
+cross-trace batch links, Pricing/database parent-child spans, and metrics with the explicit integration-test opt-in.

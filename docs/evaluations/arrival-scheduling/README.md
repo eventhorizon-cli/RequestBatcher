@@ -166,5 +166,5 @@ output directories for the read comparisons.
 
 ## Observability
 
-This evaluation predates the optional `RequestBatcher.OpenTelemetry` instrumentation and does not report tracing
+This evaluation predates the built-in RequestBatcher instrumentation and does not report tracing
 overhead or trace output. See the [observability design](../../observability-design.md) for the production span model.

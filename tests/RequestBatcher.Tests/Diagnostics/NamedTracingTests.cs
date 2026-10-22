@@ -153,14 +153,17 @@ public sealed class NamedTracingTests
             }
 
             Assert.Same(caller, Activity.Current);
-            var call = Assert.Single(stopped, span => span.OperationName == RequestBatcherTracing.CallName
+            var expectedCallName = name is null ? "RequestBatcher.Execute" : $"RequestBatcher.Execute {name}";
+            var call = Assert.Single(stopped, span => span.OperationName == expectedCallName
                 && span.ParentSpanId == caller.SpanId);
             Assert.Equal(name, call.GetTagItem("requestbatcher.name"));
         }));
 
-        var calls = stopped.Where(span => span.OperationName == RequestBatcherTracing.CallName).ToArray();
+        var calls = stopped.Where(span => span.OperationName == RequestBatcherTracing.GetCallName(
+            span.GetTagItem("requestbatcher.name") as string)).ToArray();
         Assert.Equal(3, calls.Length);
-        var batches = stopped.Where(span => span.OperationName == RequestBatcherTracing.BatchName).ToArray();
+        var batches = stopped.Where(span => span.OperationName == RequestBatcherTracing.GetBatchName(
+            span.GetTagItem("requestbatcher.name") as string)).ToArray();
         Assert.NotEmpty(batches);
         foreach (var batch in batches)
         {
@@ -171,8 +174,10 @@ public sealed class NamedTracingTests
 
         foreach (var name in names)
         {
-            Assert.Contains(sampled, item => item == (RequestBatcherTracing.CallName, name));
-            Assert.Contains(sampled, item => item == (RequestBatcherTracing.BatchName, name));
+            Assert.Contains(sampled, item => item ==
+                (name is null ? "RequestBatcher.Execute" : $"RequestBatcher.Execute {name}", name));
+            Assert.Contains(sampled, item => item ==
+                (name is null ? "RequestBatcher.ProcessBatch" : $"RequestBatcher.ProcessBatch {name}", name));
         }
 
         Assert.All(stopped.Where(span => span.GetTagItem("requestbatcher.name") is null),

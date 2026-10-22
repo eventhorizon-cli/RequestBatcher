@@ -67,7 +67,14 @@ Reproduction requires the instrumented source described by the [arrival-scheduli
 
 ## Observability
 
-The optional `RequestBatcher.OpenTelemetry` package exposes `AddRequestBatcherInstrumentation()` for application
+The `RequestBatcher` package exposes `AddRequestBatcherInstrumentation()` for application
 tracing. Historical benchmark results in this index are not tracing measurements and should not be read as results with
 the new instrumentation enabled. See the [observability design](../../docs/observability-design.md) for span lifetime,
 links, sampling, and performance boundaries.
+
+| Source / filter class | Comparison |
+| --- | --- |
+| [ObservabilityOverheadBenchmarks](InMemory/ObservabilityOverheadBenchmarks.cs) | Disabled, metrics-only, and tracing-plus-metrics OpenTelemetry providers around 256 named async pricing requests with a 20 ms handler delay. |
+
+The corresponding [observability overhead evaluation](../../docs/evaluations/observability-overhead/README.md) records the
+measured results and workload limitations.

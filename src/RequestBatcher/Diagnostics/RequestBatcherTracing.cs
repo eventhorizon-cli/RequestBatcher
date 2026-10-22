@@ -119,7 +119,7 @@ internal static class RequestBatcherTracing
 
         // Dispatch runs in an isolated context. Links describe the many-to-many relationship with calls.
         return Source.StartActivity(
-            BatchName,
+            GetBatchName(batcherName),
             ActivityKind.Consumer,
             parentContext: default,
             tags: tags,
@@ -133,10 +133,17 @@ internal static class RequestBatcherTracing
     }
 
     private static Activity? StartCall(string requestTypeName, string? batcherName) => Source.StartActivity(
-        CallName,
+        GetCallName(batcherName),
         ActivityKind.Internal,
         parentContext: Activity.Current?.Context ?? default,
         tags: CreateTags(requestTypeName, batcherName));
+
+    internal static string GetCallName(string? batcherName) => GetSpanName(CallName, batcherName);
+
+    internal static string GetBatchName(string? batcherName) => GetSpanName(BatchName, batcherName);
+
+    private static string GetSpanName(string baseName, string? batcherName) =>
+        batcherName is null ? baseName : $"{baseName} {batcherName}";
 
     private static ActivityTagsCollection CreateTags(string requestTypeName, string? batcherName)
     {

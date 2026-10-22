@@ -42,5 +42,5 @@ dotnet run --project tests/RequestBatcher.Benchmarks/RequestBatcher.Benchmarks.c
 
 ## Observability
 
-The partition-key comparison does not include the optional `RequestBatcher.OpenTelemetry` instrumentation. See the
+The partition-key comparison does not include the built-in RequestBatcher instrumentation. See the
 [observability design](../../observability-design.md) for how a submission is linked to one or more batches.

@@ -77,5 +77,5 @@ had 40 configurations and 12 bursts; the current probe uses 33 configurations an
 
 ## Observability
 
-The historical BufferQueue comparison does not include the optional `RequestBatcher.OpenTelemetry` instrumentation.
+The historical BufferQueue comparison does not include the built-in RequestBatcher instrumentation.
 See the [observability design](../../observability-design.md) for the current `Execute` and `ProcessBatch` spans.

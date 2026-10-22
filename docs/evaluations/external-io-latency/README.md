@@ -67,5 +67,5 @@ for the individual-submission workloads. The local server stops automatically.
 
 ## Observability
 
-This historical HTTP latency evaluation does not measure the optional `RequestBatcher.OpenTelemetry` instrumentation.
+This historical HTTP latency evaluation does not measure the built-in RequestBatcher instrumentation.
 See the [observability design](../../observability-design.md) for caller spans, batch links, and downstream children.

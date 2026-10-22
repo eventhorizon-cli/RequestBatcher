@@ -8,7 +8,7 @@ internal static class CartEndpoints
     {
         app.MapPost("/cart/quote", async (
             CartItem?[]? items,
-            IHttpClientFactory clientFactory,
+            [FromKeyedServices("pricing-queries")] IRequestBatcher<int, Product?> pricingBatcher,
             CancellationToken cancellationToken) =>
         {
             var validationError = Validate(items);
@@ -19,21 +19,54 @@ internal static class CartEndpoints
 
             var validItems = items!.Select(item => item!).ToArray();
             var ids = validItems.Select(item => item.ProductId).ToArray();
-            Product?[] products;
+            IReadOnlyList<Product?> products;
             try
             {
-                using var response = await clientFactory.CreateClient("pricing")
-                    .GetAsync($"prices?ids={string.Join(',', ids)}", cancellationToken)
-                    .ConfigureAwait(false);
-                if (!response.IsSuccessStatusCode)
-                {
-                    return Results.Problem(
-                        "The pricing service did not accept the product lookup.",
-                        statusCode: StatusCodes.Status502BadGateway);
-                }
+                // The native batch overload creates one call span for the entire Cart submission.
+                products = await pricingBatcher.ExecuteAsync(
+                    ids,
+                    static async ValueTask (
+                        IReadOnlyList<RequestBatchEntry<int, Product?>> entries,
+                        IHttpClientFactory clientFactory,
+                        CancellationToken batchCancellationToken) =>
+                    {
+                        var batchIds = entries.Select(entry => entry.Request).Distinct().ToArray();
+                        using var response = await clientFactory.CreateClient("pricing")
+                            .GetAsync($"prices?ids={string.Join(',', batchIds)}", batchCancellationToken)
+                            .ConfigureAwait(false);
+                        if (!response.IsSuccessStatusCode)
+                        {
+                            throw new HttpRequestException(
+                                "The pricing service did not accept the product lookup.",
+                                inner: null,
+                                response.StatusCode);
+                        }
 
-                products = await response.Content.ReadFromJsonAsync<Product?[]>(cancellationToken: cancellationToken)
-                    .ConfigureAwait(false) ?? [];
+                        var batchProducts = await response.Content
+                            .ReadFromJsonAsync<Product?[]>(cancellationToken: batchCancellationToken)
+                            .ConfigureAwait(false);
+                        if (batchProducts is null || batchProducts.Length != batchIds.Length)
+                        {
+                            throw new InvalidOperationException(
+                                "The pricing service returned an invalid product count.");
+                        }
+
+                        var productsById = new Dictionary<int, Product?>();
+                        for (var index = 0; index < batchIds.Length; index++)
+                        {
+                            var product = batchProducts[index];
+                            if (product is not null && (product.Id != batchIds[index] || product.Price < 0))
+                            {
+                                throw new InvalidOperationException("The pricing service returned an invalid product.");
+                            }
+
+                            productsById.Add(batchIds[index], product);
+                        }
+
+                        entries.SetResponses(id => productsById[id]);
+                    },
+                    cancellationToken)
+                    .ConfigureAwait(false);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {
@@ -51,14 +84,14 @@ internal static class CartEndpoints
                     "The pricing service could not be reached.",
                     statusCode: StatusCodes.Status502BadGateway);
             }
-            catch (JsonException)
+            catch (Exception exception) when (exception is InvalidOperationException or JsonException)
             {
                 return Results.Problem(
                     "The pricing service returned an invalid response.",
                     statusCode: StatusCodes.Status502BadGateway);
             }
 
-            if (products.Length != validItems.Length)
+            if (products.Count != validItems.Length)
             {
                 return Results.Problem(
                     "The pricing service returned an invalid product count.",
@@ -94,9 +127,9 @@ internal static class CartEndpoints
 
     private static string? Validate(CartItem?[]? items)
     {
-        if (items is null || items.Length is < 1 or > 64)
+        if (items is null || items.Length is < 2 or > 10)
         {
-            return "Provide between 1 and 64 cart items.";
+            return "Provide between 2 and 10 cart items.";
         }
 
         for (var index = 0; index < items.Length; index++)

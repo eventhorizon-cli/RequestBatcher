@@ -98,13 +98,6 @@ jobs:
             --output artifacts \
             -p:Version="$VERSION" \
             -p:ContinuousIntegrationBuild=true
-          dotnet pack src/RequestBatcher.OpenTelemetry/RequestBatcher.OpenTelemetry.csproj \
-            --configuration Release \
-            --no-build \
-            --no-restore \
-            --output artifacts \
-            -p:Version="$VERSION" \
-            -p:ContinuousIntegrationBuild=true
 
       - name: Publish packages to NuGet
         env:
@@ -113,7 +106,6 @@ jobs:
         run: |
           packages=(
             "artifacts/RequestBatcher.$VERSION.nupkg"
-            "artifacts/RequestBatcher.OpenTelemetry.$VERSION.nupkg"
           )
           for package in "${packages[@]}"; do
             test -f "$package"
@@ -130,8 +122,6 @@ jobs:
           assets=(
             "artifacts/RequestBatcher.$VERSION.nupkg"
             "artifacts/RequestBatcher.$VERSION.snupkg"
-            "artifacts/RequestBatcher.OpenTelemetry.$VERSION.nupkg"
-            "artifacts/RequestBatcher.OpenTelemetry.$VERSION.snupkg"
           )
           for asset in "${assets[@]}"; do
             test -f "$asset"

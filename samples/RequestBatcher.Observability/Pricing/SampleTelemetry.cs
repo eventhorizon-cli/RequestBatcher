@@ -1,3 +1,4 @@
+using Npgsql;
 using OpenTelemetry.Logs;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
@@ -15,13 +16,13 @@ internal static class SampleTelemetry
             .WithTracing(tracing => tracing
                 // Keep every call and independent batch visible in this local demonstration.
                 .SetSampler(new AlwaysOnSampler())
-                .AddSource("Npgsql")
+                .AddNpgsql()
                 .AddAspNetCoreInstrumentation(options =>
                     options.Filter = context => !context.Request.Path.StartsWithSegments("/health"))
-                .AddRequestBatcherInstrumentation()
                 .AddOtlpExporter())
             .WithMetrics(metrics => metrics
                 .AddAspNetCoreInstrumentation()
+                .AddMeter("Npgsql")
                 .AddOtlpExporter());
         builder.Logging.AddOpenTelemetry(logging =>
         {
