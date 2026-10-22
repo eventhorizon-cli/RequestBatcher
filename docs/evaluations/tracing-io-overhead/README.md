@@ -4,6 +4,9 @@ This evaluation compares published RequestBatcher 0.2.4 (before tracing instrume
 a simulated 20 ms downstream operation per handler batch. Version 0.3.2 runs with no tracing provider and with
 OpenTelemetry root sampling rates of 0%, 1%, 10%, and 100%.
 
+The [allocation optimization comparison](optimization.md) separately measures 0.3.2 against the optimized source
+with identical sampling modes, retaining all tracing and completion semantics.
+
 ## Workload and sampling contract
 
 Each wave submits 1,024 unique integer requests to one unkeyed queue partition, with BatchSize = 32,

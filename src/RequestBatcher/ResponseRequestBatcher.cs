@@ -7,17 +7,18 @@ internal sealed class ResponseRequestBatcher<TRequest, TResponse>(
     RequestBatchCoordinator<RequestBatchEntry<TRequest, TResponse>> batcher)
     : IRequestBatcher<TRequest, TResponse>
 {
-    private static readonly string _requestTypeName = typeof(TRequest).FullName ?? typeof(TRequest).Name;
+    private readonly RequestBatcherTraceMetadata _traceMetadata = new(
+        typeof(TRequest).FullName ?? typeof(TRequest).Name,
+        batcher.BatcherName);
 
     internal string? BatcherName => batcher.BatcherName;
 
     public Task<TResponse> ExecuteAsync(TRequest request, CancellationToken cancellationToken = default) =>
         RequestBatcherTracing.Source.HasListeners()
             ? RequestBatcherTracing.TraceCall(
-                _requestTypeName,
+                _traceMetadata,
                 (Batcher: this, Request: request, Token: cancellationToken),
-                static (state, context) => state.Batcher.ExecuteCoreAsync(state.Request, state.Token, context),
-                BatcherName)
+                static (state, context) => state.Batcher.ExecuteCoreAsync(state.Request, state.Token, context))
             : ExecuteCoreAsync(request, cancellationToken);
 
     internal Task<TResponse> ExecuteCoreAsync(
@@ -41,10 +42,9 @@ internal sealed class ResponseRequestBatcher<TRequest, TResponse>(
 
         return RequestBatcherTracing.Source.HasListeners()
             ? RequestBatcherTracing.TraceCall(
-                _requestTypeName,
+                _traceMetadata,
                 (Batcher: this, Requests: requests, Token: cancellationToken),
-                static (state, context) => state.Batcher.ExecuteCoreAsync(state.Requests, state.Token, context),
-                BatcherName)
+                static (state, context) => state.Batcher.ExecuteCoreAsync(state.Requests, state.Token, context))
             : ExecuteCoreAsync(requests, cancellationToken);
     }
 

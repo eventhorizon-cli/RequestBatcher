@@ -109,6 +109,19 @@ or extra per-item tracing allocation. Traced pending requests use an internal
 subclass that stores shared submission tracing state, keeping the untraced pending object's size unchanged.
 The state contains the submission context and, for recorded calls, a lazily allocated
 collection of batch contexts protected against concurrent dispatch. It never holds an Activity.
+Fixed call names and immutable sampling tags are prepared once per coordinator/adapter rather than per submission.
+The metadata type, sampling-dependent state, deduplication, and Activity lifetime stay under Diagnostics. Submission
+adapters only hold metadata and invoke the tracing boundary; queue admission, capacity, dispatch, and request
+completion do not inspect sampling flags or manage Activities. The existing completion bridge stays in Diagnostics
+rather than adding telemetry callbacks to business completion contracts.
+They remain available to samplers at Activity creation and are not mutable through the shared tag collection.
+The no-listener hot path does not access them. A submission that does not request all Activity data allocates
+neither a reverse-link synchronization gate nor a reverse-link collection. Batch dispatch still supplies every
+distinct forward context to the sampler, including unsampled contexts, but retains reverse-link recipients only
+for submissions that collect those links. Forward-context deduplication uses no hash set until a second distinct
+context is encountered; repeated items from one explicit submission therefore avoid that allocation.
+The collection decision follows IsAllDataRequested, not the Recorded flag: record-only Activities still collect
+reverse links, while propagation-only Activities do not.
 Call completion writes the collected links before stopping the Activity, so exporters see
 the complete links without concurrent Activity mutation. Dropped calls retain only their
 available context and do not collect reverse links. Tracing-enabled calls retain only contexts on queued items; request arrays,
@@ -142,6 +155,11 @@ isolation with the new implementation without listeners, and compare disabled,
 dropped, and recorded tracing for single and explicit submissions. Validate
 processed counts, report time and allocations, and do not claim zero overhead.
 README guidance and simplified SVG diagrams explain lifetime and correlation.
+Allocation regressions are evaluated against the published 0.3.2 package with the same 20 ms workload and SDK
+sampling rates (disabled, 0%, 1%, 10%, 100%). Verify mixed sampled/dropped submissions in one batch, links from
+unsampled submissions to independently sampled batches, creation-time tag availability, and unmodified reverse-link
+deduplication. Activity lifetimes, completion bridges, original exception collections, and cancellation tokens are
+unchanged by allocation reductions.
 Tracing and metrics registration extensions ship in the core RequestBatcher package.
 
 ## Live integration coverage

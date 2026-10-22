@@ -912,6 +912,11 @@ distinct `Execute` spans that contributed requests. Handler database and HTTP sp
 Each recorded `Execute` also links back to its batches before it ends. These late links do not affect its sampling;
 the application's parent span is not modified. Follow the links from `Execute` to inspect each batch's downstream spans.
 
+Sampling is controlled by the application's tracing provider. A 0% sampler can still create propagation Activities,
+so it does not have the same overhead as leaving the RequestBatcher source unregistered. Propagation-only submissions
+retain their context for batch sampling, without collecting reverse links. Fixed call metadata is reused;
+span duration and task completion semantics are unchanged.
+
 Named registrations append the public name after a space, for example `RequestBatcher.Execute pricing-queries` and
 `RequestBatcher.HandleBatch pricing-queries`; both spans also include `requestbatcher.name`. Unnamed registrations
 keep the base names and omit the tag. Links are causal references across the queue, not shared parent edges, trace IDs,

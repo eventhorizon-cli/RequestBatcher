@@ -4,15 +4,17 @@ namespace RequestBatcher.Diagnostics;
 
 internal sealed class SubmissionTraceContext(ActivityContext context, bool collectBatchLinks)
 {
-    private readonly object _gate = new();
+    private readonly object? _gate = collectBatchLinks ? new() : null;
     private List<ActivityContext>? _batches;
     private bool _completed;
 
     internal ActivityContext Context { get; } = context;
 
+    internal bool CollectBatchLinks => _gate is not null;
+
     internal void AddBatch(ActivityContext batch)
     {
-        if (!collectBatchLinks)
+        if (_gate is null)
         {
             return;
         }
@@ -28,6 +30,11 @@ internal sealed class SubmissionTraceContext(ActivityContext context, bool colle
 
     internal void Complete(Activity activity)
     {
+        if (_gate is null)
+        {
+            return;
+        }
+
         List<ActivityContext>? batches;
         lock (_gate)
         {
