@@ -63,6 +63,9 @@ initialization cost still exist. It is therefore distinct from configuring an ac
 0% of traces. The [published-version comparison](README.md) separately records the pre-tracing 0.2.4 baseline;
 measurements from the two runs should not be treated as a single controlled timing comparison.
 
+The separate [allocation profile](allocation-profile.md) investigates object types and allocation stacks with runtime
+diagnostics; its timings must not be interpreted as benchmark results.
+
 ## Validation and limits
 
 All 2,760 executed waves validated 2,826,240 request items exactly once, including warmup and diagnostic invocations.

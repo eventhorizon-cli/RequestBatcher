@@ -76,6 +76,7 @@ links, sampling, and performance boundaries.
 | --- | --- |
 | [ObservabilityOverheadBenchmarks](InMemory/ObservabilityOverheadBenchmarks.cs) | Disabled, metrics-only, and tracing-plus-metrics OpenTelemetry providers around 256 named async pricing requests with a 20 ms handler delay. |
 | [TracingIoOverheadBenchmarks](InMemory/TracingIoOverheadBenchmarks.cs) | Published 0.2.4 versus 0.3.2, with tracing disabled or SDK sampling at 0%, 1%, 10%, and 100%, for single and explicit submissions with 20 ms simulated downstream calls. See the [comparison runner and report](../../docs/evaluations/tracing-io-overhead/README.md). |
+| [MetricsIoOverheadBenchmarks](InMemory/MetricsIoOverheadBenchmarks.cs) | Metrics disabled, SDK aggregation only, and periodic collection every 1,000 ms or 100 ms, with tracing disabled and 20 ms simulated downstream calls. See the [metrics evaluation](../../docs/evaluations/metrics-io-overhead/README.md). |
 
 The corresponding [observability overhead evaluation](../../docs/evaluations/observability-overhead/README.md) records the
 measured results and workload limitations.
