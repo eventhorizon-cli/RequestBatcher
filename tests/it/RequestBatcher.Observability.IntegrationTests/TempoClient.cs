@@ -69,7 +69,8 @@ internal sealed class TempoClient
 
         var body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
         throw new HttpRequestException(
-            $"Tempo request failed with {(int)response.StatusCode} {response.ReasonPhrase}: {body}",
+            $"Tempo request {response.RequestMessage?.RequestUri} failed with " +
+            $"{(int)response.StatusCode} {response.ReasonPhrase}: {body}",
             null,
             response.StatusCode);
     }

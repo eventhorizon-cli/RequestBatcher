@@ -59,9 +59,10 @@ public sealed class ObservabilityTests(ITestOutputHelper output)
                 var callers = await Task.WhenAll(probes.Select(async probe =>
                     (Probe: probe, Spans: await tempo.GetTraceAsync(probe.TraceId, cancellationToken))));
                 var executions = callers.Select(caller => AssertCaller(caller.Probe, caller.Spans)).ToArray();
-                // Search the exported span timestamps rather than assuming the test host's clock matches Docker.
+                // Use exported timestamps to avoid host/container clock differences. Tempo excludes very recent
+                // data from search, so leave enough lookback for its end-time clamp to preserve a valid range.
                 var start = DateTimeOffset.FromUnixTimeMilliseconds(executions.Min(span => span.StartTimeUnixNano) / 1_000_000)
-                    .AddSeconds(-5);
+                    .AddMinutes(-2);
                 var end = DateTimeOffset.FromUnixTimeMilliseconds(executions.Max(span => span.EndTimeUnixNano) / 1_000_000)
                     .AddSeconds(5);
                 var batchIds = await tempo.FindBatchTracesAsync(
