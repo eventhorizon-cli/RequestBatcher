@@ -51,6 +51,18 @@ Propagation Activities, forward-link construction, submission context, and the c
 for the current contract. Lower sampling does not bypass them. This run changes several allocation sources together;
 it does not isolate the cost of link operations from Activity and completion costs.
 
+For 1,024 single submissions, the optimized 0% case allocates 1,368.63 KB in total versus 291.93 KB with tracing
+disabled: an additional 1,076.70 KB per wave, or about 1.05 KB per submission. These are cumulative managed
+allocations, not memory retained by 1,024 request objects. The pending-call tracing bridge creates an additional
+completion source, returned task, and asynchronous completion state; propagation Activities and submission state
+also remain even when no spans are exported. Individual allocation sources have not been profiled separately.
+
+Disabled means no listener subscribes to the RequestBatcher ActivitySource. Submission takes the direct core path,
+without a tracing Activity, submission context, or tracing completion bridge. Listener checks and the fixed metadata
+initialization cost still exist. It is therefore distinct from configuring an active OpenTelemetry provider to sample
+0% of traces. The [published-version comparison](README.md) separately records the pre-tracing 0.2.4 baseline;
+measurements from the two runs should not be treated as a single controlled timing comparison.
+
 ## Validation and limits
 
 All 2,760 executed waves validated 2,826,240 request items exactly once, including warmup and diagnostic invocations.
