@@ -30,12 +30,16 @@ REQUESTBATCHER_RUN_INTEGRATION_TESTS=1 dotnet test \
 
 - 响应顺序、数量、种子数据价格、重复商品回填和总价。
 - 每个 Cart 请求只有一个 `RequestBatcher.Execute pricing-queries`，父节点是对应的 HTTP 服务端 span。
-- `RequestBatcher.ProcessBatch pricing-queries` 是独立 Trace 的根节点，通过去重的 Links 关联调用方 Execute；
+- `RequestBatcher.HandleBatch pricing-queries` 是独立 Trace 的根节点，通过去重的 Links 关联调用方 Execute，且 Execute 有对应的回链；
   所有测试调用方都有对应 Link，且观察到至少一个包含多个调用方的批次。
 - 批大小为 1–20 个**商品请求项**。一次 Cart 提交可以拆到多个批次，批次不必填满。
 - Cart HTTP 客户端 → Pricing HTTP 服务端 → Npgsql 查询的父子关系，HTTP 成功状态，以及 Pricing 中没有 Batcher。
 - 第二轮使用新的上下文，防止早先调用方污染后续 Trace。
-- 五项 RequestBatcher 指标已导出，计数器与直方图 count/sum 持续增长。
+- 五项 RequestBatcher 指标已导出，请求类型标签为短名 `Int32`，计数器与直方图 count/sum 持续增长。
+
+示例新写入的 telemetry 使用 `service.name=cart` 和 `service.name=pricing`。dashboard 的 `Cart calls · Execute` 与
+`Handler execution · HandleBatch` 表格展示双向 span Links，可以从调用方找到批次，也可以从批次回到调用方。改名之前写入的
+数据会继续使用旧服务名，直到后端保留期清理。
 
 OTLP 导出、Tempo 索引和 Prometheus 抓取是异步的，所以每个验证阶段最多轮询 120 秒。
 失败时会报告缺失的 Trace、Link 或指标证据；成功输出包含调用方和批次的 Trace ID，方便在 Grafana 查看。

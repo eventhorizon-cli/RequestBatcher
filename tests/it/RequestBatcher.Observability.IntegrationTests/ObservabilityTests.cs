@@ -13,7 +13,7 @@ namespace RequestBatcher.Observability.IntegrationTests;
 public sealed class ObservabilityTests(ITestOutputHelper output)
 {
     private const string ExecuteName = "RequestBatcher.Execute pricing-queries";
-    private const string BatchName = "RequestBatcher.ProcessBatch pricing-queries";
+    private const string BatchName = "RequestBatcher.HandleBatch pricing-queries";
     private static readonly TimeSpan _telemetryTimeout = TimeSpan.FromSeconds(120);
 
     [LiveFact]
@@ -70,11 +70,26 @@ public sealed class ObservabilityTests(ITestOutputHelper output)
                 Assert.NotEmpty(batchIds);
                 var batches = await Task.WhenAll(batchIds.Select(id => tempo.GetTraceAsync(id, cancellationToken)));
                 var roots = batches.Select(AssertBatch).ToArray();
+                var batchContexts = roots
+                    .Select(root => (root.TraceId, root.SpanId))
+                    .ToHashSet();
 
                 foreach (var execute in executions)
                 {
-                    Assert.True(roots.Any(root => root.Links.Contains((execute.TraceId, execute.SpanId))),
-                        $"No ProcessBatch link to Execute {execute.TraceId}/{execute.SpanId}. " +
+                    var executeContext = (execute.TraceId, execute.SpanId);
+                    var expectedBatchContexts = roots
+                        .Where(root => root.Links.Contains(executeContext))
+                        .Select(root => (root.TraceId, root.SpanId))
+                        .ToHashSet();
+                    Assert.NotEmpty(expectedBatchContexts);
+                    Assert.Equal(execute.Links.Count, execute.Links.Distinct().Count());
+                    Assert.True(expectedBatchContexts.SetEquals(execute.Links),
+                        $"Execute {execute.TraceId}/{execute.SpanId} links to unrelated or missing batches. " +
+                        $"Expected {string.Join(',', expectedBatchContexts.Select(context => $"{context.TraceId}/{context.SpanId}"))}; " +
+                        $"actual {string.Join(',', execute.Links.Select(context => $"{context.TraceId}/{context.SpanId}"))}.");
+                    Assert.All(execute.Links, link => Assert.Contains(link, batchContexts));
+                    Assert.True(roots.Any(root => root.Links.Contains(executeContext)),
+                        $"No HandleBatch link to Execute {execute.TraceId}/{execute.SpanId}. " +
                         $"Searched {start:O} to {end:O}; found batches: {string.Join(',', batchIds)}.");
                 }
 
@@ -165,7 +180,7 @@ public sealed class ObservabilityTests(ITestOutputHelper output)
         Assert.Equal(probe.ParentSpanId, http.ParentSpanId);
         Assert.Equal(http.SpanId, execute.ParentSpanId);
         Assert.Equal(probe.TraceId, execute.TraceId);
-        Assert.Equal("requestbatcher-cart", execute.ServiceName);
+        Assert.Equal("cart", execute.ServiceName);
         Assert.Equal("System.Int32", execute.Attributes["requestbatcher.request.type"]);
         Assert.Equal("pricing-queries", execute.Attributes["requestbatcher.name"]);
         Assert.Equal("200", http.Attributes["http.response.status_code"]);
@@ -178,7 +193,7 @@ public sealed class ObservabilityTests(ITestOutputHelper output)
     private static TempoSpan AssertBatch(IReadOnlyList<TempoSpan> spans)
     {
         var root = Assert.Single(spans, span => span.Name == BatchName);
-        Assert.Equal("requestbatcher-cart", root.ServiceName);
+        Assert.Equal("cart", root.ServiceName);
         Assert.Equal("SPAN_KIND_CONSUMER", root.Kind);
         Assert.Empty(root.ParentSpanId);
         Assert.Equal("pricing-queries", root.Attributes["requestbatcher.name"]);
@@ -188,9 +203,9 @@ public sealed class ObservabilityTests(ITestOutputHelper output)
         Assert.Equal(root.Links.Count, root.Links.Distinct().Count());
         Assert.All(root.Links, link => Assert.NotEqual(root.TraceId, link.TraceId));
         var client = Assert.Single(spans, span => span.ParentSpanId == root.SpanId &&
-            span.ServiceName == "requestbatcher-cart" && span.Kind == "SPAN_KIND_CLIENT");
+            span.ServiceName == "cart" && span.Kind == "SPAN_KIND_CLIENT");
         var server = Assert.Single(spans, span => span.ParentSpanId == client.SpanId &&
-            span.ServiceName == "requestbatcher-pricing" && span.Kind == "SPAN_KIND_SERVER");
+            span.ServiceName == "pricing" && span.Kind == "SPAN_KIND_SERVER");
         var database = Assert.Single(spans, span => span.ParentSpanId == server.SpanId && span.ScopeName == "Npgsql");
         Assert.Equal("SPAN_KIND_CLIENT", database.Kind);
         Assert.Equal("200", client.Attributes["http.response.status_code"]);
@@ -200,7 +215,7 @@ public sealed class ObservabilityTests(ITestOutputHelper output)
             Assert.Equal(root.TraceId, span.TraceId);
             Assert.False(span.IsError, $"Error span: {span.TraceId}/{span.SpanId} {span.Name}");
         });
-        Assert.DoesNotContain(spans, span => span.ServiceName == "requestbatcher-pricing" &&
+        Assert.DoesNotContain(spans, span => span.ServiceName == "pricing" &&
             span.Name.StartsWith("RequestBatcher.", StringComparison.Ordinal));
         return root;
     }
@@ -210,7 +225,7 @@ public sealed class ObservabilityTests(ITestOutputHelper output)
     {
         const string query = "sum by (__name__) ({__name__=~\"requestbatcher_(requests_submitted_total|requests_processed_total|" +
             "batches_processed_total|batch_size_(sum|count)|batch_duration_milliseconds_(sum|count))\"," +
-            "requestbatcher_name=\"pricing-queries\",service_name=\"requestbatcher-cart\"})";
+            "requestbatcher_name=\"pricing-queries\",requestbatcher_request_type=\"Int32\",service_name=\"cart\"})";
         using var response = await grafana.GetAsync("/api/datasources/proxy/uid/requestbatcher-prometheus/api/v1/query?query=" +
             Uri.EscapeDataString(query), cancellationToken);
         response.EnsureSuccessStatusCode();

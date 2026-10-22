@@ -14,7 +14,7 @@ RequestBatcher combines requests that are already queued, limits handler-batch c
 invokes the application handler with a batch. It is intended for database, cache, and API operations that support
 processing multiple items together.
 
-![Request coalescing illustration](docs/assets/request-batcher-request-coalescing.png)
+![Request coalescing illustration](docs/assets/request-batcher-request-coalescing.svg)
 
 Separate concurrent requests can be combined into one batch before a downstream batch operation. The illustration is
 an example: only requests already queued in the same partition can be combined into one handler batch.
@@ -22,7 +22,7 @@ an example: only requests already queued in the same partition can be combined i
 **One batch API call does not imply one handler invocation.** Below, A and B each make one batch API call,
 submitting queries for products `[101, 102, 103]` and `[102, 103, 104]` respectively.
 
-![Explicit batch splitting and handler deduplication](docs/assets/request-batcher-explicit-batch-merging.png)
+![Explicit batch splitting and handler deduplication](docs/assets/request-batcher-explicit-batch-merging.svg)
 
 Requests route individually by `ProductId`. In this example, 101 and 103 share one partition, while 102 and 104 share
 another. Each partition combines queued requests from both submissions into a handler batch.
@@ -59,7 +59,7 @@ scheduling; when all slots are occupied, requests must wait for capacity to exec
 requests per handler call: a batch may contain just one request at low traffic or several requests already queued in the
 same partition during a burst.
 
-![Opportunistic merging flow](docs/assets/request-batcher-opportunistic-merging.png)
+![Opportunistic merging flow](docs/assets/request-batcher-opportunistic-merging.svg)
 
 The diagram shows normal consumption and omits cancellation and shutdown. [BufferQueue's consumer loop](https://github.com/eventhorizon-cli/BufferQueue/blob/90c6208f940592f797ab8cf78ad4af88d1163649/src/BufferQueue/BufferPullConsumer.cs#L59)
 checks the notification version before waiting. If new data was signaled during the scan, it retries the pull to avoid a
@@ -660,7 +660,7 @@ continuously produce multiple asynchronous handler batches, so partitions do not
 `BatchSize` is an upper bound, not a minimum. RequestBatcher does not hold the first request for a fixed batching
 window, so low traffic may produce single-request batches while concurrent traffic naturally produces larger batches.
 
-![RequestBatcher architecture](docs/assets/request-batcher-architecture.png)
+![RequestBatcher architecture](docs/assets/request-batcher-architecture.svg)
 
 The architecture diagram shows the coordinator, the in-memory partition queue, and the separate `Task` completion
 path for each accepted request.
@@ -671,7 +671,7 @@ Here, `H = MaxConcurrency` is the maximum number of handler batches running at o
 one internal queue partition; with a numeric or string partition key, `P` is the explicit count supplied to
 `UsePartitionKey`.
 
-![Internal dispatch scheduling](docs/assets/request-batcher-dispatch-scheduling.png)
+![Internal dispatch scheduling](docs/assets/request-batcher-dispatch-scheduling.svg)
 
 One `BatchDispatchLoop` owns all `P` partitions and shares `H` global execution slots. It waits for a free slot before
 pulling a queue batch, then starts its handler and returns to waiting for another slot. When all slots are occupied,
@@ -753,7 +753,7 @@ Continuing the example, the existing calls each query 20 distinct products: `1,9
 with possible duplicates across calls. Try `BatchSize = 80`: suppose a handler receives 80 items and deduplicates them
 to 60 products. It queries those products in two parallel calls of 30, awaits both, and assigns results to all 80 items.
 
-![Deduplicate 80 items, split queries, and map responses](docs/assets/request-batcher-batch-fanout.png)
+![Deduplicate 80 items, split queries, and map responses](docs/assets/request-batcher-batch-fanout.svg)
 
 **Merging lets different submissions share a deduplication opportunity; splitting keeps individual downstream calls
 small.** Choose the sizes separately: `BatchSize` limits items before deduplication, while the handler controls products
@@ -763,7 +763,7 @@ Under these assumptions, handlers process `38,400 / 80 = 480` batches/s, making 
 querying `960 × 30 = 28,800` product items/s. That is **50% fewer calls and 25% fewer product items queried**, while
 all requests still receive results.
 
-![Call volume, product items queried, and RT before and after merging](docs/assets/request-batcher-batch-sizing.png)
+![Call volume, product items queried, and RT before and after merging](docs/assets/request-batcher-batch-sizing.svg)
 
 The diagram assumes downstream mean RT rises from 50 ms to 55 ms. **These are illustrative estimates, not benchmark
 results.** Fewer calls and repeated queries are potential benefits; longer RT is a cost. Compare end-to-end latency
@@ -788,7 +788,7 @@ Also check downstream concurrency against the maximum number of calls per handle
 `MaxConcurrency = 4`, batches of 80 can each split into three parallel queries, allowing `4 × 3 = 12` downstream calls
 at once from one batcher. Account for all pods as well.
 
-![Handler concurrency versus downstream call concurrency](docs/assets/request-batcher-fanout-concurrency.png)
+![Handler concurrency versus downstream call concurrency](docs/assets/request-batcher-fanout-concurrency.svg)
 
 The value 4 illustrates the relationship; it is not a recommendation for the traffic above. To strictly limit downstream
 calls, use a shared concurrency limit for child queries in the handler.
@@ -804,7 +804,7 @@ distribution, and downstream resource limits consistent. Cover low, normal, and 
   and throttling.
 - **Resource costs:** application and downstream CPU, memory allocations, and connection-pool use.
 
-![Configure, load-test, measure, and recalculate concurrency](docs/assets/request-batcher-sizing-feedback.png)
+![Configure, load-test, measure, and recalculate concurrency](docs/assets/request-batcher-sizing-feedback.svg)
 
 After each adjustment, recalculate concurrency using measured handler-batch QPS and duration, then retest merging.
 **Aim to reduce downstream work while meeting latency and resource requirements**; larger batches or lower downstream
@@ -967,10 +967,6 @@ the delegate handler is singleton and registration has no lifetime argument. The
 handler-class version. The delegate sample has its own HTTP and database ports; see its
 [README](samples/RequestBatcher.Delegates/README.md) for startup and curl commands.
 
-## License
-
-RequestBatcher is available under the [MIT License](LICENSE).
-
 ## Observability
 
 RequestBatcher includes OpenTelemetry registration extensions without depending on the full OpenTelemetry SDK. Install
@@ -1001,23 +997,36 @@ builder.Services.AddOpenTelemetry()
 
 `RequestBatcher.Execute` is an `Internal` span under the caller's current span. It measures the complete caller-visible
 call, including admission, capacity wait, queue residence, handler execution, and result completion. Each non-empty
-dispatched batch creates an independent `RequestBatcher.ProcessBatch` `Consumer` root. The batch span links to the
+dispatched batch creates an independent `RequestBatcher.HandleBatch` `Consumer` root. The batch span links to the
 distinct `Execute` spans that contributed requests, while database or HTTP spans created by the handler are its children.
+Each recorded `Execute` span also links back to its batches before it ends, including when one submission spans several
+batches. These late links do not affect sampling of `Execute`; the application's parent span is not modified.
 
 For a named registration, the public span names append the configured name after a space, such as
-`RequestBatcher.Execute pricing-queries` and `RequestBatcher.ProcessBatch pricing-queries`. Both spans also carry
+`RequestBatcher.Execute pricing-queries` and `RequestBatcher.HandleBatch pricing-queries`. Both spans also carry
 `requestbatcher.name`; unnamed registrations keep the base names and omit the tag. The name is the public DI
-registration name, never an internal queue key. Start with `Execute`, use the backend's reverse-link view to find the
-linked `ProcessBatch`, then inspect its downstream children:
+registration name, never an internal queue key. Start with `Execute`, follow its span links to the related
+`HandleBatch` spans, then inspect their downstream children:
 
 ![RequestBatcher observability model](docs/diagrams/observability.svg)
 
-Only `ActivityContext` crosses the in-process queue. Links express causality; they do not create a shared parent edge,
+Only span contexts and shared link-collection state cross the in-process queue. Links express causality; they do not create a shared parent edge,
 shared trace ID, or ordering guarantee. HTTP request activities, logging scopes, baggage, and other `AsyncLocal` state
 are not copied into background processing. Tracing is best effort and pending requests are not recovered after a
 process failure.
 
 The matching `MeterProviderBuilder` extension registers the `RequestBatcher` meter. It records accepted requests,
 processed requests and batches, batch size, and batch duration. Metrics use only request type and configured batcher
-name as dimensions; request payloads, tenant values, and partition keys are not recorded. Instruments emit values only
+name as dimensions. Request types use their short public name (for example, `Int32`), without namespaces or internal
+response wrappers; identically named types share a dimension, so use batcher names to distinguish pipelines when needed.
+Request payloads, tenant values, and partition keys are not recorded. Instruments emit values only
 when a meter provider listens to the `RequestBatcher` meter.
+
+Instrument names already include `requestbatcher.`, for example `requestbatcher.batches.processed`. With the sample's
+Prometheus exporter this becomes `requestbatcher_batches_processed_total`. Do not add another `requestbatcher` exporter
+namespace/prefix, which would produce `requestbatcher_requestbatcher_*`. Queries filtering the request-type label must
+use short names.
+
+## License
+
+RequestBatcher is available under the [MIT License](LICENSE).

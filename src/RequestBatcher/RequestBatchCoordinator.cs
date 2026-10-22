@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Diagnostics;
 using System.Runtime.ExceptionServices;
 using BufferQueue;
 using Microsoft.Extensions.Logging;
@@ -23,6 +22,8 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
     private const int Stopped = 2;
     private static readonly string _requestTypeName =
         typeof(TRequest).FullName ?? typeof(TRequest).Name;
+    private static readonly string _metricRequestTypeName =
+        RequestBatcherMetrics.GetMetricRequestTypeName(typeof(TRequest));
 
     private readonly object _lifecycleLock = new();
     private readonly ILogger<RequestBatchCoordinator<TRequest>> _logger;
@@ -112,7 +113,7 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
         TRequest request,
         IRequestCompletion? completion,
         CancellationToken cancellationToken,
-        ActivityContext traceContext = default)
+        SubmissionTraceContext? traceContext = default)
     {
         if (Volatile.Read(ref _state) != Running)
         {
@@ -145,7 +146,7 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
     internal Task ExecuteCoreAsync(
         IEnumerable<TRequest> requests,
         CancellationToken cancellationToken,
-        ActivityContext traceContext = default)
+        SubmissionTraceContext? traceContext = default)
     {
         ArgumentNullException.ThrowIfNull(requests);
 
@@ -209,7 +210,7 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
         TRequest request,
         IRequestCompletion? completion,
         CancellationToken cancellationToken,
-        ActivityContext traceContext)
+        SubmissionTraceContext? traceContext)
     {
         PendingBatchRequest<TRequest> pendingRequest;
         lock (_lifecycleLock)
@@ -224,14 +225,14 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
             _pendingRequests.TryAdd(pendingRequest, 0);
         }
 
-        RequestBatcherMetrics.RecordSubmitted(_requestTypeName, BatcherName, 1);
+        RequestBatcherMetrics.RecordSubmitted(_metricRequestTypeName, BatcherName, 1);
         return _producer.ProduceAsync(pendingRequest, cancellationToken);
     }
 
     private Task AcceptBatch(
         TRequest[] requests,
         CancellationToken cancellationToken,
-        ActivityContext traceContext)
+        SubmissionTraceContext? traceContext)
     {
         PendingBatchRequest<TRequest>[] pendingRequests;
         BatchSubmissionCompletion batchCompletion;
@@ -252,7 +253,7 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
             }
         }
 
-        RequestBatcherMetrics.RecordSubmitted(_requestTypeName, BatcherName, requests.Length);
+        RequestBatcherMetrics.RecordSubmitted(_metricRequestTypeName, BatcherName, requests.Length);
         return _producer.ProduceAsync(pendingRequests, cancellationToken);
     }
 
@@ -260,8 +261,8 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
         TRequest request,
         CancellationToken cancellationToken,
         IRequestCompletion? completion,
-        ActivityContext traceContext) =>
-        traceContext.TraceId != default && traceContext.SpanId != default
+        SubmissionTraceContext? traceContext) =>
+        traceContext is not null
             ? new TracedPendingBatchRequest<TRequest>(request, cancellationToken, _onRequestFinished, completion, traceContext)
             : new PendingBatchRequest<TRequest>(request, cancellationToken, _onRequestFinished, completion);
 

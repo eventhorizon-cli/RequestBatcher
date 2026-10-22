@@ -30,12 +30,17 @@ product items, including a duplicate. It verifies:
 
 - Response order, quantities, seeded prices, duplicate fan-out, and totals.
 - Exactly one `RequestBatcher.Execute pricing-queries` span per Cart request, under its HTTP server span.
-- Independent `RequestBatcher.ProcessBatch pricing-queries` roots with unique Links to the caller Execute spans,
-  coverage of every test caller, and a batch combining multiple callers.
+- Independent `RequestBatcher.HandleBatch pricing-queries` roots with unique Links to the caller Execute spans,
+  matching reverse links from Execute, coverage of every test caller, and a batch combining multiple callers.
 - Batch sizes of 1–20 **product items**. A Cart submission can span multiple batches; a batch need not be full.
 - Cart HTTP client → Pricing HTTP server → Npgsql query parent relationships, successful HTTP status, and no Pricing batcher.
 - New contexts in a subsequent burst, guarding against an earlier caller contaminating later traces.
-- All five RequestBatcher instruments exported, with increasing counters and histogram counts/sums.
+- All five RequestBatcher instruments exported with the short request type `Int32`, with increasing counters and histogram counts/sums.
+
+The sample uses `service.name=cart` and `service.name=pricing` for new telemetry. The dashboard's `Cart calls · Execute`
+and `Handler execution · HandleBatch` tables expose the reciprocal span Links, so a caller can be followed to its batches
+and a batch can be followed back to its callers. Data written before this naming change keeps the old service names until
+backend retention removes it.
 
 Trace and metric assertions poll for up to 120 seconds per phase because OTLP export, Tempo indexing, and Prometheus
 scraping are asynchronous. Failures include missing trace/link/metric evidence. Successful output includes caller and

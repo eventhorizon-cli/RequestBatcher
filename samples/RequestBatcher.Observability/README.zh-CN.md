@@ -6,6 +6,9 @@
 `pricing-queries` RequestBatcher 管线合并商品查询，再调用 Pricing Web API。Pricing 直接从 PostgreSQL 读取商品价格。
 Grafana OTel LGTM 接收两个 Web API 的 tracing、metrics 和 logs。
 
+示例使用简洁的 OpenTelemetry 服务名 `cart` 和 `pricing`，让 service selector 和 trace 视图直接聚焦业务服务。
+已经写入后端、使用旧名称 `requestbatcher-cart` 或 `requestbatcher-pricing` 的 telemetry，会在后端保留期结束前继续显示为旧名称。
+
 本示例用于本地演示，不是性能基准或生产部署。Cart、Pricing 和流量生成器都是 .NET 10 项目；每个流量请求携带 2–10 个商品，
 且不导出 OpenTelemetry span，因此 Cart ASP.NET Core 请求 span 是 trace 中可见的根。PostgreSQL 初始化脚本会创建商品 ID 1 到 100。
 
@@ -67,16 +70,28 @@ Npgsql 官方 instrumentation 创建的 PostgreSQL span。`requestbatcher.batch.
 要从某个调用追踪到批次，在 Cart trace 中复制 `Execute` span 的 trace ID，然后在 Tempo TraceQL 中查询：
 
 ```text
-{ link:traceID = "CALL_TRACE_ID" && span:name =~ "RequestBatcher.ProcessBatch.*" }
+{ link:traceID = "CALL_TRACE_ID" && span:name =~ "RequestBatcher.HandleBatch.*" }
 ```
 
 选择包含原始调用的时间范围。批次可能少于 20 份提交，因为 RequestBatcher 不会等待填满 `BatchSize`。ActivityLink 是因果关联，
-不是共享父子关系，因此批次可能显示在另一条 trace 中，具体反向导航取决于 tracing backend。示意图保留抽象的 A/B 流程：
+不是共享父子关系，因此它们不会组成一棵共享的 trace 树。`HandleBatch` span 会 link 到所有参与其中的
+`Execute` span；每个 `Execute` span 也会 link 回处理其请求的所有 `HandleBatch` span。可以参考 Grafana 的
+[TraceQL link 查询文档](https://grafana.com/docs/tempo/latest/traceql/construct-traceql-queries/)了解
+`link:traceID` 和 `link:spanID` 选择器。
 
-也可以直接在 Grafana 中查看 links：从 dashboard 打开一条 `ProcessBatch` trace，点击
-`RequestBatcher.ProcessBatch pricing-queries` span 行，在 span 详情中展开 `Links`，即可看到参与该批次的多个
-`Execute` 调用方上下文。`Execute` span 没有 outgoing links，因为 link 记录在批次 span 上；可以参考 Grafana 的
-[trace link 视图](https://grafana.com/docs/grafana/latest/visualizations/explore/trace-integration/#links)和上面的 TraceQL 查询做反向定位。
+直接导航时，从 dashboard 的 `Handler execution · HandleBatch` 表格打开一条 `HandleBatch` trace，点击
+`RequestBatcher.HandleBatch pricing-queries` span 行，在 span 详情中展开 `References`，即可看到参与该批次的多个
+`Execute` 调用方上下文。Links 是双向的：从 `Cart calls · Execute` 表格点击 `Execute` span 并展开 `References`，也可以直接看到处理该调用的批次。
+Grafana 会在这个列表中同时展示 parent 和 span link：`cart POST /cart/quote` 是 Execute 在同一条 trace 中的 HTTP parent，
+handler link 则指向独立的 `HandleBatch` trace。这里的 parent 条目并不是额外添加的 ActivityLink。需要从批次反向搜索调用方时，
+复制批次的 trace ID 和 span ID，然后在 Tempo 中查询：
+
+```text
+{ link:traceID = "BATCH_TRACE_ID" && link:spanID = "BATCH_SPAN_ID" && span:name = "RequestBatcher.Execute pricing-queries" }
+```
+
+当前固定版本的 Tempo 在查询字段中会去掉前导零；替换上面的 ID 前，请删除复制结果开头的 `0`。选择包含原始批次的时间范围；
+当 tracing backend 没有在 span 详情中提供可点击 link 时，可以使用上面的 TraceQL 查询。
 
 ![RequestBatcher 可观测性流转](../../docs/diagrams/observability.svg)
 

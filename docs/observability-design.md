@@ -18,17 +18,25 @@ pre-canceled, rejected, and failed submissions terminate their call span too.
 Argument-null validation that throws before a submission begins remains synchronous.
 An explicit submission has one call span even when it becomes multiple batches.
 
-Each dispatched nonempty batch creates one `RequestBatcher.ProcessBatch`
+Each dispatched nonempty batch creates one `RequestBatcher.HandleBatch`
 Consumer span in the isolated background context, with its own root trace.
 It links to the distinct submission contexts of requests that actually entered
 processing. These are span-context links, deduplicated by TraceId and SpanId;
 one batch can link to many calls and one call can be linked by many batches.
+Each recorded Execute span also links back to every batch that processed its requests.
+Batch contexts are collected during dispatch and added to Execute before it ends;
+these late links are not available to the Execute sampler. Links are deduplicated
+per call and batch. The library does not modify the application's parent Activity.
 Canceled queued requests are omitted. Database and HTTP instrumentation inside
 the handler become children of the batch span. Scoped-handler construction and
 async disposal occur inside the batch span. A batch span ends before publishing
 its requests' terminal results so a completed call has a completed batch trace.
 
 The call span measures end-to-end waiting; the Consumer span measures execution.
+The `HandleBatch` operation names the batch handler invocation, including its scope lifecycle.
+Changing this operation name requires updating span-name queries and dashboards;
+the ActivitySource name, span kinds, parent relationships, and link targets remain the same.
+Named-span tests and live integration checks validate the exact operation name and links.
 The call span is not a messaging send span, whose duration would imply enqueue
 latency only. RequestBatcher remains in-process and cannot recover pending work
 after process failure. Links model causality, not shared trace IDs or ordering.
@@ -46,6 +54,13 @@ dimensions:
 - `requestbatcher.batch.size` records the number of requests in each batch.
 - `requestbatcher.batch.duration` records handler duration in milliseconds.
 
+The request-type dimension uses the public request type's simple name, without
+its namespace or an internal response wrapper. The name is cached per closed
+coordinator/consumer type. Types with the same simple name share this dimension;
+public batcher names can distinguish pipelines. Existing label filters must use
+short names. Instrument names remain unchanged and already contain the
+`requestbatcher.` prefix; an exporter namespace must not duplicate it.
+
 Batch measurements finish alongside the batch span, before request completions are
 published. Processed counts include failed handler attempts and exclude requests
 canceled before dispatch. Duration includes handler scope disposal, but excludes
@@ -58,16 +73,16 @@ are never metric dimensions.
 
 ## Context and outcomes
 
-Only ActivityContext is transported. ExecutionContext, Activity instances,
+Only ActivityContext and a shared per-submission collection of batch contexts are transported. ExecutionContext, Activity instances,
 logging scopes, and baggage are not copied into the consumer. When a listener
 drops a call Activity, an available caller context can still provide a link.
-No valid context means no link. Links and batch attributes are supplied at span
+No valid context means no link. Forward links and batch attributes are supplied at span
 creation, so samplers can inspect them. The application's sampler governs batch
 root sampling; parent-based sampling does not automatically follow links.
 
 Span names use stable base names. For a named registration, the public name follows the operation,
 separated by a space, such as `RequestBatcher.Execute pricing-queries` and
-`RequestBatcher.ProcessBatch pricing-queries`; both spans also include
+`RequestBatcher.HandleBatch pricing-queries`; both spans also include
 `requestbatcher.name`. Unnamed registrations keep the base name and omit the tag. The name is
 the exact public DI registration name, never an internal topic or pipeline key. It is available at Activity creation for
 sampling and carried once on the coordinator through dispatch and response/delegate adapters,
@@ -91,8 +106,12 @@ Diagnostics owns a shared ActivitySource and tracing helpers. Public entry point
 check HasListeners before creating closures or tracing state. With no listener,
 the existing task path is used without an async wrapper, span, link collection,
 or extra per-item tracing allocation. Traced pending requests use an internal
-subclass that stores context, keeping the untraced pending object's size unchanged.
-Tracing-enabled calls retain only context on queued items; request arrays,
+subclass that stores shared submission tracing state, keeping the untraced pending object's size unchanged.
+The state contains the submission context and, for recorded calls, a lazily allocated
+collection of batch contexts protected against concurrent dispatch. It never holds an Activity.
+Call completion writes the collected links before stopping the Activity, so exporters see
+the complete links without concurrent Activity mutation. Dropped calls retain only their
+available context and do not collect reverse links. Tracing-enabled calls retain only contexts on queued items; request arrays,
 completion contracts, routing, cancellation, and lifecycle stay unchanged.
 
 An enabled call starts its Activity, invokes the normal core path, and restores
@@ -109,6 +128,7 @@ Public batching APIs and handler lifetimes remain unchanged. Tests use real DI,
 ActivityListener, and the OpenTelemetry SDK without external services. Cover
 multiple callers in one batch, a call split across batches, parent/context
 restoration, downstream children, scope disposal and response materialization,
+bidirectional links visible to SDK processors at call end, concurrent batches for one call,
 queue/capacity waiting, cancellation before/after dispatch, faults (including
 faulted OperationCanceledException), duplicate links, no-context calls, rejected
 and empty submissions, sampled-out tracing, named/delegate/response forms, and
@@ -133,8 +153,9 @@ Grafana's Tempo and Prometheus data-source proxies, and unique W3C trace IDs to 
 sample traffic. No production dependency or public API changes are required.
 
 Concurrent Cart requests each submit 2–10 product IDs through the native enumerable API. The suite verifies ordered
-prices including duplicates, exactly one Execute span per HTTP request, its HTTP parent, and independent ProcessBatch
-roots linked to the corresponding Execute contexts. Links must be unique per caller context, every submitted caller
+prices including duplicates, exactly one Execute span per HTTP request, its HTTP parent, and independent HandleBatch
+roots linked to the corresponding Execute contexts. Each Execute must link back to exactly those batch contexts;
+both directions must be unique and symmetric, with no unrelated batch links. Every submitted caller
 must be represented, and a concurrent burst must demonstrate a batch containing multiple callers. Batch size counts
 product items and stays within 1–20; the test does not require full batches or one handler invocation per submission.
 Each related batch must contain the Cart HTTP client → Pricing HTTP server → Npgsql query parent chain, without a

@@ -30,7 +30,7 @@ Find reports by question; versions, workloads, and limitations are documented in
 
 ## Observability
 
-RequestBatcher exposes optional `RequestBatcher.Execute` and `RequestBatcher.ProcessBatch` spans through the
+RequestBatcher exposes optional `RequestBatcher.Execute` and `RequestBatcher.HandleBatch` spans through the
 `RequestBatcher` adapter. The reports indexed here describe their recorded workloads and do not claim
 to have run with the new tracing instrumentation. Read the [observability design](../observability-design.md) for
 correlation and configuration guidance.

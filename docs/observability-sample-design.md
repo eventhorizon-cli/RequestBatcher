@@ -45,19 +45,29 @@ runs one parameterized PostgreSQL SELECT. Missing product responses are explicit
 seeds IDs 1–100 once. The generator logs request duration and outcomes but does not export its own spans.
 
 `RequestBatcher.Execute pricing-queries` stays in the Cart HTTP trace and measures caller-visible submission duration.
-Independent `RequestBatcher.ProcessBatch pricing-queries` Consumer roots link to the distinct Cart `Execute` spans that
+Independent `RequestBatcher.HandleBatch pricing-queries` Consumer roots link to the distinct Cart `Execute` spans that
 contributed product requests and contain the Cart-to-Pricing HTTP child span. One Cart `Execute` span may link to multiple
 batch roots when its 2–10 product requests are split, while a batch can mix requests from concurrent caller traces. Npgsql
 creates the database span under Pricing's HTTP span. Both
-RequestBatcher spans carry `requestbatcher.name=pricing-queries`. Only context identifiers cross the queue; ambient
-request state is isolated.
+RequestBatcher spans carry `requestbatcher.name=pricing-queries`. Links work in both directions; Execute collects batch
+contexts during dispatch and adds its links before ending. Only context identifiers and shared link-collection state
+cross the queue; ambient request state is isolated.
 
 OTLP/HTTP exports traces, framework HTTP metrics, RequestBatcher metrics, Npgsql metrics, and logs. Service names are
-`requestbatcher-cart` and `requestbatcher-pricing`. Always-on sampling and a 256-link limit keep the demonstration
+`cart` and `pricing`, set through `OTEL_SERVICE_NAME` with matching application defaults. Grafana queries and integration
+assertions use those service identities. Existing stored telemetry retains its original service names.
+Dashboard trace panels appear first, distinguish caller waiting from batch execution, and explain navigation through
+span links. Metrics and logs follow them.
+Grafana's span details label these navigable entries `References` and include both
+parent references and span links. An Execute's HTTP parent shares its trace ID;
+its handler links point to independent HandleBatch traces. Panel descriptions and
+sample instructions explain this distinction.
+Always-on sampling and a 256-link limit keep the demonstration
 visible; these are not production sampling recommendations. Grafana provisions Tempo, Prometheus, and Loki and
 searches both RequestBatcher span types. TraceQL link lookup connects a caller trace to its batch traces without
 implying a single trace tree. RequestBatcher metrics cover accepted and processed product requests, processed batches,
-batch size in product requests, and batch duration. It is in-process and
+batch size in product requests, and batch duration. Their request-type dimension uses `Int32`, the public request type's
+short name. Instrument names contain one `requestbatcher` prefix. It is in-process and
 cannot recover pending requests after process failure.
 
 ## Validation

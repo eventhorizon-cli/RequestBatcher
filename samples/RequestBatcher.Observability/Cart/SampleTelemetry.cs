@@ -9,7 +9,7 @@ internal static class SampleTelemetry
 {
     internal static void Configure(IHostApplicationBuilder builder)
     {
-        var serviceName = builder.Configuration["OTEL_SERVICE_NAME"] ?? "requestbatcher-cart";
+        var serviceName = builder.Configuration["OTEL_SERVICE_NAME"] ?? "cart";
         builder.Services.AddOpenTelemetry()
             .ConfigureResource(resource => resource.AddService(serviceName))
             .WithTracing(tracing => tracing

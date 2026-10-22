@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using RequestBatcher.Diagnostics;
 
@@ -34,7 +33,7 @@ internal sealed class DelegateRequestBatcher<TRequest>(
         TRequest request,
         Delegate callback,
         CancellationToken cancellationToken,
-        ActivityContext traceContext = default)
+        SubmissionTraceContext? traceContext = default)
     {
         if (cancellationToken.IsCancellationRequested)
         {
@@ -66,7 +65,7 @@ internal sealed class DelegateRequestBatcher<TRequest>(
         IEnumerable<TRequest> requests,
         Delegate callback,
         CancellationToken cancellationToken,
-        ActivityContext traceContext = default)
+        SubmissionTraceContext? traceContext = default)
     {
         if (cancellationToken.IsCancellationRequested)
         {

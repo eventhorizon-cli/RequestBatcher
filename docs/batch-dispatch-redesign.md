@@ -268,7 +268,7 @@ This adds one scheduling boundary per long-lived task, not per batch. Batch
 dispatch, handler scope ownership, admission, cancellation, and draining retain
 their existing contracts. Public APIs and target frameworks are unchanged. The
 optional tracing contract is defined in [Observability](observability-design.md):
-each dispatched batch may create an independent `RequestBatcher.ProcessBatch`
+each dispatched batch may create an independent `RequestBatcher.HandleBatch`
 Consumer span with links to the submission spans that contributed requests.
 
 Deterministic regressions cover initialization under an Activity and AsyncLocal,

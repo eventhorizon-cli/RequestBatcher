@@ -1,4 +1,4 @@
-using System.Diagnostics;
+using RequestBatcher.Diagnostics;
 
 namespace RequestBatcher.PendingRequests;
 
@@ -8,8 +8,8 @@ internal sealed class TracedPendingBatchRequest<TRequest>(
     CancellationToken cancellationToken,
     Action<PendingBatchRequest<TRequest>> onFinished,
     IRequestCompletion? completion,
-    ActivityContext context)
+    SubmissionTraceContext traceContext)
     : PendingBatchRequest<TRequest>(request, cancellationToken, onFinished, completion)
 {
-    public ActivityContext Context { get; } = context;
+    public SubmissionTraceContext TraceContext { get; } = traceContext;
 }

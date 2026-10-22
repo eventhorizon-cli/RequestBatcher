@@ -44,7 +44,7 @@ services:
     environment:
       ASPNETCORE_URLS: http://+:8080
       ConnectionStrings__Products: Host=postgres;Database=requestbatcher_observability;Username=postgres;Password=postgres
-      OTEL_SERVICE_NAME: requestbatcher-pricing
+      OTEL_SERVICE_NAME: pricing
       OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
       OTEL_EXPORTER_OTLP_ENDPOINT: http://lgtm:4318
       OTEL_METRIC_EXPORT_INTERVAL: "10000"
@@ -72,7 +72,7 @@ services:
     environment:
       ASPNETCORE_URLS: http://+:8080
       Pricing__BaseAddress: http://pricing:8080
-      OTEL_SERVICE_NAME: requestbatcher-cart
+      OTEL_SERVICE_NAME: cart
       OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
       OTEL_EXPORTER_OTLP_ENDPOINT: http://lgtm:4318
       OTEL_METRIC_EXPORT_INTERVAL: "10000"
