@@ -30,6 +30,8 @@ public sealed class OpenTelemetryInstrumentationTests
         Assert.Equal(parent.SpanId, call.ParentSpanId);
         Assert.Equal(call.Context, Assert.Single(batch.Links).Context);
         Assert.Equal(call.Context, Assert.Single(sampler.BatchLinks).Context);
+        Assert.Equal(batch.Context, Assert.Single(processor.CallLinks).Context);
+        Assert.Empty(parent.Links);
         Assert.Equal(default, batch.ParentSpanId);
     }
 
@@ -66,7 +68,17 @@ public sealed class OpenTelemetryInstrumentationTests
     private sealed class CaptureProcessor : BaseProcessor<Activity>
     {
         public ConcurrentQueue<Activity> Spans { get; } = new();
-        public override void OnEnd(Activity data) => Spans.Enqueue(data);
+        public ActivityLink[] CallLinks { get; private set; } = [];
+
+        public override void OnEnd(Activity data)
+        {
+            if (data.OperationName == RequestBatcherTracing.CallName)
+            {
+                CallLinks = data.Links.ToArray();
+            }
+
+            Spans.Enqueue(data);
+        }
     }
 
     private sealed class LinkSampler : Sampler

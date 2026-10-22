@@ -7,6 +7,92 @@
   "panels": [
     {
       "datasource": {
+        "type": "tempo",
+        "uid": "requestbatcher-tempo"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 0,
+        "y": 0
+      },
+      "id": 4,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "enablePagination": true,
+          "showCount": false,
+          "showTotal": false
+        },
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "tempo",
+            "uid": "requestbatcher-tempo"
+          },
+          "limit": 20,
+          "query": "{ resource.service.name = \"cart\" && name =~ \"RequestBatcher.Execute.*\" }",
+          "queryType": "traceql",
+          "refId": "A",
+          "spanLimit": 10,
+          "tableType": "traces"
+        }
+      ],
+      "title": "Cart calls · Execute",
+      "type": "table",
+      "description": "Caller-visible duration, including queue waiting. Select RequestBatcher.Execute pricing-queries and expand References. The HTTP parent belongs to the same trace; handler links point to independent HandleBatch traces. One call may link to several batches."
+    },
+    {
+      "datasource": {
+        "type": "tempo",
+        "uid": "requestbatcher-tempo"
+      },
+      "fieldConfig": {
+        "defaults": {},
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 9,
+        "w": 12,
+        "x": 12,
+        "y": 0
+      },
+      "id": 5,
+      "options": {
+        "cellHeight": "sm",
+        "footer": {
+          "enablePagination": true,
+          "showCount": false,
+          "showTotal": false
+        },
+        "showHeader": true
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "tempo",
+            "uid": "requestbatcher-tempo"
+          },
+          "limit": 20,
+          "query": "{ resource.service.name = \"cart\" && name =~ \"RequestBatcher.HandleBatch.*\" }",
+          "queryType": "traceql",
+          "refId": "A",
+          "spanLimit": 10,
+          "tableType": "traces"
+        }
+      ],
+      "title": "Handler execution · HandleBatch",
+      "type": "table",
+      "description": "Handler execution traces contain cart → pricing → database spans. Select RequestBatcher.HandleBatch pricing-queries and expand References to navigate to the contributing Execute calls. One batch may combine several calls."
+    },
+    {
+      "datasource": {
         "type": "prometheus",
         "uid": "requestbatcher-prometheus"
       },
@@ -23,7 +109,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 0
+        "y": 9
       },
       "id": 1,
       "options": {
@@ -44,7 +130,7 @@
             "uid": "requestbatcher-prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (service_name) (rate(http_server_request_duration_seconds_count{service_name=~\"requestbatcher-pricing|requestbatcher-cart\"}[$__rate_interval]))",
+          "expr": "sum by (service_name) (rate(http_server_request_duration_seconds_count{service_name=~\"pricing|cart\"}[$__rate_interval]))",
           "legendFormat": "{{service_name}}",
           "range": true,
           "refId": "A"
@@ -71,7 +157,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 0
+        "y": 9
       },
       "id": 2,
       "options": {
@@ -92,7 +178,7 @@
             "uid": "requestbatcher-prometheus"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_seconds_bucket{service_name=~\"requestbatcher-pricing|requestbatcher-cart\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(http_server_request_duration_seconds_bucket{service_name=~\"pricing|cart\"}[$__rate_interval])))",
           "legendFormat": "p95",
           "range": true,
           "refId": "A"
@@ -119,7 +205,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 8
+        "y": 17
       },
       "id": 6,
       "options": {
@@ -140,7 +226,7 @@
             "uid": "requestbatcher-prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (service_name, requestbatcher_name) (rate(requestbatcher_requests_submitted_total{service_name=\"requestbatcher-cart\"}[$__rate_interval]))",
+          "expr": "sum by (service_name, requestbatcher_name) (rate(requestbatcher_requests_submitted_total{service_name=\"cart\"}[$__rate_interval]))",
           "legendFormat": "{{service_name}} / {{requestbatcher_name}}",
           "range": true,
           "refId": "A"
@@ -167,7 +253,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 8
+        "y": 17
       },
       "id": 7,
       "options": {
@@ -188,7 +274,7 @@
             "uid": "requestbatcher-prometheus"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum by (le, service_name, requestbatcher_name) (rate(requestbatcher_batch_size_bucket{service_name=\"requestbatcher-cart\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le, service_name, requestbatcher_name) (rate(requestbatcher_batch_size_bucket{service_name=\"cart\"}[$__rate_interval])))",
           "legendFormat": "{{service_name}} / {{requestbatcher_name}} p95",
           "range": true,
           "refId": "A"
@@ -215,7 +301,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 16
+        "y": 25
       },
       "id": 8,
       "options": {
@@ -236,7 +322,7 @@
             "uid": "requestbatcher-prometheus"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum by (le, service_name, requestbatcher_name) (rate(requestbatcher_batch_duration_milliseconds_bucket{service_name=\"requestbatcher-cart\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le, service_name, requestbatcher_name) (rate(requestbatcher_batch_duration_milliseconds_bucket{service_name=\"cart\"}[$__rate_interval])))",
           "legendFormat": "{{service_name}} / {{requestbatcher_name}} p95",
           "range": true,
           "refId": "A"
@@ -258,7 +344,7 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 24
+        "y": 33
       },
       "id": 3,
       "options": {
@@ -281,97 +367,13 @@
             "uid": "requestbatcher-loki"
           },
           "editorMode": "builder",
-          "expr": "{service_name=~\"requestbatcher-pricing|requestbatcher-cart\"}",
+          "expr": "{service_name=~\"pricing|cart\"}",
           "queryType": "range",
           "refId": "A"
         }
       ],
       "title": "Application logs",
       "type": "logs"
-    },
-    {
-      "datasource": {
-        "type": "tempo",
-        "uid": "requestbatcher-tempo"
-      },
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 9,
-        "w": 12,
-        "x": 0,
-        "y": 33
-      },
-      "id": 4,
-      "options": {
-        "cellHeight": "sm",
-        "footer": {
-          "enablePagination": true,
-          "showCount": false,
-          "showTotal": false
-        },
-        "showHeader": true
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "tempo",
-            "uid": "requestbatcher-tempo"
-          },
-          "limit": 20,
-          "query": "{ resource.service.name = \"requestbatcher-cart\" && name =~ \"RequestBatcher.Execute.*\" }",
-          "queryType": "traceql",
-          "refId": "A",
-          "spanLimit": 10,
-          "tableType": "traces"
-        }
-      ],
-      "title": "RequestBatcher.Execute traces",
-      "type": "table"
-    },
-    {
-      "datasource": {
-        "type": "tempo",
-        "uid": "requestbatcher-tempo"
-      },
-      "fieldConfig": {
-        "defaults": {},
-        "overrides": []
-      },
-      "gridPos": {
-        "h": 9,
-        "w": 12,
-        "x": 12,
-        "y": 33
-      },
-      "id": 5,
-      "options": {
-        "cellHeight": "sm",
-        "footer": {
-          "enablePagination": true,
-          "showCount": false,
-          "showTotal": false
-        },
-        "showHeader": true
-      },
-      "targets": [
-        {
-          "datasource": {
-            "type": "tempo",
-            "uid": "requestbatcher-tempo"
-          },
-          "limit": 20,
-          "query": "{ resource.service.name = \"requestbatcher-cart\" && name =~ \"RequestBatcher.ProcessBatch.*\" }",
-          "queryType": "traceql",
-          "refId": "A",
-          "spanLimit": 10,
-          "tableType": "traces"
-        }
-      ],
-      "title": "RequestBatcher.ProcessBatch traces",
-      "type": "table"
     }
   ],
   "refresh": "5s",

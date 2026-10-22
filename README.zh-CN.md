@@ -13,7 +13,7 @@ RequestBatcher 是一个运行在进程内的 .NET 批处理库，**原生支持
 RequestBatcher 会合并已经排队的请求，限制 Handler 批次并发数和队列容量，再将批次交给应用的 Handler 处理。
 它适用于支持一次处理多个数据项的数据库、缓存和下游 API。
 
-![请求合并示意图](docs/assets/request-batcher-request-coalescing.zh-CN.png)
+![请求合并示意图](docs/assets/request-batcher-request-coalescing.zh-CN.svg)
 
 多个独立的并发请求可以先合并为一个批次，再执行一次下游批量操作。图示仅用于说明：只有已经在同一 Partition 中排队的请求
 才可能合并为同一批。
@@ -21,7 +21,7 @@ RequestBatcher 会合并已经排队的请求，限制 Handler 批次并发数�
 **一次批量 API 调用，不等于一次 Handler 调用。** 下图中，A、B 各调用一次批量 API，分别提交商品
 `[101, 102, 103]` 和 `[102, 103, 104]` 的查询请求。
 
-![显式批量拆分与 Handler 去重示意图](docs/assets/request-batcher-explicit-batch-merging.zh-CN.png)
+![显式批量拆分与 Handler 去重示意图](docs/assets/request-batcher-explicit-batch-merging.zh-CN.svg)
 
 请求按 `ProductId` 逐项路由。图中，101、103 进入一个 Partition，102、104 进入另一个；来自 A、B 的请求
 在各 Partition 中合并成 Handler 批次。
@@ -51,7 +51,7 @@ RequestBatcher 基于 [BufferQueue](https://github.com/eventhorizon-cli/BufferQu
 这个过程不依赖定时轮询，也没有固定的收集窗口。有空闲名额时，等待主要来自唤醒和调度；名额占满时，请求仍需排队。
 `BatchSize` 只限制每批的最大数量：低流量时一批可能只有一个请求，突发流量时则可能合并同一 Partition 中的多个请求。
 
-![机会式合并流程图](docs/assets/request-batcher-opportunistic-merging.zh-CN.png)
+![机会式合并流程图](docs/assets/request-batcher-opportunistic-merging.zh-CN.svg)
 
 图中展示正常消费流程，省略了取消与停止分支。[BufferQueue 的消费循环](https://github.com/eventhorizon-cli/BufferQueue/blob/90c6208f940592f797ab8cf78ad4af88d1163649/src/BufferQueue/BufferPullConsumer.cs#L59)
 会在进入等待前检查通知版本；如果这期间有新数据通知到达，就重新尝试拉取，避免漏掉唤醒。
@@ -622,7 +622,7 @@ Partition 路由拆成多个处理批次。
 单个批次设置额外的收集窗口：只要有执行名额，它就会立即用当前已排队的请求发起 Handler 调用，即使只有一个请求。
 `BatchSize` 只限制单次调用的最大请求数。
 
-![RequestBatcher 架构图](docs/assets/request-batcher-architecture.zh-CN.png)
+![RequestBatcher 架构图](docs/assets/request-batcher-architecture.zh-CN.svg)
 
 架构图展示了协调器、内存队列中的各个 Partition，以及每个已接收请求独立完成 `Task` 的处理路径。
 
@@ -631,7 +631,7 @@ Partition 路由拆成多个处理批次。
 `H = MaxConcurrency` 是全局同时执行的 Handler 批次数上限。未配置 Partition Key 时，内部只有一个 Partition；配置
 数值或字符串 Partition Key 时，`P` 是传给 `UsePartitionKey` 的显式 Partition 数量。
 
-![内部调度流程](docs/assets/request-batcher-dispatch-scheduling.zh-CN.png)
+![内部调度流程](docs/assets/request-batcher-dispatch-scheduling.zh-CN.svg)
 
 一个 `BatchDispatchLoop` 负责所有 Partition，并共享同一组全局执行名额。它只有在取得执行名额后才会从队列拉取
 批次，因此请求只在 BufferQueue 中等待，不会进入应用自行维护的转交队列。名额按一次 Handler 批次调用完成释放，
@@ -708,7 +708,7 @@ builder.Services.AddRequestBatcher<ProductQueryItem, ProductBatchHandler>(
 可以试验 `BatchSize = 80`：假设一次拉到 80 项，Handler 按商品去重后剩 60 个，再按每次 30 个商品并行查询，
 等待两次查询完成后，为全部 80 项回填结果。
 
-![80 项去重、拆分查询与结果回填](docs/assets/request-batcher-batch-fanout.zh-CN.png)
+![80 项去重、拆分查询与结果回填](docs/assets/request-batcher-batch-fanout.zh-CN.svg)
 
 **合并让不同提交共享一次去重机会；拆分让下游每次仍只处理较小的批量。** 两者的大小可以分别选择：
 `BatchSize` 限制去重前的请求项数，下游每次查询多少个商品由 Handler 控制。
@@ -716,7 +716,7 @@ builder.Services.AddRequestBatcher<ProductQueryItem, ProductBatchHandler>(
 按上述假设，Handler 每秒处理 `38,400 / 80 = 480` 批，下游执行 `480 × 2 = 960` 次查询，共查询
 `960 × 30 = 28,800` 个商品项。与原来相比，**调用次数减少 50%，查询商品项数减少 25%**，所有请求仍得到结果。
 
-![合并前后的调用量、查询项数与 RT 对比](docs/assets/request-batcher-batch-sizing.zh-CN.png)
+![合并前后的调用量、查询项数与 RT 对比](docs/assets/request-batcher-batch-sizing.zh-CN.svg)
 
 图中假设下游平均 RT 从 50 ms 增至 55 ms，**这是估算示例，不是压测结果**。更少的调用和重复查询是潜在收益，
 更长的 RT 是代价；是否值得，还要比较端到端延迟和实际资源消耗。
@@ -737,7 +737,7 @@ Partition 数量和消费速度都会影响合并效果，应从较少的 Partit
 还要按最坏拆分数量检查下游并发。以 `MaxConcurrency = 4` 为例，80 项最多拆成三次并行查询，
 同一个 Batcher 就可能同时执行 `4 × 3 = 12` 次下游调用；多个 Pod 还需合计。
 
-![Handler 并发与下游调用并发的区别](docs/assets/request-batcher-fanout-concurrency.zh-CN.png)
+![Handler 并发与下游调用并发的区别](docs/assets/request-batcher-fanout-concurrency.zh-CN.svg)
 
 这个 4 只用于说明并发关系，不是上例的推荐配置。若需要严格限制下游调用数，应在 Handler 中为子查询设置共享的并发限制。
 
@@ -750,7 +750,7 @@ Partition 数量和消费速度都会影响合并效果，应从较少的 Partit
 - **延迟与吞吐**：下游及 Handler 平均 RT、调用方端到端 P95/P99、排队时间、吞吐量及错误和限流情况。
 - **资源开销**：应用和下游的 CPU、内存分配、连接池占用。
 
-![配置、压测与重新估算并发的循环](docs/assets/request-batcher-sizing-feedback.zh-CN.png)
+![配置、压测与重新估算并发的循环](docs/assets/request-batcher-sizing-feedback.zh-CN.svg)
 
 每轮调整后，用实测的 Handler 批次 QPS 和耗时重新估算并发，再复测合并效果。
 **目标是减少下游工作量，同时满足延迟和资源要求**，不以批次越大或下游 QPS 越低为唯一标准。
@@ -886,10 +886,6 @@ PostgreSQL 和 Grafana OTel LGTM。生成器并发提交含 2 到 10 条商品�
 原示例继续展示 Handler 类的写法。委托版使用独立的 HTTP 和数据库端口，启动及 curl 步骤见其
 [README](samples/RequestBatcher.Delegates/README.md)。
 
-## 许可证
-
-RequestBatcher 采用 [MIT License](LICENSE)。
-
 ## 可观测性
 
 RequestBatcher 核心包内置 OpenTelemetry 注册扩展，但不依赖完整 SDK。安装应用使用的 Hosting 和 Exporter：
@@ -918,16 +914,28 @@ builder.Services.AddOpenTelemetry()
 ```
 
 `RequestBatcher.Execute` 是调用方当前 span 下的 `Internal` span，覆盖调用方可见的完整过程，包括准入、容量等待、队列停留、
-Handler 执行和结果完成。每个实际分发的非空批次都会创建独立的 `RequestBatcher.ProcessBatch` `Consumer` 根 span，并通过
+Handler 执行和结果完成。每个实际分发的非空批次都会创建独立的 `RequestBatcher.HandleBatch` `Consumer` 根 span，并通过
 link 关联真正贡献请求的 `Execute` span；Handler 创建的数据库或 HTTP span 是该批次 span 的子 span。
+被记录的 `Execute` span 结束前也会补上指向所有相关批次的 link，一次提交跨多个批次时仍可逐一跳转。
+回链不参与 `Execute` 创建时的采样决策；库不会修改应用的 HTTP/业务父 span。
 
 命名注册会在 span 基础名后追加一个空格和公开名称，例如 `RequestBatcher.Execute pricing-queries` 和
-`RequestBatcher.ProcessBatch pricing-queries`，同时写入 `requestbatcher.name`。未命名注册保留基础名称并省略此 tag。
-Link 表示跨队列的因果关系，不代表共享父 span、Trace ID 或执行顺序；队列只传递 `ActivityContext`，需要的请求 scope、baggage
+`RequestBatcher.HandleBatch pricing-queries`，同时写入 `requestbatcher.name`。未命名注册保留基础名称并省略此 tag。
+Link 表示跨队列的因果关系，不代表共享父 span、Trace ID 或执行顺序；队列只传递 span context 和共享的回链收集状态，需要的请求 scope、baggage
 和其他 `AsyncLocal` 状态应显式传递。
 
-![RequestBatcher 可观测性模型](https://raw.githubusercontent.com/eventhorizon-cli/RequestBatcher/main/docs/diagrams/observability.svg)
+![RequestBatcher 可观测性模型](docs/diagrams/observability.svg)
 
 对应的 `MeterProviderBuilder` 扩展会注册 `RequestBatcher` meter，记录已接收请求、已处理请求、已处理批次数、批次大小和批次
 耗时。Metrics 只使用请求类型和配置的 batcher name 作为维度，不记录请求内容、租户值或 Partition Key；只有 meter provider 监听
 该 meter 时才会输出数据。Tracing 和内存中的待处理请求都是尽力而为，进程故障后不会恢复请求。
+
+请求类型使用公开类型的短名（例如 `Int32`），不包含命名空间或内部响应包装类型；不同命名空间的同名类型会共享此维度，
+需要区分时可配置不同的 batcher name。已有的请求类型标签过滤条件需要改用短名。
+指标名本身已经带有 `requestbatcher.`，例如 `requestbatcher.batches.processed` 在示例中导出为
+`requestbatcher_batches_processed_total`。导出端不要再添加 `requestbatcher` namespace/prefix，否则会出现
+`requestbatcher_requestbatcher_*`。
+
+## 许可证
+
+RequestBatcher 采用 [MIT License](LICENSE)。

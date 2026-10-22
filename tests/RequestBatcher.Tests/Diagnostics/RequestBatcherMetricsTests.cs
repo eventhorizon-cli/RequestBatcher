@@ -51,8 +51,18 @@ public sealed class RequestBatcherMetricsTests
         Assert.Contains(measurements, item => item.Name == "requestbatcher.batch.duration");
 
         var tagged = Assert.Single(measurements, item => item.Name == "requestbatcher.requests.submitted");
-        Assert.Equal(typeof(int).FullName, tagged.Tags["requestbatcher.request.type"]);
+        Assert.Equal(nameof(Int32), tagged.Tags["requestbatcher.request.type"]);
         Assert.Equal("prices", tagged.Tags["requestbatcher.name"]);
+    }
+
+    [Theory]
+    [InlineData(typeof(int), "Int32")]
+    [InlineData(typeof(RequestBatchEntry<int, string>), "Int32")]
+    public void GetMetricRequestTypeName_Type_ReturnsSimpleRequestTypeName(
+        Type requestType,
+        string expected)
+    {
+        Assert.Equal(expected, RequestBatcherMetrics.GetMetricRequestTypeName(requestType));
     }
 
     [Fact]

@@ -280,7 +280,7 @@ public sealed class TraceCallCompletionTests
             task,
             (state, context) =>
             {
-                captureContext?.Invoke(context);
+                captureContext?.Invoke(context?.Context ?? default);
                 return state;
             });
     }
@@ -295,7 +295,7 @@ public sealed class TraceCallCompletionTests
             task,
             (state, context) =>
             {
-                captureContext?.Invoke(context);
+                captureContext?.Invoke(context?.Context ?? default);
                 return state;
             });
     }

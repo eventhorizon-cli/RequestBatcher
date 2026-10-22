@@ -7,20 +7,21 @@ internal static class RequestBatcherTracing
 {
     internal const string SourceName = "RequestBatcher";
     internal const string CallName = "RequestBatcher.Execute";
-    internal const string BatchName = "RequestBatcher.ProcessBatch";
+    internal const string BatchName = "RequestBatcher.HandleBatch";
     internal static readonly ActivitySource Source = new(SourceName);
 
     public static Task TraceCall<TState>(
         string requestTypeName,
         TState state,
-        Func<TState, ActivityContext, Task> submit,
+        Func<TState, SubmissionTraceContext?, Task> submit,
         string? batcherName = null)
     {
         var parent = Activity.Current;
         var activity = StartCall(requestTypeName, batcherName);
+        var context = CreateContext(activity, parent);
         try
         {
-            var task = submit(state, activity?.Context ?? parent?.Context ?? default);
+            var task = submit(state, context);
             if (activity is null)
             {
                 return task;
@@ -28,17 +29,21 @@ internal static class RequestBatcherTracing
 
             if (task.IsCompleted)
             {
-                EndCall(activity, task);
+                EndCall(activity, task, context);
                 return task;
             }
 
             var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            _ = CompleteCallAsync(task, activity, completion);
+            _ = CompleteCallAsync(task, activity, completion, context);
             return completion.Task;
         }
         catch (Exception exception)
         {
             RecordFailure(activity, exception);
+            if (activity is not null)
+            {
+                context?.Complete(activity);
+            }
             activity?.Dispose();
             throw;
         }
@@ -52,14 +57,15 @@ internal static class RequestBatcherTracing
     public static Task<TResult> TraceCall<TState, TResult>(
         string requestTypeName,
         TState state,
-        Func<TState, ActivityContext, Task<TResult>> submit,
+        Func<TState, SubmissionTraceContext?, Task<TResult>> submit,
         string? batcherName = null)
     {
         var parent = Activity.Current;
         var activity = StartCall(requestTypeName, batcherName);
+        var context = CreateContext(activity, parent);
         try
         {
-            var task = submit(state, activity?.Context ?? parent?.Context ?? default);
+            var task = submit(state, context);
             if (activity is null)
             {
                 return task;
@@ -67,17 +73,21 @@ internal static class RequestBatcherTracing
 
             if (task.IsCompleted)
             {
-                EndCall(activity, task);
+                EndCall(activity, task, context);
                 return task;
             }
 
             var completion = new TaskCompletionSource<TResult>(TaskCreationOptions.RunContinuationsAsynchronously);
-            _ = CompleteCallAsync(task, activity, completion);
+            _ = CompleteCallAsync(task, activity, completion, context);
             return completion.Task;
         }
         catch (Exception exception)
         {
             RecordFailure(activity, exception);
+            if (activity is not null)
+            {
+                context?.Complete(activity);
+            }
             activity?.Dispose();
             throw;
         }
@@ -98,6 +108,7 @@ internal static class RequestBatcherTracing
         }
 
         List<ActivityLink>? links = null;
+        List<SubmissionTraceContext>? submissions = null;
         HashSet<(ActivityTraceId, ActivitySpanId)>? contexts = null;
         foreach (var request in requests)
         {
@@ -106,11 +117,12 @@ internal static class RequestBatcherTracing
                 continue;
             }
 
-            var context = traced.Context;
+            var context = traced.TraceContext.Context;
             contexts ??= [];
             if (contexts.Add((context.TraceId, context.SpanId)))
             {
                 (links ??= []).Add(new ActivityLink(context));
+                (submissions ??= []).Add(traced.TraceContext);
             }
         }
 
@@ -118,12 +130,21 @@ internal static class RequestBatcherTracing
         tags.Add("requestbatcher.batch.size", requests.Count);
 
         // Dispatch runs in an isolated context. Links describe the many-to-many relationship with calls.
-        return Source.StartActivity(
+        var activity = Source.StartActivity(
             GetBatchName(batcherName),
             ActivityKind.Consumer,
             parentContext: default,
             tags: tags,
             links: links);
+        if (activity is not null && submissions is not null)
+        {
+            foreach (var submission in submissions)
+            {
+                submission.AddBatch(activity.Context);
+            }
+        }
+
+        return activity;
     }
 
     public static void RecordFailure(Activity? activity, Exception exception)
@@ -156,7 +177,15 @@ internal static class RequestBatcherTracing
         return tags;
     }
 
-    private static void EndCall(Activity activity, Task task)
+    private static SubmissionTraceContext? CreateContext(Activity? activity, Activity? parent)
+    {
+        var context = activity?.Context ?? parent?.Context ?? default;
+        return context.TraceId != default && context.SpanId != default
+            ? new SubmissionTraceContext(context, activity?.IsAllDataRequested == true)
+            : null;
+    }
+
+    private static void EndCall(Activity activity, Task task, SubmissionTraceContext? context)
     {
         if (task.IsFaulted)
         {
@@ -167,13 +196,15 @@ internal static class RequestBatcherTracing
             activity.SetTag("requestbatcher.canceled", true);
         }
 
+        context?.Complete(activity);
         activity.Dispose();
     }
 
-    private static async Task CompleteCallAsync(Task task, Activity activity, TaskCompletionSource completion)
+    private static async Task CompleteCallAsync(
+        Task task, Activity activity, TaskCompletionSource completion, SubmissionTraceContext? context)
     {
         await task.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
-        EndCall(activity, task);
+        EndCall(activity, task, context);
         if (task.IsFaulted)
         {
             // Preserve all original faults, including faulted OperationCanceledException instances.
@@ -192,10 +223,11 @@ internal static class RequestBatcherTracing
     private static async Task CompleteCallAsync<TResult>(
         Task<TResult> task,
         Activity activity,
-        TaskCompletionSource<TResult> completion)
+        TaskCompletionSource<TResult> completion,
+        SubmissionTraceContext? context)
     {
         await ((Task)task).ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
-        EndCall(activity, task);
+        EndCall(activity, task, context);
         if (task.IsFaulted)
         {
             completion.TrySetException(task.Exception!.InnerExceptions);

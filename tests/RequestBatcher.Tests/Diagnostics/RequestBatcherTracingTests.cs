@@ -77,6 +77,8 @@ public sealed class RequestBatcherTracingTests
         Assert.Equal(2, batch.Links.Count());
         Assert.Contains(batch.Links, link => link.Context == callA.Context);
         Assert.Contains(batch.Links, link => link.Context == callB.Context);
+        Assert.Equal(batch.Context, Assert.Single(callA.Links).Context);
+        Assert.Equal(batch.Context, Assert.Single(callB.Links).Context);
         Assert.True(callA.StartTimeUtc <= batch.StartTimeUtc);
         Assert.True(callA.StartTimeUtc + callA.Duration >= batch.StartTimeUtc + batch.Duration);
         Assert.True(callB.StartTimeUtc + callB.Duration >= batch.StartTimeUtc + batch.Duration);
@@ -93,6 +95,8 @@ public sealed class RequestBatcherTracingTests
         var call = Assert.Single(capture.Calls);
         Assert.Equal(3, capture.Batches.Count());
         Assert.All(capture.Batches, batch => Assert.Equal(call.Context, Assert.Single(batch.Links).Context));
+        Assert.Equal(3, call.Links.Count());
+        Assert.All(capture.Batches, batch => Assert.Contains(call.Links, link => link.Context == batch.Context));
     }
 
     [Fact]
@@ -129,9 +133,12 @@ public sealed class RequestBatcherTracingTests
         await Task.WhenAll(first, active).WaitAsync(TimeSpan.FromSeconds(5));
         var canceledCall = Assert.Single(capture.Calls, span => Equals(span.GetTagItem("requestbatcher.canceled"), true));
         Assert.Equal(ActivityStatusCode.Unset, canceledCall.Status);
+        Assert.Empty(canceledCall.Links);
         Assert.All(capture.Batches, batch => Assert.DoesNotContain(batch.Links, link => link.Context == canceledCall.Context));
         var activeBatch = Assert.Single(capture.Batches, span => Equals(span.GetTagItem("requestbatcher.batch.size"), 2));
         Assert.Single(activeBatch.Links);
+        var activeCall = Assert.Single(capture.Calls, call => call.Context == activeBatch.Links.Single().Context);
+        Assert.Equal(activeBatch.Context, Assert.Single(activeCall.Links).Context);
     }
 
     [Fact]
@@ -210,6 +217,7 @@ public sealed class RequestBatcherTracingTests
         Assert.Same(parent, Activity.Current);
         Assert.Empty(capture.Calls);
         Assert.Equal(parent.Context, Assert.Single(Assert.Single(capture.Batches).Links).Context);
+        Assert.Empty(parent.Links);
     }
 
     [Fact]
@@ -256,6 +264,8 @@ public sealed class RequestBatcherTracingTests
             var call = Assert.Single(capture.Calls);
             Assert.Equal(parent.SpanId, call.ParentSpanId);
             Assert.All(capture.Batches, batch => Assert.Equal(call.Context, Assert.Single(batch.Links).Context));
+            Assert.Equal(capture.Batches.Count(), call.Links.Count());
+            Assert.All(capture.Batches, batch => Assert.Contains(call.Links, link => link.Context == batch.Context));
         }
     }
 
@@ -391,6 +401,70 @@ public sealed class RequestBatcherTracingTests
         Assert.Equal(fullMode == RequestBatchFullMode.Wait ? 3 : 2, capture.Batches.Count());
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_ConcurrentBatches_CollectsEveryReverseLinkBeforeCallStops(bool fail)
+    {
+        using var capture = new TraceCapture();
+        var allStarted = NewSource();
+        var release = NewSource();
+        var started = 0;
+        const int batchCount = 8;
+        var expected = new InvalidOperationException("batch failed");
+        await using var provider = CreateProvider(async (_, _) =>
+        {
+            if (Interlocked.Increment(ref started) == batchCount)
+            {
+                allStarted.TrySetResult();
+            }
+
+            await release.Task;
+            if (fail)
+            {
+                throw expected;
+            }
+        }, batchSize: 1, maxConcurrency: batchCount);
+        var task = provider.GetRequiredService<IRequestBatcher<int>>()
+            .ExecuteAsync(Enumerable.Range(0, batchCount));
+        try
+        {
+            await allStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Empty(capture.Calls);
+        }
+        finally
+        {
+            release.TrySetResult();
+        }
+
+        if (fail)
+        {
+            await Assert.ThrowsAnyAsync<Exception>(() => task.WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.True(task.IsFaulted);
+        }
+        else
+        {
+            await task.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+
+        var call = Assert.Single(capture.Calls);
+        Assert.Equal(batchCount, capture.Batches.Count());
+        Assert.Equal(batchCount, call.Links.Count());
+        Assert.All(capture.Batches, batch => Assert.Contains(call.Links, link => link.Context == batch.Context));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_DroppedBatch_DoesNotAddReverseLink()
+    {
+        using var capture = new TraceCapture(options => options.Name == RequestBatcherTracing.BatchName
+            ? ActivitySamplingResult.None
+            : ActivitySamplingResult.AllDataAndRecorded);
+        await using var provider = CreateProvider((_, _) => ValueTask.CompletedTask);
+        await provider.GetRequiredService<IRequestBatcher<int>>().ExecuteAsync(1);
+        Assert.Empty(capture.Batches);
+        Assert.Empty(Assert.Single(capture.Calls).Links);
+    }
+
     private sealed class DisposalProbe
     {
         public TaskCompletionSource Disposing { get; } = NewSource();
@@ -419,14 +493,15 @@ public sealed class RequestBatcherTracingTests
 
     private static TaskCompletionSource NewSource() => new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    private static ServiceProvider CreateProvider(RequestBatchHandler<int> handler, int batchSize = 16)
+    private static ServiceProvider CreateProvider(
+        RequestBatchHandler<int> handler, int batchSize = 16, int maxConcurrency = 1)
     {
         var services = new ServiceCollection();
         services.AddSingleton(handler);
         services.AddRequestBatcher<int, TestHandler>(ServiceLifetime.Singleton, options =>
         {
             options.BatchSize = batchSize;
-            options.MaxConcurrency = 1;
+            options.MaxConcurrency = maxConcurrency;
         });
         return services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
     }

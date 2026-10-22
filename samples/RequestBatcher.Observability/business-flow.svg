@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1320" height="500" viewBox="0 0 1320 500" role="img" aria-labelledby="title desc">
   <title id="title">Cart and pricing business flow</title>
-  <desc id="desc">Concurrent external callers send 2 to 10 item carts to Cart. Each Cart request creates one Execute span; Cart combines up to 20 product requests into ProcessBatch operations before calling Pricing, which reads PostgreSQL.</desc>
+  <desc id="desc">Concurrent external callers send 2 to 10 item carts to Cart. Each Cart request creates one Execute span; Cart combines up to 20 product requests into HandleBatch operations before calling Pricing, which reads PostgreSQL.</desc>
   <defs>
     <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="5" orient="auto" markerUnits="strokeWidth">
       <path d="M 0 0 L 10 5 L 0 10 z" fill="#536574"/>
@@ -45,6 +45,6 @@
     <text x="981" y="205" font-size="14" fill="#536574">SQL</text>
 
     <rect x="240" y="380" width="840" height="52" rx="6" fill="#f5f7f8" stroke="#b8c2c9"/>
-    <text x="660" y="412" text-anchor="middle" font-size="16" fill="#536574">N caller traces → ProcessBatch links → Pricing HTTP span → Npgsql database span</text>
+    <text x="660" y="412" text-anchor="middle" font-size="16" fill="#536574">N caller traces → HandleBatch links → Pricing HTTP span → Npgsql database span</text>
   </g>
 </svg>

@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using RequestBatcher.Diagnostics;
 using RequestBatcher.PendingRequests;
 
@@ -24,7 +23,7 @@ internal sealed class ResponseRequestBatcher<TRequest, TResponse>(
     internal Task<TResponse> ExecuteCoreAsync(
         TRequest request,
         CancellationToken cancellationToken,
-        ActivityContext traceContext = default)
+        SubmissionTraceContext? traceContext = default)
     {
         var entry = new RequestBatchEntry<TRequest, TResponse>(request);
         var completion = new ResponseCompletion<TRequest, TResponse>(entry);
@@ -52,7 +51,7 @@ internal sealed class ResponseRequestBatcher<TRequest, TResponse>(
     internal Task<IReadOnlyList<TResponse>> ExecuteCoreAsync(
         IEnumerable<TRequest> requests,
         CancellationToken cancellationToken,
-        ActivityContext traceContext = default)
+        SubmissionTraceContext? traceContext = default)
     {
         ArgumentNullException.ThrowIfNull(requests);
         return ProcessEntriesAsync(requests, cancellationToken, traceContext);
@@ -69,7 +68,7 @@ internal sealed class ResponseRequestBatcher<TRequest, TResponse>(
     private async Task<IReadOnlyList<TResponse>> ProcessEntriesAsync(
         IEnumerable<TRequest> requests,
         CancellationToken cancellationToken,
-        ActivityContext traceContext)
+        SubmissionTraceContext? traceContext)
     {
         var entries = new List<RequestBatchEntry<TRequest, TResponse>>();
         await batcher

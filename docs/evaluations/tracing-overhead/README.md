@@ -61,7 +61,7 @@ SHA-512: 16784b16f17d1af2315161d0df1e81aedfb0a56bd1028fba49b5493050bed3a78f9da06
 
 The `RequestBatcher` package registers the core `RequestBatcher` ActivitySource with an
 OpenTelemetry provider. The public `RequestBatcher.Execute` span measures the caller-visible submission, including
-queue residence and handler completion. A dispatched `RequestBatcher.ProcessBatch` span represents handler execution
+queue residence and handler completion. A dispatched `RequestBatcher.HandleBatch` span represents handler execution
 and uses links to the submission contexts that contributed requests. The batch span is created in an isolated
 background context, so downstream database and HTTP instrumentation becomes its child without inheriting the first
 web request's ambient trace. See the [observability design](../../observability-design.md) and the package
