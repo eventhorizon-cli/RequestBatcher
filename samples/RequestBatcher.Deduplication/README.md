@@ -1,5 +1,7 @@
 # PostgreSQL Web API Sample
 
+**English** | [简体中文](README.zh-CN.md)
+
 This sample uses [BufferQueue](https://github.com/eventhorizon-cli/BufferQueue) through RequestBatcher. A push wakes the
 consumer path, which pulls currently queued requests when an execution slot is available; there is no fixed collection
 window. `BatchSize` is only a maximum, while `MaxConcurrency` limits concurrent handler batches per process and
@@ -120,3 +122,15 @@ successful update and waits for the applicable handler batch before completing e
 
 Database failures propagate to the HTTP request as a server error; RequestBatcher does not retry them automatically.
 RequestBatcher is in-process, so pending requests are not recovered after a process failure.
+
+## Observability
+
+For OpenTelemetry in this Web API, install `RequestBatcher` with your OpenTelemetry hosting and exporter
+packages, then call `AddRequestBatcherInstrumentation()` from `WithTracing`. `RequestBatcher.Execute` covers the
+caller's full wait; each `RequestBatcher.ProcessBatch` span is an independent Consumer trace linked to the calls that
+entered that batch. See the [observability guide](../../docs/observability-design.md) and
+[correlation diagram](../../docs/diagrams/observability.svg).
+
+For optional end-to-end validation of the Compose observability sample, see the [integration test guide](../../tests/it/README.md)
+([中文](../../tests/it/README.zh-CN.md)). It reuses the running stack and verifies one Cart `Execute` per HTTP request,
+cross-trace batch links, Pricing/database parent-child spans, and metrics with the explicit integration-test opt-in.

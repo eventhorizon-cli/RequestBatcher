@@ -1,0 +1,112 @@
+name: requestbatcher-observability
+
+services:
+  postgres:
+    image: postgres:17.6-alpine
+    environment:
+      POSTGRES_DB: requestbatcher_observability
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_USER: postgres
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./init.sql:/docker-entrypoint-initdb.d/001-products.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d requestbatcher_observability"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
+  lgtm:
+    image: grafana/otel-lgtm:0.29.0
+    init: true
+    ports:
+      - "127.0.0.1:${GRAFANA_PORT:-3000}:3000"
+      - "127.0.0.1:${OTLP_GRPC_PORT:-4317}:4317"
+      - "127.0.0.1:${OTLP_HTTP_PORT:-4318}:4318"
+    volumes:
+      - lgtm-data:/data
+      - ./grafana/provisioning/datasources/requestbatcher.yaml:/otel-lgtm/grafana/conf/provisioning/datasources/requestbatcher.yaml:ro
+      - ./grafana/provisioning/dashboards/requestbatcher.yaml:/otel-lgtm/grafana/conf/provisioning/dashboards/requestbatcher.yaml:ro
+      - ./grafana/dashboards:/otel-lgtm/grafana/conf/provisioning/dashboards/requestbatcher:ro
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/ready"]
+      interval: 5s
+      timeout: 3s
+      retries: 60
+      start_period: 20s
+    stop_grace_period: 15s
+
+  pricing:
+    build:
+      context: ../..
+      dockerfile: samples/RequestBatcher.Observability/Dockerfile
+      target: pricing
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__Products: Host=postgres;Database=requestbatcher_observability;Username=postgres;Password=postgres
+      OTEL_SERVICE_NAME: requestbatcher-pricing
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://lgtm:4318
+      OTEL_METRIC_EXPORT_INTERVAL: "10000"
+      OTEL_TRACES_SAMPLER: always_on
+      OTEL_SPAN_LINK_COUNT_LIMIT: "256"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      lgtm:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${PRICING_PORT:-5082}:8080"
+    healthcheck:
+      test: ["CMD", "dotnet", "/healthcheck/CheckHealth.dll"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+
+  cart:
+    build:
+      context: ../..
+      dockerfile: samples/RequestBatcher.Observability/Dockerfile
+      target: cart
+    environment:
+      ASPNETCORE_URLS: http://+:8080
+      Pricing__BaseAddress: http://pricing:8080
+      OTEL_SERVICE_NAME: requestbatcher-cart
+      OTEL_EXPORTER_OTLP_PROTOCOL: http/protobuf
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://lgtm:4318
+      OTEL_METRIC_EXPORT_INTERVAL: "10000"
+      OTEL_TRACES_SAMPLER: always_on
+      OTEL_SPAN_LINK_COUNT_LIMIT: "256"
+    depends_on:
+      pricing:
+        condition: service_healthy
+      lgtm:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:${CART_PORT:-5081}:8080"
+    healthcheck:
+      test: ["CMD", "dotnet", "/healthcheck/CheckHealth.dll"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 10s
+    restart: unless-stopped
+
+  traffic-generator:
+    build:
+      context: ../..
+      dockerfile: samples/RequestBatcher.Observability/Dockerfile
+      target: traffic-generator
+    init: true
+    environment:
+      CART_URL: http://cart:8080
+      TRAFFIC_CONCURRENCY: "${TRAFFIC_CONCURRENCY:-32}"
+      TRAFFIC_DELAY_SECONDS: "${TRAFFIC_DELAY_SECONDS:-0.25}"
+    depends_on:
+      cart:
+        condition: service_healthy
+
+volumes:
+  lgtm-data:
+  postgres-data:

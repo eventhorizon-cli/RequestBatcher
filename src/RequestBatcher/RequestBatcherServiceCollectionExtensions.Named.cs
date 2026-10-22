@@ -35,7 +35,7 @@ public static partial class RequestBatcherServiceCollectionExtensions
         services.Add(new ServiceDescriptor(
             typeof(IRequestBatchHandler<TRequest>), batcherName, typeof(THandler), handlerLifetime));
         AddNamedOptions(services, batcherName, options);
-        AddKeyedCoordinator<TRequest>(services, batcherName, handlerLifetime, options);
+        AddKeyedCoordinator<TRequest>(services, batcherName, handlerLifetime, options, batcherName);
         services.AddKeyedSingleton<IRequestBatcher<TRequest>>(
             batcherName,
             (provider, key) => provider.GetRequiredKeyedService<RequestBatchCoordinator<TRequest>>(key));
@@ -81,7 +81,7 @@ public static partial class RequestBatcherServiceCollectionExtensions
                 provider.GetRequiredKeyedService<IRequestBatchHandler<TRequest, TResponse>>(batcherName)),
             handlerLifetime));
         AddKeyedCoordinator<RequestBatchEntry<TRequest, TResponse>>(
-            services, pipelineKey, handlerLifetime, entryOptions);
+            services, pipelineKey, handlerLifetime, entryOptions, batcherName);
         services.AddKeyedSingleton<IRequestBatcher<TRequest, TResponse>>(
             batcherName,
             (provider, _) => new ResponseRequestBatcher<TRequest, TResponse>(
@@ -138,7 +138,8 @@ public static partial class RequestBatcherServiceCollectionExtensions
         IServiceCollection services,
         object serviceKey,
         ServiceLifetime handlerLifetime,
-        RequestBatchOptions<TRequest> options)
+        RequestBatchOptions<TRequest> options,
+        string? batcherName)
     {
         var topicName = $"request-batcher-{Guid.NewGuid():N}";
         AddInternalBufferQueueTopic(services, options, topicName);
@@ -149,7 +150,8 @@ public static partial class RequestBatcherServiceCollectionExtensions
                 CreateKeyedHandler<TRequest>(provider, key, handlerLifetime),
                 Options.Create(options),
                 provider.GetRequiredService<ILogger<RequestBatchCoordinator<TRequest>>>(),
-                topicName));
+                topicName,
+                batcherName));
     }
 
     private static RequestBatchHandler<TRequest> CreateKeyedHandler<TRequest>(

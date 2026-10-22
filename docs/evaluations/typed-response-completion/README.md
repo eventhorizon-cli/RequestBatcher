@@ -39,3 +39,8 @@ dotnet run --project tests/RequestBatcher.Benchmarks/RequestBatcher.Benchmarks.c
   --configuration Release -- \
   --filter '*ResponseCompletionBenchmarks*' --artifacts /private/tmp/response-completion-results
 ```
+
+## Observability
+
+This historical response-completion evaluation does not measure the built-in RequestBatcher
+instrumentation. See the [observability design](../../observability-design.md) for the current tracing contract.

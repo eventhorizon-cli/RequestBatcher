@@ -1,0 +1,13 @@
+apiVersion: 1
+
+providers:
+  - name: RequestBatcher observability
+    orgId: 1
+    folder: RequestBatcher
+    folderUid: requestbatcher
+    type: file
+    disableDeletion: true
+    editable: false
+    updateIntervalSeconds: 10
+    options:
+      path: /otel-lgtm/grafana/conf/provisioning/dashboards/requestbatcher

@@ -1,6 +1,6 @@
 # Open-loop scheduling diagnostic
 
-`run_arrival.py` builds an isolated copy of the current source, analyzer, and
+`EvaluateArrivalScheduling.cs` builds an isolated copy of the current source, analyzer, and
 benchmark project. It patches only that temporary copy with an experimental
 bounded offload path and telemetry hooks, then runs one JSON-emitting probe
 process per case. The checkout's production runtime is not changed.
@@ -20,14 +20,14 @@ Direct/offload pairs use the same work, but changing batch size or formation
 changes its amortized cost per logical item.
 
 ```bash
-python3 scripts/scheduling-evaluation/run_arrival.py \
+dotnet run --file scripts/scheduling-evaluation/EvaluateArrivalScheduling.cs -- \
   --output /private/tmp/requestbatcher-arrival --smoke
 ```
 
 The default matrix is bounded by 32 short cases:
 
 ```bash
-python3 scripts/scheduling-evaluation/run_arrival.py \
+dotnet run --file scripts/scheduling-evaluation/EvaluateArrivalScheduling.cs -- \
   --output /private/tmp/requestbatcher-arrival
 ```
 
@@ -45,11 +45,11 @@ the sample database on port `54329` by default; Redis defaults to
 endpoint; this probe does not support Redis Cluster or multi-endpoint setups.
 
 ```bash
-python3 scripts/scheduling-evaluation/run_arrival.py \
+dotnet run --file scripts/scheduling-evaluation/EvaluateArrivalScheduling.cs -- \
   --database postgres --rates 100 --batch-sizes 1 8 \
   --output /private/tmp/requestbatcher-arrival-postgres
 
-python3 scripts/scheduling-evaluation/run_arrival.py \
+dotnet run --file scripts/scheduling-evaluation/EvaluateArrivalScheduling.cs -- \
   --database redis --database-operation read --rates 100 \
   --batch-sizes 1 8 --output /private/tmp/requestbatcher-arrival-redis-read
 ```
@@ -73,3 +73,9 @@ Percentiles select sorted latency at zero-based index `ceil(count * p) - 1`.
 `ExactOnce` verifies that each logical ID reaches the in-process handler once.
 Database checks verify final key/row counts and values; they do not prove
 exactly-once execution of external side effects.
+
+## Observability
+
+This historical diagnostic uses temporary probe hooks; its results do not represent runs with the optional
+`RequestBatcher` instrumentation enabled. For production tracing, use
+`AddRequestBatcherInstrumentation()` and follow the [observability design](../../docs/observability-design.md).

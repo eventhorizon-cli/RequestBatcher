@@ -90,29 +90,42 @@ jobs:
       - name: Pack
         env:
           VERSION: ${{ steps.version.outputs.value }}
-        run: >-
-          dotnet pack src/RequestBatcher/RequestBatcher.csproj
-          --configuration Release
-          --no-build
-          --no-restore
-          --output artifacts
-          -p:Version="$VERSION"
-          -p:ContinuousIntegrationBuild=true
+        run: |
+          dotnet pack src/RequestBatcher/RequestBatcher.csproj \
+            --configuration Release \
+            --no-build \
+            --no-restore \
+            --output artifacts \
+            -p:Version="$VERSION" \
+            -p:ContinuousIntegrationBuild=true
 
-      - name: Publish package to NuGet
+      - name: Publish packages to NuGet
         env:
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
           VERSION: ${{ steps.version.outputs.value }}
         run: |
-          package="artifacts/RequestBatcher.$VERSION.nupkg"
-          test -f "$package"
-          dotnet nuget push "$package" --api-key "$NUGET_API_KEY" --source "$NUGET_SOURCE" --skip-duplicate
+          packages=(
+            "artifacts/RequestBatcher.$VERSION.nupkg"
+          )
+          for package in "${packages[@]}"; do
+            test -f "$package"
+          done
+          for package in "${packages[@]}"; do
+            dotnet nuget push "$package" --api-key "$NUGET_API_KEY" --source "$NUGET_SOURCE" --skip-duplicate
+          done
 
-      - name: Create GitHub Release with packages
+      - name: Create GitHub Release with packages and symbols
         env:
           GH_TOKEN: ${{ github.token }}
           VERSION: ${{ steps.version.outputs.value }}
         run: |
+          assets=(
+            "artifacts/RequestBatcher.$VERSION.nupkg"
+            "artifacts/RequestBatcher.$VERSION.snupkg"
+          )
+          for asset in "${assets[@]}"; do
+            test -f "$asset"
+          done
           if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release create "$GITHUB_REF_NAME" \
               --draft \
@@ -120,10 +133,5 @@ jobs:
               --title "RequestBatcher $VERSION" \
               --generate-notes
           fi
-
-          package="artifacts/RequestBatcher.$VERSION.nupkg"
-          symbols="artifacts/RequestBatcher.$VERSION.snupkg"
-          test -f "$package"
-          test -f "$symbols"
-          gh release upload "$GITHUB_REF_NAME" "$package" "$symbols" --clobber
+          gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
           gh release edit "$GITHUB_REF_NAME" --draft=false

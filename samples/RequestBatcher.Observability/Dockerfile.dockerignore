@@ -1,0 +1,10 @@
+**/bin
+**/obj
+.git
+.agents
+.codex
+artifacts
+BenchmarkDotNet.Artifacts
+.nuget
+*.user
+*.suo

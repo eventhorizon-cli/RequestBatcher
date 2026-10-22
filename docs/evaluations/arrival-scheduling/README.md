@@ -140,22 +140,22 @@ per-launch JSON and source/runner/prototype hashes. See the
 for setup and metric definitions.
 
 ```bash
-python3 scripts/scheduling-evaluation/run_arrival.py \
+dotnet run --file scripts/scheduling-evaluation/EvaluateArrivalScheduling.cs -- \
   --workloads io cpu blocking --rates 500 5000 12000 \
   --duration-ms 2000 --max-items 24000 --warmup-items 1024 --repeats 2 \
   --output /private/tmp/arrival-memory
 
-python3 scripts/scheduling-evaluation/run_arrival.py \
+dotnet run --file scripts/scheduling-evaluation/EvaluateArrivalScheduling.cs -- \
   --workloads fast --rates 50000 150000 300000 \
   --duration-ms 2000 --max-items 600000 --warmup-items 1024 --repeats 2 \
   --output /private/tmp/arrival-fast
 
-python3 scripts/scheduling-evaluation/run_arrival.py \
+dotnet run --file scripts/scheduling-evaluation/EvaluateArrivalScheduling.cs -- \
   --database postgres --database-operation write --rates 1000 30000 \
   --duration-ms 2000 --max-items 60000 --warmup-items 1024 --repeats 2 \
   --output /private/tmp/arrival-postgres-write
 
-python3 scripts/scheduling-evaluation/run_arrival.py \
+dotnet run --file scripts/scheduling-evaluation/EvaluateArrivalScheduling.cs -- \
   --database redis --database-operation write --rates 1000 100000 \
   --duration-ms 2000 --max-items 200000 --warmup-items 1024 --repeats 2 \
   --output /private/tmp/arrival-redis-write
@@ -163,3 +163,8 @@ python3 scripts/scheduling-evaluation/run_arrival.py \
 
 Repeat the database commands with `--database-operation read` and separate
 output directories for the read comparisons.
+
+## Observability
+
+This evaluation predates the built-in RequestBatcher instrumentation and does not report tracing
+overhead or trace output. See the [observability design](../../observability-design.md) for the production span model.

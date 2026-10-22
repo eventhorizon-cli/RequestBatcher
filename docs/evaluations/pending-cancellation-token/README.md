@@ -51,3 +51,8 @@ dotnet run --project tests/RequestBatcher.Benchmarks/RequestBatcher.Benchmarks.c
   --configuration Release -- \
   --filter '*PendingRequestAllocationBenchmarks*' '*ExplicitCompletionBenchmarks*' --artifacts /private/tmp/pending-token-results
 ```
+
+## Observability
+
+This historical pending-request allocation evaluation does not measure the built-in RequestBatcher
+instrumentation. See the [observability design](../../observability-design.md) for tracing boundaries and cancellation tags.

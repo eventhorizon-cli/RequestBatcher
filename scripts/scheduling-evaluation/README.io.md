@@ -3,16 +3,16 @@
 Run from the repository root:
 
 ```bash
-python3 scripts/scheduling-evaluation/run_io.py --output artifacts/http-scheduling-evaluation
+dotnet run --file scripts/scheduling-evaluation/EvaluateHttpScheduling.cs -- --output artifacts/http-scheduling-evaluation
 ```
 
 For a small build and loopback smoke test (one unkeyed direct/offload pair), use:
 
 ```bash
-python3 scripts/scheduling-evaluation/run_io.py --smoke --output artifacts/http-scheduling-smoke
+dotnet run --file scripts/scheduling-evaluation/EvaluateHttpScheduling.cs -- --smoke --output artifacts/http-scheduling-smoke
 ```
 
-This reuses the isolated source preparation in `run.py` and replaces only the temporary
+This reuses the isolated source preparation in `EvaluateScheduling.cs` and replaces only the temporary
 probe. It does not change the checkout's production code. The experimental offload
 switch schedules the `_batchConsumer.ExecuteAsync` invocation through `Task.Run`
 after acquiring an execution slot, then uses the existing
@@ -84,7 +84,7 @@ To control batch formation, run the five pure asynchronous HTTP cases with each 
 submitted through the explicit batch API:
 
 ```bash
-python3 scripts/scheduling-evaluation/run_io.py --batch-control --output artifacts/http-batch-control
+dotnet run --file scripts/scheduling-evaluation/EvaluateHttpScheduling.cs -- --batch-control --output artifacts/http-batch-control
 ```
 
 This runs 30 additional client processes by default. The explicit submission produces
@@ -97,7 +97,7 @@ configuration in either experiment.
 To measure the effect of actual external I/O latency, run the focused sweep:
 
 ```bash
-python3 scripts/scheduling-evaluation/run_io.py --latency-sweep \
+dotnet run --file scripts/scheduling-evaluation/EvaluateHttpScheduling.cs -- --latency-sweep \
   --delays 10 100 500 --output artifacts/http-latency-sweep
 ```
 
@@ -108,3 +108,9 @@ measured requests, and three measured iterations. Use `--measured-requests`,
 `--warmup-requests`, and `--iterations` to change those counts; request counts must be
 positive multiples of 1,024. `environment.json` records the sweep flag, effective delay
 list, and the actual counts and iteration count used.
+
+## Observability
+
+The HTTP probe's timing hooks are separate from the built-in RequestBatcher instrumentation; reported
+historical results do not claim to include those spans. See the [observability design](../../docs/observability-design.md)
+for the `Execute` call span and linked `ProcessBatch` Consumer span.

@@ -76,3 +76,35 @@ jobs:
           --configuration Release
           --no-build
           --no-restore
+
+  observability:
+    name: Trace and metrics integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Start observability sample
+        run: docker compose -f samples/RequestBatcher.Observability/compose.yaml up --build -d --wait
+
+      - name: Verify exported traces and metrics
+        env:
+          REQUESTBATCHER_RUN_INTEGRATION_TESTS: "1"
+        run: >-
+          dotnet test tests/it/RequestBatcher.Observability.IntegrationTests/RequestBatcher.Observability.IntegrationTests.csproj
+          --configuration Release
+          --logger 'console;verbosity=detailed'
+
+      - name: Show service diagnostics on failure
+        if: failure()
+        run: docker compose -f samples/RequestBatcher.Observability/compose.yaml logs --no-color --tail 200
+
+      - name: Clean up integration environment
+        if: always()
+        run: docker compose -f samples/RequestBatcher.Observability/compose.yaml down --volumes

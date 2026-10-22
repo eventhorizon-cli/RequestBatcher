@@ -27,3 +27,16 @@ Find reports by question; versions, workloads, and limitations are documented in
 - [shared-completion-source](shared-completion-source/README.md): measures shared completion objects and explicit-submission allocation (in-process).
 - [pending-cancellation-token](pending-cancellation-token/README.md): measures allocation savings from removing the duplicate cancellation token field (in-process).
 - [batch-error-aggregation](batch-error-aggregation/README.md): measures exception-reference reuse during batch failure fan-out and its lock, collection, and allocation costs (in-process).
+
+## Observability
+
+RequestBatcher exposes optional `RequestBatcher.Execute` and `RequestBatcher.ProcessBatch` spans through the
+`RequestBatcher` adapter. The reports indexed here describe their recorded workloads and do not claim
+to have run with the new tracing instrumentation. Read the [observability design](../observability-design.md) for
+correlation and configuration guidance.
+
+The [tracing-overhead evaluation](tracing-overhead/README.md) measures the disabled, sampled-out, and recorded paths
+separately; its results are the reference for instrumentation cost.
+
+The [observability-overhead evaluation](observability-overhead/README.md) measures disabled, metrics-only, and
+tracing-plus-metrics OpenTelemetry providers around an asynchronous 20 ms pricing workload.

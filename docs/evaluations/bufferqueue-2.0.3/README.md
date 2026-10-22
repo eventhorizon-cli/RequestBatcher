@@ -67,10 +67,15 @@ Allocation includes the instrumented pipeline; occupancy includes asynchronous w
 No old/new BufferQueue package speedup was measured.
 
 ```bash
-python3 scripts/scheduling-evaluation/run.py --output /private/tmp/scheduling-evaluation
+dotnet run --file scripts/scheduling-evaluation/EvaluateScheduling.cs -- --output /private/tmp/scheduling-evaluation
 ```
 
 The [current probe](../../../scripts/scheduling-evaluation/README.md) uses public routing
 configuration. Historical unkeyed multi-partition cases above required an experimental
 override; current production deliberately uses one unkeyed partition. The original matrix
 had 40 configurations and 12 bursts; the current probe uses 33 configurations and six bursts.
+
+## Observability
+
+The historical BufferQueue comparison does not include the built-in RequestBatcher instrumentation.
+See the [observability design](../../observability-design.md) for the current `Execute` and `ProcessBatch` spans.

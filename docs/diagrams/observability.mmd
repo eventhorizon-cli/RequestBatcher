@@ -1,0 +1,20 @@
+flowchart LR
+    subgraph A[Service A: caller and RequestBatcher]
+        HTTPA[Caller HTTP span] --> EXEC[RequestBatcher.Execute<br/>Internal span]
+        EXEC -. "queued work" .-> BATCH[RequestBatcher.ProcessBatch<br/>Consumer root span]
+        BATCH --> HANDLER[Handler / HTTP client<br/>child span]
+        BATCH -. "ActivityLink to Execute<br/>causal; no shared parent" .-> EXEC
+    end
+
+    subgraph B[Service B: downstream]
+        HTTPB[HTTP server span] --> DB[Database child span]
+    end
+
+    HANDLER --> HTTPB
+
+    classDef caller fill:#eaf2ff,stroke:#3567a7,color:#1d3b66
+    classDef batch fill:#edf1f5,stroke:#596773,color:#303b44
+    classDef downstream fill:#f4edfb,stroke:#75529b,color:#422d59
+    class HTTPA,EXEC caller
+    class BATCH,HANDLER batch
+    class HTTPB,DB downstream

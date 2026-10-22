@@ -47,3 +47,8 @@ dotnet run --project tests/RequestBatcher.Benchmarks/RequestBatcher.Benchmarks.c
   --configuration Release -- \
   --filter '*ResponseCompletionBenchmarks*' '*ExplicitSubmissionBenchmarks*' --artifacts /private/tmp/completion-callback-results
 ```
+
+## Observability
+
+This completion-allocation evaluation does not measure the built-in RequestBatcher instrumentation.
+See the [observability design](../../observability-design.md) for current tracing behavior.

@@ -933,7 +933,7 @@ Background dispatch and consumer monitoring run without inheriting the initializ
 Handlers do not inherit HTTP request activities (`Activity.Current`), logging scopes, or other `AsyncLocal` values
 from initialization or submission. The caller's context is preserved after resolution and after awaiting completion.
 Pass required application data, such as tenant identifiers, explicitly in requests. Activities created inside a
-handler flow normally across its awaits; RequestBatcher does not create batch spans or automatic trace links.
+handler flow normally across its awaits. See [Observability](#observability) for the optional batch spans and links.
 Singleton constructors must not capture request-specific state; they follow the container's normal creation rules.
 
 Logs use the application's `Microsoft.Extensions.Logging` pipeline under the category
@@ -941,6 +941,10 @@ Logs use the application's `Microsoft.Extensions.Logging` pipeline under the cat
 are not logged.
 
 ## Sample Application
+
+The [continuous-read observability sample](samples/RequestBatcher.Observability/README.md) starts the Cart and Pricing Web APIs, a C# traffic generator, PostgreSQL,
+and Grafana OTel LGTM with Docker Compose. It shows complete call spans, independent linked batch spans,
+and downstream database spans while concurrent Cart requests submit 2–10 item carts that share RequestBatcher batches.
 
 The [PostgreSQL Web API sample](samples/RequestBatcher.Deduplication) demonstrates two pipelines in a Minimal API:
 
@@ -966,3 +970,54 @@ handler-class version. The delegate sample has its own HTTP and database ports; 
 ## License
 
 RequestBatcher is available under the [MIT License](LICENSE).
+
+## Observability
+
+RequestBatcher includes OpenTelemetry registration extensions without depending on the full OpenTelemetry SDK. Install
+the hosting and exporter packages used by your application:
+
+```bash
+dotnet add package OpenTelemetry.Extensions.Hosting
+dotnet add package OpenTelemetry.Instrumentation.AspNetCore
+dotnet add package OpenTelemetry.Exporter.OpenTelemetryProtocol
+```
+
+Register tracing and metrics with the providers already used by the Web API:
+
+```csharp
+using Microsoft.Extensions.DependencyInjection;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Trace;
+
+builder.Services.AddOpenTelemetry()
+    .WithTracing(tracing => tracing
+        .AddAspNetCoreInstrumentation()
+        .AddRequestBatcherInstrumentation()
+        .AddOtlpExporter())
+    .WithMetrics(metrics => metrics
+        .AddRequestBatcherInstrumentation()
+        .AddOtlpExporter());
+```
+
+`RequestBatcher.Execute` is an `Internal` span under the caller's current span. It measures the complete caller-visible
+call, including admission, capacity wait, queue residence, handler execution, and result completion. Each non-empty
+dispatched batch creates an independent `RequestBatcher.ProcessBatch` `Consumer` root. The batch span links to the
+distinct `Execute` spans that contributed requests, while database or HTTP spans created by the handler are its children.
+
+For a named registration, the public span names append the configured name after a space, such as
+`RequestBatcher.Execute pricing-queries` and `RequestBatcher.ProcessBatch pricing-queries`. Both spans also carry
+`requestbatcher.name`; unnamed registrations keep the base names and omit the tag. The name is the public DI
+registration name, never an internal queue key. Start with `Execute`, use the backend's reverse-link view to find the
+linked `ProcessBatch`, then inspect its downstream children:
+
+![RequestBatcher observability model](docs/diagrams/observability.svg)
+
+Only `ActivityContext` crosses the in-process queue. Links express causality; they do not create a shared parent edge,
+shared trace ID, or ordering guarantee. HTTP request activities, logging scopes, baggage, and other `AsyncLocal` state
+are not copied into background processing. Tracing is best effort and pending requests are not recovered after a
+process failure.
+
+The matching `MeterProviderBuilder` extension registers the `RequestBatcher` meter. It records accepted requests,
+processed requests and batches, batch size, and batch duration. Metrics use only request type and configured batcher
+name as dimensions; request payloads, tenant values, and partition keys are not recorded. Instruments emit values only
+when a meter provider listens to the `RequestBatcher` meter.

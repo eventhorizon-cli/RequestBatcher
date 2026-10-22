@@ -864,6 +864,10 @@ Handler 会在分发调用链上执行，直到完成或遇到尚未完成的异
 
 ## 示例应用
 
+[持续读取可观测性示例](samples/RequestBatcher.Observability/README.md)通过 Docker Compose 启动 Cart、Pricing 两个 Web API、C# 流量生成器、
+PostgreSQL 和 Grafana OTel LGTM。生成器并发提交含 2 到 10 条商品的购物车报价，展示调用总耗时、独立批次的 ActivityLink
+以及下游数据库 span。
+
 [PostgreSQL Web API 示例](samples/RequestBatcher.Deduplication)包含三个价格操作：
 
 - `POST /prices` 使用未命名的 `IRequestBatcher<PriceUpdate>`，提交完整的结构化 `PriceUpdate` 并写入价格。
@@ -885,3 +889,45 @@ Handler 会在分发调用链上执行，直到完成或遇到尚未完成的异
 ## 许可证
 
 RequestBatcher 采用 [MIT License](LICENSE)。
+
+## 可观测性
+
+RequestBatcher 核心包内置 OpenTelemetry 注册扩展，但不依赖完整 SDK。安装应用使用的 Hosting 和 Exporter：
+
+```bash
+dotnet add package OpenTelemetry.Extensions.Hosting
+dotnet add package OpenTelemetry.Instrumentation.AspNetCore
+dotnet add package OpenTelemetry.Exporter.OpenTelemetryProtocol
+```
+
+在现有 OpenTelemetry Provider 中同时注册 tracing 和 metrics：
+
+```csharp
+using Microsoft.Extensions.DependencyInjection;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Trace;
+
+builder.Services.AddOpenTelemetry()
+    .WithTracing(tracing => tracing
+        .AddAspNetCoreInstrumentation()
+        .AddRequestBatcherInstrumentation()
+        .AddOtlpExporter())
+    .WithMetrics(metrics => metrics
+        .AddRequestBatcherInstrumentation()
+        .AddOtlpExporter());
+```
+
+`RequestBatcher.Execute` 是调用方当前 span 下的 `Internal` span，覆盖调用方可见的完整过程，包括准入、容量等待、队列停留、
+Handler 执行和结果完成。每个实际分发的非空批次都会创建独立的 `RequestBatcher.ProcessBatch` `Consumer` 根 span，并通过
+link 关联真正贡献请求的 `Execute` span；Handler 创建的数据库或 HTTP span 是该批次 span 的子 span。
+
+命名注册会在 span 基础名后追加一个空格和公开名称，例如 `RequestBatcher.Execute pricing-queries` 和
+`RequestBatcher.ProcessBatch pricing-queries`，同时写入 `requestbatcher.name`。未命名注册保留基础名称并省略此 tag。
+Link 表示跨队列的因果关系，不代表共享父 span、Trace ID 或执行顺序；队列只传递 `ActivityContext`，需要的请求 scope、baggage
+和其他 `AsyncLocal` 状态应显式传递。
+
+![RequestBatcher 可观测性模型](https://raw.githubusercontent.com/eventhorizon-cli/RequestBatcher/main/docs/diagrams/observability.svg)
+
+对应的 `MeterProviderBuilder` 扩展会注册 `RequestBatcher` meter，记录已接收请求、已处理请求、已处理批次数、批次大小和批次
+耗时。Metrics 只使用请求类型和配置的 batcher name 作为维度，不记录请求内容、租户值或 Partition Key；只有 meter provider 监听
+该 meter 时才会输出数据。Tracing 和内存中的待处理请求都是尽力而为，进程故障后不会恢复请求。
