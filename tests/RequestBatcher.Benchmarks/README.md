@@ -27,6 +27,8 @@ These benchmarks run in process without Docker. Some use simulated asynchronous 
 | [DeduplicationConcurrencyBenchmarks](InMemory/DeduplicationConcurrencyBenchmarks.cs) | Batch size, concurrency, duplicates and submission size; bulk reads, chunked WhenAll and per-key fan-out with simulated I/O. |
 | [TaskWhenAllOverheadBenchmarks](InMemory/TaskWhenAllOverheadBenchmarks.cs) | WhenAll versus awaiting already-started tasks, with completed and pending task sets. |
 | [DelayDownstreamOverheadBenchmarks](InMemory/DelayDownstreamOverheadBenchmarks.cs) | Direct and batched calls with simulated 50 ms I/O. Paced arrivals by default; set `REQUEST_BATCHER_TRAFFIC=burst` for bursts. |
+| [QueuePullBenchmarks](InMemory/QueuePullBenchmarks.cs) | One consumer drains 4,096 prefilled BufferQueue records; batch limits 32/128 and 1/16 partitions. See the [pull capacity evaluation](../../docs/evaluations/queue-pull-capacity/README.md). |
+| [DispatchCapacityBenchmarks](InMemory/DispatchCapacityBenchmarks.cs) | Direct full batches versus public explicit submission, synchronous/20 ms handlers, concurrency 8/32 and 1/16 partitions. |
 | [PartitionKeySubmissionBenchmarks](InMemory/PartitionKeySubmissionBenchmarks.cs) | Concurrent single submissions versus one explicit submission under partition-key routing. |
 | [ExplicitSubmissionBenchmarks](InMemory/ExplicitSubmissionBenchmarks.cs) | Explicit groups versus mixed single/group submissions. |
 | [NamedBatchingBenchmarks](InMemory/NamedBatchingBenchmarks.cs) | Named versus unnamed pipelines, single/list submissions and singleton/scoped handlers. |

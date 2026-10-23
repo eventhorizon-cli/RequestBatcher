@@ -11,6 +11,7 @@ Find reports by question; versions, workloads, and limitations are documented in
 
 ## Scheduling and External I/O
 
+- [queue-pull-capacity](queue-pull-capacity/README.md): isolates prefilled queue draining and compares the complete pipeline with direct full batches for synchronous and 20 ms asynchronous handlers.
 - [arrival-scheduling](arrival-scheduling/README.md): compares direct handlers with controlled `Task.Run` for async I/O, CPU, and synchronous blocking workloads (local PostgreSQL/Redis included).
 - [external-io-scheduling](external-io-scheduling/README.md): evaluates `Task.Run`, handler concurrency, and connection count for real HTTP calls (local HTTP).
 - [external-io-latency](external-io-latency/README.md): examines client time, server wait, connection pooling, and synchronous CPU prefixes (local HTTP).
