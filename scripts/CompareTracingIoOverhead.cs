@@ -13,11 +13,12 @@ internal static class CompareTracingIoOverhead
     {
         if (args is ["--help"])
         {
-            Console.WriteLine("CompareTracingIoOverhead [--compare-source [--baseline-source path]] [artifact-parent]\nCompares published 0.2.4 and 0.3.2 with identical 20 ms simulated downstream work. The 0.2.4 baseline runs two Disabled cases; 0.3.2 runs Disabled, Sample0, Sample1, Sample10, and Sample100. With --compare-source, compares the 0.3.2 package with a source snapshot using the ten current-version cases. --baseline-source replaces that package baseline with a snapshot of the specified repository tree. Retains source snapshots, package hashes, and BenchmarkDotNet reports.");
+            Console.WriteLine("CompareTracingIoOverhead [--compare-source [--include-legacy] [--baseline-source path]] [artifact-parent]\nCompares published 0.2.4 and 0.3.2 with identical 20 ms simulated downstream work. The 0.2.4 baseline runs two Disabled cases; 0.3.2 runs Disabled, Sample0, Sample1, Sample10, and Sample100. With --compare-source, compares the original baseline (the 0.3.2 package or --baseline-source) with the current source using the ten current-version cases. --include-legacy adds the two 0.2.4 Disabled cases to that source comparison and requires --compare-source. --baseline-source replaces the package baseline with a snapshot of the specified repository tree. Retains source snapshots, package hashes, and BenchmarkDotNet reports.");
             return 0;
         }
 
         var compareSource = false;
+        var includeLegacy = false;
         string? baselineSource = null;
         string? parentArgument = null;
         for (var index = 0; index < args.Length; index++)
@@ -26,6 +27,12 @@ internal static class CompareTracingIoOverhead
             if (argument == "--compare-source" && !compareSource)
             {
                 compareSource = true;
+                continue;
+            }
+
+            if (argument == "--include-legacy" && !includeLegacy)
+            {
+                includeLegacy = true;
                 continue;
             }
 
@@ -51,6 +58,12 @@ internal static class CompareTracingIoOverhead
             return 2;
         }
 
+        if (includeLegacy && !compareSource)
+        {
+            Console.Error.WriteLine("--include-legacy requires --compare-source.");
+            return 2;
+        }
+
         try
         {
             var repo = Path.GetFullPath(Path.Combine(Path.GetDirectoryName(SourceFile())!, ".."));
@@ -69,13 +82,7 @@ internal static class CompareTracingIoOverhead
             }
 
             var scenarios = compareSource
-                ? new[]
-                {
-                    baselineSource is null
-                        ? new Scenario("0.3.2-package", "0.3.2", IsSource: false)
-                        : new Scenario("baseline-source", PackageVersion: null, IsSource: true, "baseline-source-tree"),
-                    new Scenario("source", PackageVersion: null, IsSource: true, "source-tree"),
-                }
+                ? CreateSourceComparisonScenarios(includeLegacy, baselineSource)
                 : new[]
                 {
                     new Scenario("0.2.4", "0.2.4", IsSource: false),
@@ -138,17 +145,16 @@ internal static class CompareTracingIoOverhead
                 }
                 await RunAsync(projectDirectory, artifacts,
                     ["run", "--project", project, "--configuration", "Release", "--no-restore", "--",
-                        "--filter", scenario.PackageVersion == "0.2.4" ? "*Disabled*" : "*TracingIoOverheadBenchmarks*",
+                        "--filter", GetBenchmarkFilter(scenario),
                         "--artifacts", Path.Combine(projectDirectory, "results")]).ConfigureAwait(false);
                 var reports = Directory.GetFiles(Path.Combine(projectDirectory, "results"), "*-report.csv", SearchOption.AllDirectories);
-                var expectedRows = scenario.PackageVersion == "0.2.4" ? 2 : 10;
                 var reportRows = reports.Sum(path =>
                     File.ReadLines(path).Skip(1).Count(line => !string.IsNullOrWhiteSpace(line)));
-                if (reports.Length == 0 || reportRows != expectedRows ||
+                if (reports.Length == 0 || reportRows != scenario.ExpectedRows ||
                     reports.Any(path => File.ReadAllText(path).Contains("NA", StringComparison.Ordinal)))
                 {
                     throw new InvalidOperationException(
-                        $"Missing or failed benchmark results for {scenario.Name}: found {reportRows} data rows, expected {expectedRows}.");
+                        $"Missing or failed benchmark results for {scenario.Name}: found {reportRows} data rows, expected {scenario.ExpectedRows}.");
                 }
             }
 
@@ -229,7 +235,29 @@ internal static class CompareTracingIoOverhead
         }
     }
 
-    private sealed record Scenario(string Name, string? PackageVersion, bool IsSource, string? SourceDirectory = null);
+    private static Scenario[] CreateSourceComparisonScenarios(bool includeLegacy, string? baselineSource)
+    {
+        var baseline = baselineSource is null
+            ? new Scenario("0.3.2-package", "0.3.2", IsSource: false)
+            : new Scenario("baseline-source", PackageVersion: null, IsSource: true, "baseline-source-tree");
+        var source = new Scenario("source", PackageVersion: null, IsSource: true, "source-tree");
+
+        return includeLegacy
+            ? [new Scenario("0.2.4", "0.2.4", IsSource: false), baseline, source]
+            : [baseline, source];
+    }
+
+    private static string GetBenchmarkFilter(Scenario scenario) =>
+        scenario.PackageVersion == "0.2.4" ? "*Disabled*" : "*TracingIoOverheadBenchmarks*";
+
+    private sealed record Scenario(
+        string Name,
+        string? PackageVersion,
+        bool IsSource,
+        string? SourceDirectory = null)
+    {
+        public int ExpectedRows => PackageVersion == "0.2.4" ? 2 : 10;
+    }
 
     private static string SourceFile([CallerFilePath] string path = "") => path;
 }

@@ -54,8 +54,9 @@ converts a pending wait with `AsTask().WaitAsync(cancellationToken)` to support 
 That source's reuse is tied to one consumer's sequential wait lifecycle. Request submissions can overlap, and their
 public Tasks support aggregation and multiple awaits; reusing their completion sources would require a separate
 ownership and consumption protocol. The ordinary internal ValueTask prototype does not provide that reuse, as the
-allocation measurements show. Keep the current Task bridge and avoid introducing a completion pool without measured
-benefit and lifecycle coverage.
+allocation measurements show. These wrapper-only measurements do not justify replacing the Task bridge with an
+ordinary ValueTask helper or introducing a completion pool. Sharing the underlying completion source is a separate
+structural change and requires its own end-to-end measurement.
 
 Raw output is retained in [completion-benchmark.csv](completion-benchmark.csv) and
 [completion-benchmark.txt](completion-benchmark.txt). The source is
@@ -68,3 +69,48 @@ dotnet run --project tests/RequestBatcher.Benchmarks/RequestBatcher.Benchmarks.c
   --configuration Release -- \
   --filter '*TracingCompletionBenchmarks*'
 ```
+
+## StackExchange.Redis completion-path review
+
+Source review uses commit `9a1fabe1cf377ce20e6d0974d33dd828dfb97225`, resolved from `main` on 2026-10-23.
+This is a candidate for a structural optimization, not a measured replacement for the current completion bridge.
+
+- [TaskResultBox<T>](https://github.com/StackExchange/StackExchange.Redis/blob/9a1fabe1cf377ce20e6d0974d33dd828dfb97225/src/StackExchange.Redis/ResultBox.cs)
+  implements the internal result-box interface and inherits TaskCompletionSource<T>. The same object accepts
+  the result and exposes the caller's Task. Storing the outcome and publishing it to continuations are separate steps;
+  the asynchronous result box is not recycled.
+- [Message.Complete](https://github.com/StackExchange/StackExchange.Redis/blob/9a1fabe1cf377ce20e6d0974d33dd828dfb97225/src/StackExchange.Redis/Message.cs#L576)
+  atomically takes the result box, records profiling completion, and then activates its continuations. This demonstrates
+  an observation point before result publication without an additional Task that waits solely for profiling cleanup.
+  Redis profiling is not evidence that all OpenTelemetry execution-context requirements are automatically satisfied.
+- [ExecuteAsyncImpl](https://github.com/StackExchange/StackExchange.Redis/blob/9a1fabe1cf377ce20e6d0974d33dd828dfb97225/src/StackExchange.Redis/ConnectionMultiplexer.cs#L2783)
+  returns the result-box Task when submission completes synchronously. Only an incomplete write uses an async helper
+  that waits for writing and then the response. Synchronous submission does not require a synchronously available response;
+  the slow path can still allocate another Task.
+
+RequestBatcher already has a corresponding PendingBatchRequest -> IRequestCompletion -> Task chain. The candidate
+change is to perform tracing completion before publishing that existing result, instead of awaiting it through a second
+completion source. Keep Activity, link handling, and sampling decisions in Diagnostics behind a narrow internal
+completion notification. A traced completion implementation can avoid adding observation state to ordinary completions.
+Retain RunContinuationsAsynchronously, preserve exactly-once ownership, and do not pool caller-visible completion sources.
+
+The integration boundary needs more than a callback on each pending item:
+
+- Rejection, pre-cancellation, enumeration failure, and empty submissions can finish before a pending item exists.
+- Group submissions must publish only after every item finishes, retaining the complete exception set and cancellation
+  semantics. A group may span multiple handler invocations.
+- Response extraction and response-array construction occur outside the coordinator's completion today. The final
+  observable result must include those operations and their failures before the Execute span ends.
+- Capacity waiting introduces producer cleanup and wrapper Tasks. Their ordering must be audited separately; removing
+  a tracing wrapper does not prove that producer wrappers are removable.
+- The current bridge captures ExecutionContext for tracing completion. Moving completion onto a consumer or cancellation
+  thread must preserve the required ambient-context behavior and restore that thread's Activity.Current. Remaining
+  context capture or restoration costs must be measured rather than assumed eliminated.
+
+Validate success, multiple faults, faulted OperationCanceledException, cancellation tokens, cancellation/dispatch races,
+shutdown, response failures, and span/link visibility before the caller's Task completes. Compare tracing disabled and
+0%, partial, and 100% sampling with both single and group submissions in the existing 20 ms workload. Include a capacity
+wait case. The earlier Task/ValueTask/callback benchmark retains the extra completion source in every strategy, so it does
+not answer whether this shared-completion design saves allocations. The subsequent
+[shared completion evaluation](shared-completion.md) records the implementation, allocation investigation, and matched
+end-to-end results, including the producer and response-group paths that still retain a completion bridge.

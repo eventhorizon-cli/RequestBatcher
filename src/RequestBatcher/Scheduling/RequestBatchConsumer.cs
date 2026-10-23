@@ -10,8 +10,8 @@ internal sealed class RequestBatchConsumer<TRequest>(
     string requestTypeName,
     string? batcherName = null)
 {
-    private static readonly string _metricRequestTypeName =
-        RequestBatcherMetrics.GetMetricRequestTypeName(typeof(TRequest));
+    private static readonly string _telemetryRequestTypeName =
+        RequestBatcherRequestType.GetName(typeof(TRequest));
 
     internal async ValueTask ExecuteAsync(
         IReadOnlyList<PendingBatchRequest<TRequest>> bufferedRequests,
@@ -24,8 +24,8 @@ internal sealed class RequestBatchConsumer<TRequest>(
         }
 
         var requests = CreateHandlerInput(activeRequests);
-        using var activity = RequestBatcherTracing.StartBatch(requestTypeName, activeRequests, batcherName);
-        var metrics = RequestBatcherMetrics.StartBatch(_metricRequestTypeName, batcherName, requests.Length);
+        using var activity = RequestBatcherTracing.StartBatch(_telemetryRequestTypeName, activeRequests, batcherName);
+        var metrics = RequestBatcherMetrics.StartBatch(_telemetryRequestTypeName, batcherName, requests.Length);
         Exception? failure = null;
 
         try

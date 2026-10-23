@@ -52,19 +52,6 @@ internal static class RequestBatcherMetrics
         return new BatchScope(requestTypeName, batcherName, count, Stopwatch.GetTimestamp());
     }
 
-    internal static string GetMetricRequestTypeName(Type requestType)
-    {
-        ArgumentNullException.ThrowIfNull(requestType);
-
-        if (requestType.IsGenericType &&
-            requestType.GetGenericTypeDefinition() == typeof(RequestBatchEntry<,>))
-        {
-            requestType = requestType.GetGenericArguments()[0];
-        }
-
-        return requestType.Name;
-    }
-
     private static void Add(Counter<long> instrument, long value, string requestTypeName, string? batcherName)
     {
         var tags = new TagList { { "requestbatcher.request.type", requestTypeName } };

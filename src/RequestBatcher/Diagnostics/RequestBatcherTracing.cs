@@ -13,14 +13,32 @@ internal static class RequestBatcherTracing
     public static Task TraceCall<TState>(
         RequestBatcherTraceMetadata metadata,
         TState state,
-        Func<TState, SubmissionTraceContext?, Task> submit)
+        Func<TState, SubmissionTraceContext?, Task> submit) =>
+        TraceCall(metadata, (state, submit), static (args, context, _) => args.submit(args.state, context), observeCompletion: false);
+
+    public static Task<TResult> TraceCall<TState, TResult>(
+        RequestBatcherTraceMetadata metadata,
+        TState state,
+        Func<TState, SubmissionTraceContext?, Task<TResult>> submit) =>
+        TraceCall(metadata, (state, submit), static (args, context, _) => args.submit(args.state, context), observeCompletion: false);
+
+    public static Task TraceCall<TState>(
+        RequestBatcherTraceMetadata metadata,
+        TState state,
+        Func<TState, SubmissionTraceContext?, IRequestCompletionObserver?, Task> submit,
+        bool observeCompletion = true)
     {
         var parent = Activity.Current;
         var activity = StartCall(metadata);
         var context = CreateContext(activity, parent);
+        var observer = activity is null || !observeCompletion ? null : new CallCompletionObserver(activity, context);
         try
         {
-            var task = submit(state, context);
+            var task = submit(state, context, observer);
+            if (observer?.TryAttach(task) == true)
+            {
+                return task;
+            }
             if (activity is null)
             {
                 return task;
@@ -38,6 +56,7 @@ internal static class RequestBatcherTracing
         }
         catch (Exception exception)
         {
+            observer?.TryAttach(null);
             RecordFailure(activity, exception);
             if (activity is not null)
             {
@@ -56,14 +75,20 @@ internal static class RequestBatcherTracing
     public static Task<TResult> TraceCall<TState, TResult>(
         RequestBatcherTraceMetadata metadata,
         TState state,
-        Func<TState, SubmissionTraceContext?, Task<TResult>> submit)
+        Func<TState, SubmissionTraceContext?, IRequestCompletionObserver?, Task<TResult>> submit,
+        bool observeCompletion = true)
     {
         var parent = Activity.Current;
         var activity = StartCall(metadata);
         var context = CreateContext(activity, parent);
+        var observer = activity is null || !observeCompletion ? null : new CallCompletionObserver(activity, context);
         try
         {
-            var task = submit(state, context);
+            var task = submit(state, context, observer);
+            if (observer?.TryAttach(task) == true)
+            {
+                return task;
+            }
             if (activity is null)
             {
                 return task;
@@ -81,6 +106,7 @@ internal static class RequestBatcherTracing
         }
         catch (Exception exception)
         {
+            observer?.TryAttach(null);
             RecordFailure(activity, exception);
             if (activity is not null)
             {

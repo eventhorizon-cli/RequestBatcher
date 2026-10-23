@@ -1,0 +1,2 @@
+Allocation probe: Mode=Sample0, Waves=100, Requests=102400, AllocatedBytes=131485424, BytesPerWave=1314854.24, BytesPerRequest=1284.04
+Tracing I/O validation: Benchmark=SingleSubmissionsAsync, ListenerMode=Sample0, Waves=110, MeanActualRoundTripMilliseconds=105.985, MeanHandlerDelayMilliseconds=20.955, MeanBatchCalls=38.091, MeanItems=1024.000, MeanItemsPerBatch=26.883, SamplingDecisions=116830, SampledSpans=0, ObservedSamplingPercent=0.000

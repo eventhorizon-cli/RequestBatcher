@@ -40,11 +40,13 @@ RequestBatcher 基于 [BufferQueue](https://github.com/eventhorizon-cli/BufferQu
 应用无需单独注册或配置它。
 
 这种批次处理可以理解为**机会式攒批（opportunistic batching）**：请求写入 BufferQueue 后会发出 push 通知，唤醒空闲的消费流程。
-消费流程取得空闲执行名额后，通过 pull API 拉取当时已经排队的请求；它不会为了凑满 `BatchSize` 而等待固定时间窗口。
+消费流程先占用一个执行名额，再通过 pull API 从一个 Partition 拉取最多 `BatchSize` 条请求（默认 128 条），随后分发这一批。
+如果当前不足一批，就直接取出已有请求，不额外等待凑满。
 
 调用方通过 DI 获取 `IRequestBatcher<TRequest>` 或 `IRequestBatcher<TRequest, TResponse>`，提交请求并等待各自的结果。
 
 调度循环分发一个批次后会继续运行。只要还有空闲名额，就可以继续拉取和分发下一批，无需等待刚分发的批次完成。
+每一批独占一个执行名额，处理结束后归还。
 
 **只有所有分配的 Partition 都没有数据时，才等待下一次 push 通知。**
 
@@ -61,6 +63,31 @@ RequestBatcher 基于 [BufferQueue](https://github.com/eventhorizon-cli/BufferQu
 > **调用方无需先收集请求，也能获得批量处理。** 多个调用方可以并发地各自提交一个
 > `TRequest`；RequestBatcher 会将同一 Partition 中已排队的零散请求合并为最多 `BatchSize` 项的处理批次。
 > `ExecuteAsync(IEnumerable<TRequest>)` 只是额外的提交方式，并不是产生批量处理的前提。
+
+## 适用场景
+
+当请求彼此独立、可以接受在内存中短暂排队（不会等待凑满 `BatchSize`，只需等待全局执行名额可用），且下游一次
+处理多项更合适时，可以使用 RequestBatcher：
+
+- 能够使用批量 `INSERT`、`UPDATE` 或 `UPSERT` 的数据库写入；
+- 原生支持多项输入的缓存读写或下游 API；
+- 需要限制内部队列容量和下游并发量的短时流量突发；
+- 调用方取消时，只需要撤销尚未分发的请求；已分发的操作应继续执行并返回实际处理结果；
+- 可以在同一处理批次内合并相关请求，且正确性不依赖 Handler 执行顺序。
+
+数据库更新还需要注意事务边界：如果一次 Handler 调用只成功一部分会造成数据不一致，应由 Handler 在同一个事务中
+完成整批更新。RequestBatcher 只负责传递 Handler 的处理结果，不会回滚已经提交的数据。
+
+## 不适用场景
+
+RequestBatcher 既不是持久化后台队列，也不是事务协调器：
+
+- 已接收的请求必须在进程故障后仍可恢复。此时应使用持久化存储或可靠消息队列。
+- 操作必须随调用方事务一起提交或回滚。应将它留在原事务中。
+- 下游操作必须依赖自动重试，或副作用必须严格恰好一次（exactly-once）。RequestBatcher 不提供这些保证。
+- 下游操作必须等待最小批量凑齐，或者依赖固定的收集窗口。RequestBatcher 会直接处理当前已排队的请求。
+- 单个调用方断开、超时或取消后，正在执行的下游操作也必须立即停止。一个处理批次可能包含来自多个调用方的
+  请求，因此单个调用方的 `CancellationToken` 不会传给 Handler，也不能取消这个共享的 Handler 调用。
 
 ## 安装与 DI 注册
 
@@ -99,236 +126,6 @@ var quote = await batcher.ExecuteAsync(new PriceQuery(ProductId: 101));
 代码示例需要引入 `Microsoft.Extensions.DependencyInjection` 和 `RequestBatcher` 命名空间。下方[带返回值批处理](#带返回值批处理)定义了
 `PriceQuery`、`PriceQuote`、`PriceQueryHandler` 以及 `IPriceStore` 依赖。应用服务中推荐通过构造函数注入
 `IRequestBatcher<PriceQuery, PriceQuote?>`。
-
-## 命名批处理与基础类型请求
-
-请求可以直接使用商品 ID。多种操作使用相同请求类型时，通过 `batcherName` 重载区分，例如 `"price"` 和
-`"stock"` 都可以使用 `int`，各自拥有独立的 Handler、配置、队列容量和并发限制。命名注册可以与原有默认注册共存。
-
-```csharp
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Options;
-using RequestBatcher;
-
-services.AddRequestBatcher<int, decimal?, PriceByIdHandler>(
-    batcherName: "price",
-    handlerLifetime: ServiceLifetime.Scoped,
-    configure: options =>
-    {
-        options.BatchSize = 100;
-        options.MaxConcurrency = 4;
-        options.UsePartitionKey(id => id, partitionCount: 8);
-    });
-
-var batcher = serviceProvider.GetRequiredKeyedService<IRequestBatcher<int, decimal?>>("price");
-var prices = await batcher.ExecuteAsync(new[] { 101, 102, 101 });
-var options = serviceProvider.GetRequiredService<IOptionsMonitor<RequestBatchOptions<int>>>().Get("price");
-```
-
-下面的 Handler 复用带返回值示例中的 `IPriceStore`，其实现仍需要在应用容器中注册：
-
-```csharp
-public sealed class PriceByIdHandler(IPriceStore store) : IRequestBatchHandler<int, decimal?>
-{
-    public async ValueTask HandleAsync(
-        IReadOnlyList<RequestBatchEntry<int, decimal?>> entries,
-        CancellationToken cancellationToken = default)
-    {
-        var ids = entries.Select(entry => (long)entry.Request).Distinct().ToArray();
-        var prices = await store.FindAsync(ids, cancellationToken).ConfigureAwait(false);
-        var pricesById = prices.ToDictionary(price => price.ProductId);
-        entries.SetResponses(id => pricesById.GetValueOrDefault(id)?.Price);
-    }
-}
-```
-
-结果按输入顺序返回，重复 ID 各自保留一个结果，未找到的商品返回 `null`。输入列表仍可能被拆成多个 Handler 批次。
-构造函数注入或 ASP.NET Core Controller Action 参数注入时，都可以在 Batcher 参数上标注
-`[FromKeyedServices("price")]`。参见 [.NET 依赖注入中的 keyed services](https://learn.microsoft.com/en-us/dotnet/core/extensions/dependency-injection/overview#keyed-services)
-和 [使用 `FromKeyedServices` 注入 Action 参数](https://learn.microsoft.com/en-us/aspnet/core/mvc/controllers/dependency-injection?view=aspnetcore-8.0#action-injection-with-fromkeyedservices)。
-
-在应用服务构造函数中注入命名 Batcher，并通过 `services.AddScoped<PriceLookup>()` 注册该服务。
-属性中的 `"price"` 与注册 Batcher 时使用的名称一致：
-
-```csharp
-using Microsoft.Extensions.DependencyInjection;
-using RequestBatcher;
-
-public sealed class PriceLookup(
-    [FromKeyedServices("price")] IRequestBatcher<int, decimal?> batcher)
-{
-    public Task<IReadOnlyList<decimal?>> FindAsync(
-        IEnumerable<int> productIds,
-        CancellationToken cancellationToken = default) =>
-        batcher.ExecuteAsync(productIds, cancellationToken);
-}
-```
-
-在 MVC Controller Action 参数中也可以使用同一个属性：
-
-```csharp
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.DependencyInjection;
-using RequestBatcher;
-
-[ApiController]
-[Route("api/prices")]
-public sealed class PricesController : ControllerBase
-{
-    [HttpPost("query")]
-    public Task<IReadOnlyList<decimal?>> FindAsync(
-        [FromBody] int[] productIds,
-        [FromKeyedServices("price")] IRequestBatcher<int, decimal?> batcher,
-        CancellationToken cancellationToken) =>
-        batcher.ExecuteAsync(productIds, cancellationToken);
-}
-```
-
-使用 MVC Controller 时注册 `AddControllers()` 并调用 `MapControllers()`。当前 PostgreSQL 示例使用 Minimal API，
-同样在 endpoint 参数上标注 `[FromKeyedServices("price")]`。无返回值重载也支持 `batcherName`。
-
-名称区分大小写，不能为 `null`、空字符串或纯空白。同一请求类型与名称只能注册一条管线，包括不同返回类型的情况。
-默认服务继续使用原有不带名称的重载。配置在注册时确定，可以通过 named options 查看，不支持运行时重配队列。
-`UsePartitionKey` 仅负责选定 Batcher 内部的请求路由，不负责选择 Batcher，也不保证 Handler 批次串行执行。
-
-[命名与默认注册的性能对比](docs/evaluations/named-batching/README.md)保持请求、响应类型、Handler 和批处理配置一致，
-分别测量 Singleton、Scoped Handler 下的逐条提交与显式批量提交。
-
-可运行的 [PostgreSQL 示例](samples/RequestBatcher.Deduplication) 使用名为 `"price"` 的 `int` 请求和 `decimal?`
-响应，查询时将 ID 扩展为 PostgreSQL `bigint`，并提供 `POST /prices/query` 接收 JSON `int[]`。
-
-## 委托 Handler
-
-委托 Handler 适合逻辑较简单的批处理场景，例如批量查询和结果回填。在 `ExecuteAsync` 调用处使用 static lambda、
-static 匿名方法、static 局部函数或 static 方法组，可以将请求提交与处理逻辑放在一起，便于结合调用上下文阅读和修改。
-处理逻辑较复杂，或需要多处复用、独立组织测试时，更适合使用单独的 `IRequestBatchHandler` 类。
-
-**委托 Handler 已针对稳定调用做过性能优化**：签名检查和通过表达式树编译强类型调用器只发生在首次绑定；
-后续提交优先通过引用比较校验委托，批次执行复用缓存的调用器，不进行反射调用、`DynamicInvoke` 或参数数组构造。
-自动绑定依赖动态代码，不支持 NativeAOT 或裁剪。
-
-现有相同配置的内存 benchmark 中，委托与传统 Handler 的逐条提交均值相差约 1%，内存分配接近，
-未观察到明显的稳定调用性能退化。该结果不包含首次绑定的编译开销，具体配置和结果见
-[性能对比](docs/evaluations/delegate-handlers/README.md)。
-
-**Handler 必须使用静态实现，不捕获局部变量或实例状态**。lambda、匿名方法和局部函数要显式加 `static`，
-方法组应指向普通或泛型静态方法；所需服务通过参数注入。
-委托可以直接传入，也可以通过变量、字段、参数、属性或工厂传递，支持显式创建、括号和类型转换。
-
-使用 `AddDelegateRequestBatcher` 注册请求、响应类型及批处理选项，不需要提供 Handler 类型：
-
-```csharp
-using Microsoft.Extensions.DependencyInjection;
-using RequestBatcher;
-
-services.AddKeyedScoped<IPriceStore, PriceStore>("catalog");
-services.AddDelegateRequestBatcher<int, decimal?>(
-    batcherName: "price",
-    configure: options =>
-    {
-        options.BatchSize = 100;
-        options.MaxConcurrency = 4;
-    });
-
-var batcher = serviceProvider.GetRequiredKeyedService<IRequestBatcher<int, decimal?>>("price");
-var prices = await batcher.ExecuteAsync(
-    new[] { 101, 102, 101 },
-    static async ValueTask (
-        IReadOnlyList<RequestBatchEntry<int, decimal?>> entries,
-        [FromKeyedServices("catalog")] IPriceStore store,
-        CancellationToken batchCancellation) =>
-    {
-        var ids = entries.Select(entry => (long)entry.Request).Distinct().ToArray();
-        var rows = await store.FindAsync(ids, batchCancellation).ConfigureAwait(false);
-        var pricesById = rows.ToDictionary(row => row.ProductId);
-        entries.SetResponses(id => pricesById.GetValueOrDefault(id)?.Price);
-    });
-```
-
-也可以将上面的 lambda 替换为静态方法或静态局部函数。同一管线选择其中一种写法：
-
-```csharp
-var price = await batcher.ExecuteAsync(101, HandlePricesAsync);
-
-static async ValueTask HandlePricesAsync(
-    IReadOnlyList<RequestBatchEntry<int, decimal?>> entries,
-    [FromKeyedServices("catalog")] IPriceStore store,
-    CancellationToken batchCancellation)
-{
-    var ids = entries.Select(entry => (long)entry.Request).Distinct();
-    var rows = await store.FindAsync(ids, batchCancellation).ConfigureAwait(false);
-    var pricesById = rows.ToDictionary(row => row.ProductId);
-    entries.SetResponses(id => pricesById.GetValueOrDefault(id)?.Price);
-}
-```
-
-这里复用下方带返回值示例中的 `IPriceStore`，使用时需要注册自己的实现，示例中写作 `PriceStore`。
-无返回值时，使用 `AddDelegateRequestBatcher<TRequest>()` 注册，lambda 首参数改为 `IReadOnlyList<TRequest>`。
-两种模式都通过 `ExecuteAsync` 扩展方法支持单条和显式列表提交。
-
-对于 `int`、`string` 这类容易在多个业务中复用的请求类型，建议用 `batcherName` 区分业务管线。
-例如，价格查询使用 `"price"`，其他同样以 `int` 为请求类型的业务使用各自的名称，避免共用管线时发生委托绑定冲突。
-省略 `batcherName` 时，注册的是默认管线。
-
-同一请求类型与名称只能选择一种注册模式：委托模式每次提交都传入 handler；
-原有 Handler 类型继续使用原有重载，`IRequestBatcher` 接口不增加成员。
-
-首次有效调用为该管线绑定唯一委托，后续传入相等的委托会复用绑定；传入不同委托会在入队前报错。
-不同的 handler 目标即使代码内容相同，也属于不同 Handler，应使用不同的 `batcherName`。并发首次调用只会绑定一次。
-委托由管线以单例持有，服务参数在每个实际执行批次中注入，不捕获调用方的请求作用域。
-
-首参数必须是对应的批次列表类型。其余参数默认从 DI 解析必需服务，`[FromKeyedServices(key)]` 选择 keyed 服务；
-必须显式指定 key，不支持继承 key。
-Web 应用也可以标注 `[FromServices]`，普通服务按约定注入，因此此标注可省略。Handler 可以完全省略批次生命周期的
-`CancellationToken`；如果声明，只能声明一个，且不得写 `= default` 等默认值。这个注入的 token 由批次共享，
-与调用方可选的 `ExecuteAsync` `cancellationToken` 参数不同。支持返回 `void`、`Task` 或 `ValueTask`，拒绝 `async void`
-和带返回值的 Task/ValueTask。每个响应 entry 仍需设置结果；列表即使被拆成多批，也会保留输入顺序、重复和缺失项。
-
-委托 Handler 和绑定的委托始终是每条管线独立的单例，因此注册不提供 `ServiceLifetime` 参数。注入服务仍遵循各自的
-DI 生命周期：Singleton 在容器内共享，Scoped 在同一批次内共享，Transient 每个参数分别解析。单例 Handler 不缓存
-解析后的服务实例。原有类型 Handler 注册继续遵循显式指定的生命周期。
-
-有服务参数时，每批创建并异步释放独立 DI scope，释放完成后调用方才收到完成结果；没有服务参数则不创建 scope。
-
-**内置 Analyzer 提供基础的编译期检查**，两个诊断默认都作为编译错误报告：
-
-- `RB0001`：能确定 handler 来自非 static lambda、非静态局部函数或实例方法时，提示改用静态实现。
-- `RB0002`：检查能确定的委托签名，包括批次列表类型、返回类型、参数修饰符和默认值，
-  以及 `CancellationToken` 和 `[FromKeyedServices]` 的使用限制。
-
-委托经过参数、属性或工厂传递后，Analyzer 可能无法确定它的目标。这类写法仍然允许使用，
-调用方应保证最终传入的是静态实现。运行时会验证实际签名、服务绑定和委托是否与已绑定的委托一致，
-但无法可靠区分源码中的 static lambda 与不捕获变量的普通 lambda。
-原有 Handler 调用不受影响，使用方也可以禁用 Analyzer。详见[委托 Handler 设计](docs/delegate-handlers-design.md)。
-
-[独立的委托版 PostgreSQL 示例](samples/RequestBatcher.Delegates)使用委托 Handler 完成价格写入和
-`POST /prices/query` 列表查询，每个 static lambda 都从批次 scope 注入 keyed scoped `PriceStore`。
-[原有示例](samples/RequestBatcher.Deduplication)继续单独展示 Handler 类的写法。
-
-## 适用场景
-
-当请求彼此独立、可以接受在内存中短暂排队（不会等待凑满 `BatchSize`，只需等待全局执行名额可用），且下游一次
-处理多项更合适时，可以使用 RequestBatcher：
-
-- 能够使用批量 `INSERT`、`UPDATE` 或 `UPSERT` 的数据库写入；
-- 原生支持多项输入的缓存读写或下游 API；
-- 需要限制内部队列容量和下游并发量的短时流量突发；
-- 调用方取消时，只需要撤销尚未分发的请求；已分发的操作应继续执行并返回实际处理结果；
-- 可以在同一处理批次内合并相关请求，且正确性不依赖 Handler 执行顺序。
-
-数据库更新还需要注意事务边界：如果一次 Handler 调用只成功一部分会造成数据不一致，应由 Handler 在同一个事务中
-完成整批更新。RequestBatcher 只负责传递 Handler 的处理结果，不会回滚已经提交的数据。
-
-## 不适用场景
-
-RequestBatcher 既不是持久化后台队列，也不是事务协调器：
-
-- 已接收的请求必须在进程故障后仍可恢复。此时应使用持久化存储或可靠消息队列。
-- 操作必须随调用方事务一起提交或回滚。应将它留在原事务中。
-- 下游操作必须依赖自动重试，或副作用必须严格恰好一次（exactly-once）。RequestBatcher 不提供这些保证。
-- 下游操作必须等待最小批量凑齐，或者依赖固定的收集窗口。RequestBatcher 会直接处理当前已排队的请求。
-- 单个调用方断开、超时或取消后，正在执行的下游操作也必须立即停止。一个处理批次可能包含来自多个调用方的
-  请求，因此单个调用方的 `CancellationToken` 不会传给 Handler，也不能取消这个共享的 Handler 调用。
 
 ## API 概览
 
@@ -599,6 +396,265 @@ Partition 路由拆成多个处理批次。
 | 失败 | 这次 Handler 调用失败时，该处理批次中的所有请求都会失败。 | 部分请求可能已经成功，其他处理批次仍可能失败；整组 `Task` 会失败，但不会回滚已经成功的操作。 |
 | 取消 | 只能取消尚未交给 Handler 的请求。 | 同一个 `CancellationToken` 用于整组中的每个请求；尚未分发的请求可以取消，已分发的请求继续返回实际结果。 |
 
+## 命名批处理与基础类型请求
+
+请求可以直接使用商品 ID。多种操作使用相同请求类型时，通过 `batcherName` 重载区分，例如 `"price"` 和
+`"stock"` 都可以使用 `int`，各自拥有独立的 Handler、配置、队列容量和并发限制。命名注册可以与原有默认注册共存。
+
+```csharp
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using RequestBatcher;
+
+services.AddRequestBatcher<int, decimal?, PriceByIdHandler>(
+    batcherName: "price",
+    handlerLifetime: ServiceLifetime.Scoped,
+    configure: options =>
+    {
+        options.BatchSize = 100;
+        options.MaxConcurrency = 4;
+        options.UsePartitionKey(id => id, partitionCount: 8);
+    });
+
+var batcher = serviceProvider.GetRequiredKeyedService<IRequestBatcher<int, decimal?>>("price");
+var prices = await batcher.ExecuteAsync(new[] { 101, 102, 101 });
+var options = serviceProvider.GetRequiredService<IOptionsMonitor<RequestBatchOptions<int>>>().Get("price");
+```
+
+下面的 Handler 复用带返回值示例中的 `IPriceStore`，其实现仍需要在应用容器中注册：
+
+```csharp
+public sealed class PriceByIdHandler(IPriceStore store) : IRequestBatchHandler<int, decimal?>
+{
+    public async ValueTask HandleAsync(
+        IReadOnlyList<RequestBatchEntry<int, decimal?>> entries,
+        CancellationToken cancellationToken = default)
+    {
+        var ids = entries.Select(entry => (long)entry.Request).Distinct().ToArray();
+        var prices = await store.FindAsync(ids, cancellationToken).ConfigureAwait(false);
+        var pricesById = prices.ToDictionary(price => price.ProductId);
+        entries.SetResponses(id => pricesById.GetValueOrDefault(id)?.Price);
+    }
+}
+```
+
+结果按输入顺序返回，重复 ID 各自保留一个结果，未找到的商品返回 `null`。输入列表仍可能被拆成多个 Handler 批次。
+构造函数注入或 ASP.NET Core Controller Action 参数注入时，都可以在 Batcher 参数上标注
+`[FromKeyedServices("price")]`。参见 [.NET 依赖注入中的 keyed services](https://learn.microsoft.com/en-us/dotnet/core/extensions/dependency-injection/overview#keyed-services)
+和 [使用 `FromKeyedServices` 注入 Action 参数](https://learn.microsoft.com/en-us/aspnet/core/mvc/controllers/dependency-injection?view=aspnetcore-8.0#action-injection-with-fromkeyedservices)。
+
+在应用服务构造函数中注入命名 Batcher，并通过 `services.AddScoped<PriceLookup>()` 注册该服务。
+属性中的 `"price"` 与注册 Batcher 时使用的名称一致：
+
+```csharp
+using Microsoft.Extensions.DependencyInjection;
+using RequestBatcher;
+
+public sealed class PriceLookup(
+    [FromKeyedServices("price")] IRequestBatcher<int, decimal?> batcher)
+{
+    public Task<IReadOnlyList<decimal?>> FindAsync(
+        IEnumerable<int> productIds,
+        CancellationToken cancellationToken = default) =>
+        batcher.ExecuteAsync(productIds, cancellationToken);
+}
+```
+
+在 MVC Controller Action 参数中也可以使用同一个属性：
+
+```csharp
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
+using RequestBatcher;
+
+[ApiController]
+[Route("api/prices")]
+public sealed class PricesController : ControllerBase
+{
+    [HttpPost("query")]
+    public Task<IReadOnlyList<decimal?>> FindAsync(
+        [FromBody] int[] productIds,
+        [FromKeyedServices("price")] IRequestBatcher<int, decimal?> batcher,
+        CancellationToken cancellationToken) =>
+        batcher.ExecuteAsync(productIds, cancellationToken);
+}
+```
+
+使用 MVC Controller 时注册 `AddControllers()` 并调用 `MapControllers()`。当前 PostgreSQL 示例使用 Minimal API，
+同样在 endpoint 参数上标注 `[FromKeyedServices("price")]`。无返回值重载也支持 `batcherName`。
+
+名称区分大小写，不能为 `null`、空字符串或纯空白。同一请求类型与名称只能注册一条管线，包括不同返回类型的情况。
+默认服务继续使用原有不带名称的重载。配置在注册时确定，可以通过 named options 查看，不支持运行时重配队列。
+`UsePartitionKey` 仅负责选定 Batcher 内部的请求路由，不负责选择 Batcher，也不保证 Handler 批次串行执行。
+
+[命名与默认注册的性能对比](docs/evaluations/named-batching/README.md)保持请求、响应类型、Handler 和批处理配置一致，
+分别测量 Singleton、Scoped Handler 下的逐条提交与显式批量提交。
+
+可运行的 [PostgreSQL 示例](samples/RequestBatcher.Deduplication) 使用名为 `"price"` 的 `int` 请求和 `decimal?`
+响应，查询时将 ID 扩展为 PostgreSQL `bigint`，并提供 `POST /prices/query` 接收 JSON `int[]`。
+
+## 委托 Handler
+
+委托 Handler 适合逻辑较简单的批处理场景，例如批量查询和结果回填。在 `ExecuteAsync` 调用处使用 static lambda、
+static 匿名方法、static 局部函数或 static 方法组，可以将请求提交与处理逻辑放在一起，便于结合调用上下文阅读和修改。
+处理逻辑较复杂，或需要多处复用、独立组织测试时，更适合使用单独的 `IRequestBatchHandler` 类。
+
+**委托 Handler 已针对稳定调用做过性能优化**：签名检查和通过表达式树编译强类型调用器只发生在首次绑定；
+后续提交优先通过引用比较校验委托，批次执行复用缓存的调用器，不进行反射调用、`DynamicInvoke` 或参数数组构造。
+自动绑定依赖动态代码，不支持 NativeAOT 或裁剪。
+
+现有相同配置的内存 benchmark 中，委托与传统 Handler 的逐条提交均值相差约 1%，内存分配接近，
+未观察到明显的稳定调用性能退化。该结果不包含首次绑定的编译开销，具体配置和结果见
+[性能对比](docs/evaluations/delegate-handlers/README.md)。
+
+**Handler 必须使用静态实现，不捕获局部变量或实例状态**。lambda、匿名方法和局部函数要显式加 `static`，
+方法组应指向普通或泛型静态方法；所需服务通过参数注入。
+委托可以直接传入，也可以通过变量、字段、参数、属性或工厂传递，支持显式创建、括号和类型转换。
+
+使用 `AddDelegateRequestBatcher` 注册请求、响应类型及批处理选项，不需要提供 Handler 类型：
+
+```csharp
+using Microsoft.Extensions.DependencyInjection;
+using RequestBatcher;
+
+services.AddKeyedScoped<IPriceStore, PriceStore>("catalog");
+services.AddDelegateRequestBatcher<int, decimal?>(
+    batcherName: "price",
+    configure: options =>
+    {
+        options.BatchSize = 100;
+        options.MaxConcurrency = 4;
+    });
+
+var batcher = serviceProvider.GetRequiredKeyedService<IRequestBatcher<int, decimal?>>("price");
+var prices = await batcher.ExecuteAsync(
+    new[] { 101, 102, 101 },
+    static async ValueTask (
+        IReadOnlyList<RequestBatchEntry<int, decimal?>> entries,
+        [FromKeyedServices("catalog")] IPriceStore store,
+        CancellationToken batchCancellation) =>
+    {
+        var ids = entries.Select(entry => (long)entry.Request).Distinct().ToArray();
+        var rows = await store.FindAsync(ids, batchCancellation).ConfigureAwait(false);
+        var pricesById = rows.ToDictionary(row => row.ProductId);
+        entries.SetResponses(id => pricesById.GetValueOrDefault(id)?.Price);
+    });
+```
+
+也可以将上面的 lambda 替换为静态方法或静态局部函数。同一管线选择其中一种写法：
+
+```csharp
+var price = await batcher.ExecuteAsync(101, HandlePricesAsync);
+
+static async ValueTask HandlePricesAsync(
+    IReadOnlyList<RequestBatchEntry<int, decimal?>> entries,
+    [FromKeyedServices("catalog")] IPriceStore store,
+    CancellationToken batchCancellation)
+{
+    var ids = entries.Select(entry => (long)entry.Request).Distinct();
+    var rows = await store.FindAsync(ids, batchCancellation).ConfigureAwait(false);
+    var pricesById = rows.ToDictionary(row => row.ProductId);
+    entries.SetResponses(id => pricesById.GetValueOrDefault(id)?.Price);
+}
+```
+
+这里复用前文带返回值示例中的 `IPriceStore`，使用时需要注册自己的实现，示例中写作 `PriceStore`。
+无返回值时，使用 `AddDelegateRequestBatcher<TRequest>()` 注册，lambda 首参数改为 `IReadOnlyList<TRequest>`。
+两种模式都通过 `ExecuteAsync` 扩展方法支持单条和显式列表提交。
+
+对于 `int`、`string` 这类容易在多个业务中复用的请求类型，建议用 `batcherName` 区分业务管线。
+例如，价格查询使用 `"price"`，其他同样以 `int` 为请求类型的业务使用各自的名称，避免共用管线时发生委托绑定冲突。
+省略 `batcherName` 时，注册的是默认管线。
+
+同一请求类型与名称只能选择一种注册模式：委托模式每次提交都传入 handler；
+原有 Handler 类型继续使用原有重载，`IRequestBatcher` 接口不增加成员。
+
+首次有效调用为该管线绑定唯一委托，后续传入相等的委托会复用绑定；传入不同委托会在入队前报错。
+不同的 handler 目标即使代码内容相同，也属于不同 Handler，应使用不同的 `batcherName`。并发首次调用只会绑定一次。
+委托由管线以单例持有，服务参数在每个实际执行批次中注入，不捕获调用方的请求作用域。
+
+首参数必须是对应的批次列表类型。其余参数默认从 DI 解析必需服务，`[FromKeyedServices(key)]` 选择 keyed 服务；
+必须显式指定 key，不支持继承 key。
+Web 应用也可以标注 `[FromServices]`，普通服务按约定注入，因此此标注可省略。Handler 可以完全省略批次生命周期的
+`CancellationToken`；如果声明，只能声明一个，且不得写 `= default` 等默认值。这个注入的 token 由批次共享，
+与调用方可选的 `ExecuteAsync` `cancellationToken` 参数不同。支持返回 `void`、`Task` 或 `ValueTask`，拒绝 `async void`
+和带返回值的 Task/ValueTask。每个响应 entry 仍需设置结果；列表即使被拆成多批，也会保留输入顺序、重复和缺失项。
+
+委托 Handler 和绑定的委托始终是每条管线独立的单例，因此注册不提供 `ServiceLifetime` 参数。注入服务仍遵循各自的
+DI 生命周期：Singleton 在容器内共享，Scoped 在同一批次内共享，Transient 每个参数分别解析。单例 Handler 不缓存
+解析后的服务实例。原有类型 Handler 注册继续遵循显式指定的生命周期。
+
+有服务参数时，每批创建并异步释放独立 DI scope，释放完成后调用方才收到完成结果；没有服务参数则不创建 scope。
+
+**内置 Analyzer 提供基础的编译期检查**，两个诊断默认都作为编译错误报告：
+
+- `RB0001`：能确定 handler 来自非 static lambda、非静态局部函数或实例方法时，提示改用静态实现。
+- `RB0002`：检查能确定的委托签名，包括批次列表类型、返回类型、参数修饰符和默认值，
+  以及 `CancellationToken` 和 `[FromKeyedServices]` 的使用限制。
+
+委托经过参数、属性或工厂传递后，Analyzer 可能无法确定它的目标。这类写法仍然允许使用，
+调用方应保证最终传入的是静态实现。运行时会验证实际签名、服务绑定和委托是否与已绑定的委托一致，
+但无法可靠区分源码中的 static lambda 与不捕获变量的普通 lambda。
+原有 Handler 调用不受影响，使用方也可以禁用 Analyzer。详见[委托 Handler 设计](docs/delegate-handlers-design.md)。
+
+[独立的委托版 PostgreSQL 示例](samples/RequestBatcher.Delegates)使用委托 Handler 完成价格写入和
+`POST /prices/query` 列表查询，每个 static lambda 都从批次 scope 注入 keyed scoped `PriceStore`。
+[原有示例](samples/RequestBatcher.Deduplication)继续单独展示 Handler 类的写法。
+
+## 处理语义
+
+### 完成与失败
+
+- Handler 正常完成时，该处理批次中所有调用方的 `Task` 都会成功完成。
+- Handler 抛出异常时，这些调用方会收到原始异常。
+- RequestBatcher 不会自动重试失败的 Handler。
+- 显式批量重载会等待本次提交中的所有请求；只要涉及的某次 Handler 调用失败，最终 `Task` 就会失败。
+- 一次显式批量提交可能跨越多个 Handler 调用。如果其中多次调用失败，`await` 会按普通 `Task` 语义抛出其中一个
+  原始异常；所有不同的异常实例都可以从 `Task.Exception.InnerExceptions` 读取。同一次 Handler 异常即使影响
+  多个请求，也只记录一次。
+
+### 调用方取消
+
+调用方取消只能移除尚未交给 Handler 的请求。一旦 Handler 开始执行，RequestBatcher 会返回实际处理结果，而不会
+将调用方的 `Task` 改成已取消。这样可以避免取消状态掩盖已经发生的副作用。
+
+传给 Handler 的 `CancellationToken` 属于 RequestBatcher 自身的处理生命周期，不属于任何一个调用方。因此，
+一个调用方取消不会中止同一批中的其他请求。
+
+显式批量提交会将调用方传入的同一个 `CancellationToken` 应用于组内每个请求。因此取消后可能同时存在“尚未
+分发而取消”的请求和“已经分发并继续执行”的请求。返回的 `Task` 仍会等待全部请求；其中存在失败时最终状态为
+失败，否则只要有请求被取消，最终状态就是取消。已经完成的副作用不会回滚。
+
+### 容量与背压
+
+`MaxPendingRequests` 是内部 BufferQueue 中仍处于排队状态的请求容量上限。分发循环拉取批次时会自动提交消费进度，
+随后才启动 Handler。因此，除了排队容量外，最多还有 `MaxConcurrency * BatchSize` 个已拉取请求正在执行。它不限制
+一次显式提交的请求数量，也不限制正在等待容量的调用方数量：
+
+- `FullMode = Wait` 在队列空间不足时异步等待，并支持调用方在等待期间取消。
+- `Wait` 模式下，一组请求的数量不超过 `MaxPendingRequests` 时，会等到队列能容纳整组请求后一起入队；超过时，
+  按输入顺序分段，每段最多 `MaxPendingRequests` 个请求，等待队列腾出足够空间后依次入队。
+  中途取消时，已分发的请求仍会继续处理，尚未分发的请求会被取消。
+- `FullMode = Fail` 在队列剩余空间不足以容纳本次提交的全部请求时，立即拒绝整次提交，包括请求总数超过
+  `MaxPendingRequests` 的情况。此时返回的 `Task` 会失败，异常为 `RequestBatchQueueFullException`，本次提交的请求
+  均不会入队。
+
+### 停止与释放
+
+`DisposeAsync` 会停止接收新请求，处理完已经接收的所有提交（包括仍在等待容量的提交），然后释放协调器持有的资源。
+并发或重复调用共享同一次释放操作。通过 `AddRequestBatcher` 注册时，由应用容器负责异步释放。
+
+## 依赖注入与日志
+
+`AddRequestBatcher` 会将 Handler、协调器和内部 BufferQueue topic 注册到现有的 `IServiceCollection` 中。应用无需
+直接配置 BufferQueue，RequestBatcher 也不会创建嵌套的 Service Provider。
+
+`Scoped` 和 `Transient` Handler 会在每个处理批次专属的异步作用域中解析一次。`Singleton` Handler 会跨批次
+复用；当 `MaxConcurrency > 1` 时，它必须保证线程安全。
+
+日志会通过应用现有的 `Microsoft.Extensions.Logging` 管道写入，类别为
+`RequestBatchCoordinator<TRequest>`。Handler 异常会连同原始 `Exception` 一起记录，日志不会包含请求内容。
+
 ## 请求处理流程
 
 **内部队列的 Partition 数量不代表 Handler 并发数。** Partition 只用于组织请求的排队和路由；同时执行的 Handler
@@ -808,85 +864,16 @@ RequestBatcher 不提供全局、Partition 内或 Partition Key 级别的 Handle
 Handler 会在分发调用链上执行，直到完成或遇到尚未完成的异步等待。在此之前的 CPU 密集计算或同步阻塞会
 推迟其他批次的分发，即使仍有空闲执行名额。`MaxConcurrency` 是并发上限，不会自动将同步 Handler 代码并行化。
 
-## 处理语义
-
-### 完成与失败
-
-- Handler 正常完成时，该处理批次中所有调用方的 `Task` 都会成功完成。
-- Handler 抛出异常时，这些调用方会收到原始异常。
-- RequestBatcher 不会自动重试失败的 Handler。
-- 显式批量重载会等待本次提交中的所有请求；只要涉及的某次 Handler 调用失败，最终 `Task` 就会失败。
-- 一次显式批量提交可能跨越多个 Handler 调用。如果其中多次调用失败，`await` 会按普通 `Task` 语义抛出其中一个
-  原始异常；所有不同的异常实例都可以从 `Task.Exception.InnerExceptions` 读取。同一次 Handler 异常即使影响
-  多个请求，也只记录一次。
-
-### 调用方取消
-
-调用方取消只能移除尚未交给 Handler 的请求。一旦 Handler 开始执行，RequestBatcher 会返回实际处理结果，而不会
-将调用方的 `Task` 改成已取消。这样可以避免取消状态掩盖已经发生的副作用。
-
-传给 Handler 的 `CancellationToken` 属于 RequestBatcher 自身的处理生命周期，不属于任何一个调用方。因此，
-一个调用方取消不会中止同一批中的其他请求。
-
-显式批量提交会将调用方传入的同一个 `CancellationToken` 应用于组内每个请求。因此取消后可能同时存在“尚未
-分发而取消”的请求和“已经分发并继续执行”的请求。返回的 `Task` 仍会等待全部请求；其中存在失败时最终状态为
-失败，否则只要有请求被取消，最终状态就是取消。已经完成的副作用不会回滚。
-
-### 容量与背压
-
-`MaxPendingRequests` 是内部 BufferQueue 中仍处于排队状态的请求容量上限。分发循环拉取批次时会自动提交消费进度，
-随后才启动 Handler。因此，除了排队容量外，最多还有 `MaxConcurrency * BatchSize` 个已拉取请求正在执行。它不限制
-一次显式提交的请求数量，也不限制正在等待容量的调用方数量：
-
-- `FullMode = Wait` 在队列空间不足时异步等待，并支持调用方在等待期间取消。
-- `Wait` 模式下，一组请求的数量不超过 `MaxPendingRequests` 时，会等到队列能容纳整组请求后一起入队；超过时，
-  按输入顺序分段，每段最多 `MaxPendingRequests` 个请求，等待队列腾出足够空间后依次入队。
-  中途取消时，已分发的请求仍会继续处理，尚未分发的请求会被取消。
-- `FullMode = Fail` 在队列剩余空间不足以容纳本次提交的全部请求时，立即拒绝整次提交，包括请求总数超过
-  `MaxPendingRequests` 的情况。此时返回的 `Task` 会失败，异常为 `RequestBatchQueueFullException`，本次提交的请求
-  均不会入队。
-
-### 停止与释放
-
-`DisposeAsync` 会停止接收新请求，处理完已经接收的所有提交（包括仍在等待容量的提交），然后释放协调器持有的资源。
-并发或重复调用共享同一次释放操作。通过 `AddRequestBatcher` 注册时，由应用容器负责异步释放。
-
-## 依赖注入与日志
-
-`AddRequestBatcher` 会将 Handler、协调器和内部 BufferQueue topic 注册到现有的 `IServiceCollection` 中。应用无需
-直接配置 BufferQueue，RequestBatcher 也不会创建嵌套的 Service Provider。
-
-`Scoped` 和 `Transient` Handler 会在每个处理批次专属的异步作用域中解析一次。`Singleton` Handler 会跨批次
-复用；当 `MaxConcurrency > 1` 时，它必须保证线程安全。
-
-日志会通过应用现有的 `Microsoft.Extensions.Logging` 管道写入，类别为
-`RequestBatchCoordinator<TRequest>`。Handler 异常会连同原始 `Exception` 一起记录，日志不会包含请求内容。
-
-## 示例应用
-
-[持续读取可观测性示例](samples/RequestBatcher.Observability/README.md)通过 Docker Compose 启动 Cart、Pricing 两个 Web API、C# 流量生成器、
-PostgreSQL 和 Grafana OTel LGTM。生成器并发提交含 2 到 10 条商品的购物车报价，展示调用总耗时、独立批次的 ActivityLink
-以及下游数据库 span。
-
-[PostgreSQL Web API 示例](samples/RequestBatcher.Deduplication)包含三个价格操作：
-
-- `POST /prices` 使用未命名的 `IRequestBatcher<PriceUpdate>`，提交完整的结构化 `PriceUpdate` 并写入价格。
-- `GET /prices/{productId}` 在 endpoint 参数上使用 `[FromKeyedServices("price")]` 注入命名的
-  `IRequestBatcher<int, decimal?>`，返回单个价格；商品不存在时返回 `404`。
-- `POST /prices/query` 使用同一个命名 Batcher 接收 JSON `int[]`，按输入顺序返回 nullable 价格，保留重复 ID，缺失
-  商品返回 `null`。
-
-例如先写入商品 `101` 的价格 `17.90`，并假设 `102` 和 `999` 不存在，提交 `[101, 102, 101, 999]` 会返回
-`[17.90, null, 17.90, null]`。列表提交仍可能拆成多个 Handler 批次，去重只发生在每个批次内；详见
-[示例 README](samples/RequestBatcher.Deduplication/README.md)中的 Docker 启动和 curl 步骤。
-
-[独立的委托版 PostgreSQL 示例](samples/RequestBatcher.Delegates)通过 `AddDelegateRequestBatcher` 注册价格写入与
-查询，在 `POST /prices` 和 `POST /prices/query` 的调用处直接传入 static lambda。查询管线名为 `"price"`，接受
-`int` ID、返回 `decimal?`；委托从每个批次的 scope 注入 keyed scoped `PriceStore`，注册时不指定 Handler 生命周期。
-原示例继续展示 Handler 类的写法。委托版使用独立的 HTTP 和数据库端口，启动及 curl 步骤见其
-[README](samples/RequestBatcher.Delegates/README.md)。
-
 ## 可观测性
+
+### 执行上下文与链路追踪
+
+后台调度和消费者监控不会继承初始化调用方的执行上下文。Handler 不会继承初始化或提交请求时的 HTTP Activity
+（`Activity.Current`）、日志 scope 或其他 `AsyncLocal` 值。解析 batcher 和等待请求完成后，调用方的上下文保持不变。
+租户标识等业务数据应通过请求显式传递；Handler 内创建的 Activity 会正常跨越其异步等待。Singleton 构造函数遵循
+容器的常规创建规则，不应捕获请求专属状态。
+
+### OpenTelemetry 集成
 
 RequestBatcher 核心包内置 OpenTelemetry 注册扩展，但不依赖完整 SDK。安装应用使用的 Hosting 和 Exporter：
 
@@ -918,6 +905,8 @@ Handler 执行和结果完成。每个实际分发的非空批次都会创建独
 link 关联真正贡献请求的 `Execute` span；Handler 创建的数据库或 HTTP span 是该批次 span 的子 span。
 被记录的 `Execute` span 结束前也会补上指向所有相关批次的 link，一次提交跨多个批次时仍可逐一跳转。
 回链不参与 `Execute` 创建时的采样决策；库不会修改应用的 HTTP/业务父 span。
+两种 span 的 `requestbatcher.request.type` 都使用公开请求类型的短名（例如 `Int32`），不包含命名空间或内部响应包装类型。
+按请求类型过滤的查询和采样规则也应使用短名。
 
 采样由应用的 tracing provider 控制。0% 采样仍可能创建用于传播上下文的 Activity，因此开销不等于完全不注册
 RequestBatcher source。仅传播上下文的提交会保留供批次采样使用的上下文，但不收集反向链接。固定调用元数据会复用，
@@ -925,7 +914,7 @@ span 时长和任务完成语义保持不变。工作负载和分配开销见 [2
 
 命名注册会在 span 基础名后追加一个空格和公开名称，例如 `RequestBatcher.Execute pricing-queries` 和
 `RequestBatcher.HandleBatch pricing-queries`，同时写入 `requestbatcher.name`。未命名注册保留基础名称并省略此 tag。
-Link 表示跨队列的因果关系，不代表共享父 span、Trace ID 或执行顺序；队列只传递 span context 和共享的回链收集状态，需要的请求 scope、baggage
+Link 表示跨队列的因果关系，不代表共享父 span、Trace ID 或执行顺序。Handler 不会继承调用方的执行上下文，需要的请求 scope、baggage
 和其他 `AsyncLocal` 状态应显式传递。
 
 ![RequestBatcher 可观测性模型](docs/diagrams/observability.zh-CN.svg)
@@ -939,6 +928,30 @@ Link 表示跨队列的因果关系，不代表共享父 span、Trace ID 或执�
 指标名本身已经带有 `requestbatcher.`，例如 `requestbatcher.batches.processed` 在示例中导出为
 `requestbatcher_batches_processed_total`。导出端不要再添加 `requestbatcher` namespace/prefix，否则会出现
 `requestbatcher_requestbatcher_*`。
+
+## 示例应用
+
+[持续读取可观测性示例](samples/RequestBatcher.Observability/README.md)通过 Docker Compose 启动 Cart、Pricing 两个 Web API、C# 流量生成器、
+PostgreSQL 和 Grafana OTel LGTM。生成器并发提交含 2 到 10 条商品的购物车报价，展示调用总耗时、独立批次的 ActivityLink
+以及下游数据库 span。
+
+[PostgreSQL Web API 示例](samples/RequestBatcher.Deduplication)包含三个价格操作：
+
+- `POST /prices` 使用未命名的 `IRequestBatcher<PriceUpdate>`，提交完整的结构化 `PriceUpdate` 并写入价格。
+- `GET /prices/{productId}` 在 endpoint 参数上使用 `[FromKeyedServices("price")]` 注入命名的
+  `IRequestBatcher<int, decimal?>`，返回单个价格；商品不存在时返回 `404`。
+- `POST /prices/query` 使用同一个命名 Batcher 接收 JSON `int[]`，按输入顺序返回 nullable 价格，保留重复 ID，缺失
+  商品返回 `null`。
+
+例如先写入商品 `101` 的价格 `17.90`，并假设 `102` 和 `999` 不存在，提交 `[101, 102, 101, 999]` 会返回
+`[17.90, null, 17.90, null]`。列表提交仍可能拆成多个 Handler 批次，去重只发生在每个批次内；详见
+[示例 README](samples/RequestBatcher.Deduplication/README.md)中的 Docker 启动和 curl 步骤。
+
+[独立的委托版 PostgreSQL 示例](samples/RequestBatcher.Delegates)通过 `AddDelegateRequestBatcher` 注册价格写入与
+查询，在 `POST /prices` 和 `POST /prices/query` 的调用处直接传入 static lambda。查询管线名为 `"price"`，接受
+`int` ID、返回 `decimal?`；委托从每个批次的 scope 注入 keyed scoped `PriceStore`，注册时不指定 Handler 生命周期。
+原示例继续展示 Handler 类的写法。委托版使用独立的 HTTP 和数据库端口，启动及 curl 步骤见其
+[README](samples/RequestBatcher.Delegates/README.md)。
 
 ## 许可证
 

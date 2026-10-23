@@ -8,7 +8,7 @@ internal sealed class ResponseRequestBatcher<TRequest, TResponse>(
     : IRequestBatcher<TRequest, TResponse>
 {
     private readonly RequestBatcherTraceMetadata _traceMetadata = new(
-        typeof(TRequest).FullName ?? typeof(TRequest).Name,
+        RequestBatcherRequestType.GetName(typeof(TRequest)),
         batcher.BatcherName);
 
     internal string? BatcherName => batcher.BatcherName;
@@ -18,16 +18,19 @@ internal sealed class ResponseRequestBatcher<TRequest, TResponse>(
             ? RequestBatcherTracing.TraceCall(
                 _traceMetadata,
                 (Batcher: this, Request: request, Token: cancellationToken),
-                static (state, context) => state.Batcher.ExecuteCoreAsync(state.Request, state.Token, context))
+                static (state, context, observer) => state.Batcher.ExecuteCoreAsync(state.Request, state.Token, context, observer))
             : ExecuteCoreAsync(request, cancellationToken);
 
     internal Task<TResponse> ExecuteCoreAsync(
         TRequest request,
         CancellationToken cancellationToken,
-        SubmissionTraceContext? traceContext = default)
+        SubmissionTraceContext? traceContext = default,
+        IRequestCompletionObserver? completionObserver = null)
     {
         var entry = new RequestBatchEntry<TRequest, TResponse>(request);
-        var completion = new ResponseCompletion<TRequest, TResponse>(entry);
+        var completion = completionObserver is null
+            ? new ResponseCompletion<TRequest, TResponse>(entry)
+            : new TracedResponseCompletion<TRequest, TResponse>(entry, completionObserver);
         var submission = batcher.ExecuteCoreAsync(entry, completion, cancellationToken, traceContext);
         return ReferenceEquals(submission, completion.Task)
             ? completion.Task

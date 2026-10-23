@@ -49,6 +49,8 @@ The [compact-context and link evaluation](tracing-io-overhead/compact-links.md) 
 matched before/after source snapshots and the same sampling matrix.
 The [pending completion evaluation](tracing-io-overhead/completion-optimization.md) compares internal Task, ValueTask,
 and callback completion bridges and explains the applicability of BufferQueue's reusable ValueTask source.
+The [shared tracing completion evaluation](tracing-io-overhead/shared-completion.md) compares the ordinary admission
+path before and after reusing the request's completion source, with a fresh 0.2.4 baseline and all sampling rates.
 
 The [metrics I/O evaluation](metrics-io-overhead/README.md) isolates SDK aggregation and periodic collection overhead
 with tracing disabled, using the same 1,024-request waves and simulated 20 ms calls.

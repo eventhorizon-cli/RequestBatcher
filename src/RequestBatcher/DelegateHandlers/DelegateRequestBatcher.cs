@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using RequestBatcher.Diagnostics;
+using RequestBatcher.PendingRequests;
 
 namespace RequestBatcher.DelegateHandlers;
 
@@ -8,7 +9,7 @@ internal sealed class DelegateRequestBatcher<TRequest>(
     DelegateRequestBatchHandler<TRequest> handler) : IRequestBatcher<TRequest>, IDelegateRequestBatcher<TRequest>
 {
     private readonly RequestBatcherTraceMetadata _traceMetadata = new(
-        typeof(TRequest).FullName ?? typeof(TRequest).Name,
+        RequestBatcherRequestType.GetName(typeof(TRequest)),
         coordinator.BatcherName);
 
     public Task ExecuteAsync(TRequest request, CancellationToken cancellationToken = default) =>
@@ -24,8 +25,8 @@ internal sealed class DelegateRequestBatcher<TRequest>(
             ? RequestBatcherTracing.TraceCall(
                 _traceMetadata,
                 (Batcher: this, Request: request, Callback: callback, Token: cancellationToken),
-                static (state, context) => state.Batcher.SubmitCoreAsync(
-                    state.Request, state.Callback, state.Token, context))
+                static (state, context, observer) => state.Batcher.SubmitCoreAsync(
+                    state.Request, state.Callback, state.Token, context, observer))
             : SubmitCoreAsync(request, callback, cancellationToken);
 
     [RequiresDynamicCode("Delegate handlers compile a typed invoker on first use.")]
@@ -34,7 +35,8 @@ internal sealed class DelegateRequestBatcher<TRequest>(
         TRequest request,
         Delegate callback,
         CancellationToken cancellationToken,
-        SubmissionTraceContext? traceContext = default)
+        SubmissionTraceContext? traceContext = default,
+        IRequestCompletionObserver? completionObserver = null)
     {
         if (cancellationToken.IsCancellationRequested)
         {
@@ -42,7 +44,7 @@ internal sealed class DelegateRequestBatcher<TRequest>(
         }
 
         handler.Bind(callback);
-        return coordinator.ExecuteCoreAsync(request, null, cancellationToken, traceContext);
+        return coordinator.ExecuteCoreAsync(request, null, cancellationToken, traceContext, completionObserver);
     }
 
     [RequiresDynamicCode("Delegate handlers compile a typed invoker on first use.")]
@@ -55,8 +57,8 @@ internal sealed class DelegateRequestBatcher<TRequest>(
             ? RequestBatcherTracing.TraceCall(
                 _traceMetadata,
                 (Batcher: this, Request: requests, Callback: callback, Token: cancellationToken),
-                static (state, context) => state.Batcher.SubmitCoreAsync(
-                    state.Request, state.Callback, state.Token, context))
+                static (state, context, observer) => state.Batcher.SubmitCoreAsync(
+                    state.Request, state.Callback, state.Token, context, observer))
             : SubmitCoreAsync(requests, callback, cancellationToken);
 
     [RequiresDynamicCode("Delegate handlers compile a typed invoker on first use.")]
@@ -65,7 +67,8 @@ internal sealed class DelegateRequestBatcher<TRequest>(
         IEnumerable<TRequest> requests,
         Delegate callback,
         CancellationToken cancellationToken,
-        SubmissionTraceContext? traceContext = default)
+        SubmissionTraceContext? traceContext = default,
+        IRequestCompletionObserver? completionObserver = null)
     {
         if (cancellationToken.IsCancellationRequested)
         {
@@ -73,7 +76,7 @@ internal sealed class DelegateRequestBatcher<TRequest>(
         }
 
         handler.Bind(callback);
-        return coordinator.ExecuteCoreAsync(requests, cancellationToken, traceContext);
+        return coordinator.ExecuteCoreAsync(requests, cancellationToken, traceContext, completionObserver);
     }
 
     private static InvalidOperationException MissingHandler() => new(
