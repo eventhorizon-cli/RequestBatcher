@@ -40,6 +40,8 @@ The existing live test continues to verify response correctness, span parentage 
 links, batch boundaries, and all five exported metrics. Its assertions now run against the
 fixture-owned environment. A separate non-Docker tracing stress test can run with the normal test
 suite and does not depend on this fixture.
+The database child is identified by Npgsql's `db.query.text` attribute. A cold connection pool may also emit a
+physical connection span under the same HTTP server; it is not counted as a second SQL query.
 
 The stress tests use the public API and real OpenTelemetry SDK. At 0% and 100% sampling, each runs 32 waves of
 512 requests with mixed single and 16-item submissions, bounded capacity, and an asynchronous handler. Every

@@ -205,8 +205,10 @@ public sealed class ObservabilityTests(ITestOutputHelper output, ObservabilityFi
             span.ServiceName == "cart" && span.Kind == "SPAN_KIND_CLIENT");
         var server = Assert.Single(spans, span => span.ParentSpanId == client.SpanId &&
             span.ServiceName == "pricing" && span.Kind == "SPAN_KIND_SERVER");
-        var database = Assert.Single(spans, span => span.ParentSpanId == server.SpanId && span.ScopeName == "Npgsql");
+        var database = Assert.Single(spans, span => span.ParentSpanId == server.SpanId && span.ScopeName == "Npgsql" &&
+            span.Attributes.ContainsKey("db.query.text"));
         Assert.Equal("SPAN_KIND_CLIENT", database.Kind);
+        Assert.False(string.IsNullOrWhiteSpace(database.Attributes["db.query.text"]));
         Assert.Equal("200", client.Attributes["http.response.status_code"]);
         Assert.Equal("200", server.Attributes["http.response.status_code"]);
         Assert.All(spans, span =>
