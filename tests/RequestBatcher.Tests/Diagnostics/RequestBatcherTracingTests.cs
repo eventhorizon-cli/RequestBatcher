@@ -199,7 +199,7 @@ public sealed class RequestBatcherTracingTests
         var first = new InvalidOperationException();
         var second = new ArgumentException();
         var pending = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var task = RequestBatcherTracing.TraceCall("test", pending.Task, static (state, _) => state);
+        var task = RequestBatcherTracing.TraceCall(new RequestBatcherTraceMetadata("test"), pending.Task, static (state, _) => state);
         pending.SetException(new Exception[] { first, second });
         Assert.Same(first, await Assert.ThrowsAsync<InvalidOperationException>(() => task));
         Assert.Equal(new Exception[] { first, second }, task.Exception!.InnerExceptions);

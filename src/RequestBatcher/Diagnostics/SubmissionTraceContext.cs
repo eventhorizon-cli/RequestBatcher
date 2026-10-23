@@ -2,45 +2,91 @@ using System.Diagnostics;
 
 namespace RequestBatcher.Diagnostics;
 
-internal sealed class SubmissionTraceContext(ActivityContext context, bool collectBatchLinks)
+internal class SubmissionTraceContext
 {
-    private readonly object _gate = new();
-    private List<ActivityContext>? _batches;
-    private bool _completed;
+    private readonly ActivityContext _context;
 
-    internal ActivityContext Context { get; } = context;
+    private SubmissionTraceContext(ActivityContext context) => _context = context;
 
-    internal void AddBatch(ActivityContext batch)
+    internal ActivityContext Context => _context;
+
+    internal static SubmissionTraceContext Create(ActivityContext context, bool collectBatchLinks) =>
+        collectBatchLinks
+            ? new RecordedSubmissionTraceContext(context)
+            : new SubmissionTraceContext(context);
+
+    internal virtual bool CollectBatchLinks => false;
+
+    internal virtual void AddBatch(ActivityContext batch)
     {
-        if (!collectBatchLinks)
-        {
-            return;
-        }
-
-        lock (_gate)
-        {
-            if (!_completed)
-            {
-                (_batches ??= []).Add(batch);
-            }
-        }
     }
 
-    internal void Complete(Activity activity)
+    internal virtual void Complete(Activity activity)
     {
-        List<ActivityContext>? batches;
-        lock (_gate)
+    }
+
+    private sealed class RecordedSubmissionTraceContext(ActivityContext context)
+        : SubmissionTraceContext(context)
+    {
+        private readonly object _gate = new();
+        private ActivityContext _firstBatch;
+        private List<ActivityContext>? _additionalBatches;
+        private bool _hasFirstBatch;
+        private bool _completed;
+
+        internal override bool CollectBatchLinks => true;
+
+        internal override void AddBatch(ActivityContext batch)
         {
-            _completed = true;
-            batches = _batches;
-            _batches = null;
+            lock (_gate)
+            {
+                if (_completed)
+                {
+                    return;
+                }
+
+                if (!_hasFirstBatch)
+                {
+                    _firstBatch = batch;
+                    _hasFirstBatch = true;
+                    return;
+                }
+
+                (_additionalBatches ??= []).Add(batch);
+            }
         }
 
-        if (batches is not null)
+        internal override void Complete(Activity activity)
         {
-            foreach (var batch in batches)
+            ActivityContext firstBatch;
+            List<ActivityContext>? additionalBatches;
+            bool hasFirstBatch;
+
+            lock (_gate)
             {
-                activity.AddLink(new ActivityLink(batch));
+                if (_completed)
+                {
+                    return;
+                }
+
+                _completed = true;
+                hasFirstBatch = _hasFirstBatch;
+                firstBatch = _firstBatch;
+                additionalBatches = _additionalBatches;
+                _additionalBatches = null;
+            }
+
+            if (hasFirstBatch)
+            {
+                activity.AddLink(new ActivityLink(firstBatch));
+            }
+
+            if (additionalBatches is not null)
+            {
+                foreach (var batch in additionalBatches)
+                {
+                    activity.AddLink(new ActivityLink(batch));
+                }
             }
         }
     }

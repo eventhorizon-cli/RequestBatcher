@@ -8,7 +8,7 @@ public sealed class LiveFactAttribute : FactAttribute
     {
         if (Environment.GetEnvironmentVariable("REQUESTBATCHER_RUN_INTEGRATION_TESTS") != "1")
         {
-            Skip = "Start the observability Compose sample and set REQUESTBATCHER_RUN_INTEGRATION_TESTS=1; see tests/it/README.md.";
+            Skip = "Set REQUESTBATCHER_RUN_INTEGRATION_TESTS=1 to start the disposable Testcontainers environment; see tests/it/README.md.";
         }
     }
 }

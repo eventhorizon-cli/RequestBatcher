@@ -22,6 +22,32 @@ The tracing package comparison script also uses C# and downloads the published b
 NuGet cache. Both builds run with the repository SDK. Each execution creates a fresh artifact directory and retains
 raw BenchmarkDotNet results and package SHA-512 evidence.
 
+`CompareTracingIoOverhead.cs` isolates the 20 ms tracing benchmark in temporary projects referencing published
+RequestBatcher 0.2.4 and 0.3.2 packages. Both use identical benchmark source, runtime, and dependencies, including
+the OpenTelemetry SDK. The old package runs its two `Disabled` cases; 0.3.2 runs `Disabled`, `Sample0`, `Sample1`,
+`Sample10`, and `Sample100`, using the real SDK sampler without an exporter. With `--compare-source`, the runner
+copies `src/RequestBatcher` and `src/RequestBatcher.Analyzers` (excluding build outputs) plus the pinned SDK files into
+the artifact directory, then compares the 0.3.2 package with that fixed source snapshot using the same ten cases.
+The runner verifies resolved package/project assets, retains package hashes and complete reports, requires exactly two
+CSV data rows for 0.2.4 and ten for each current-version scenario, rejects `NA` results, and fails on child-process
+errors. It neither changes the checkout's package references nor exports telemetry.
+With `--compare-source --baseline-source <repository-tree>`, both sides use source snapshots taken before the run;
+the baseline tree replaces the published 0.3.2 package. Both scenarios compile the same current benchmark file and
+require ten complete result rows. This isolates incremental optimizations against an archived source commit.
+
+`ProfileTracingAllocations.cs` reuses the tracing I/O benchmark workload in a standalone diagnostic process. It accepts
+`Disabled`, `Sample0`, or `Sample100` and a positive measured wave count, warms up ten waves, then emits
+`RequestBatcher-AllocationProbe` Start/Stop events around the measured waves. Each wave retains the benchmark's
+exactly-once validation. It reports the process-wide allocated-byte delta separately from sampled allocation events.
+Profile the compiled application with `dotnet-trace` using `gc-verbose` and the marker provider; setup, warmup, and
+cleanup must not enter the allocation analysis window. Diagnostic timing is not a benchmark result.
+
+`AnalyzeAllocationTrace.cs` reads the resulting nettrace with Microsoft's TraceEvent library. It requires exactly one
+matched marker window and nonempty allocation samples, aggregates GC allocation-tick weights by type and allocation
+stack, and writes CSV evidence. Sample counts are not object counts, and sampled weights are estimates, not exact
+per-type byte totals. TraceEvent is a script-only dependency; production dependencies remain unchanged. Keep raw
+trace files outside the repository and commit compact reports with tool versions, arguments, and limitations.
+
 The observability sample's traffic generator is a file-based C# application. Docker publishes it using the pinned
 SDK and runs the resulting assembly on .NET 8. Cart and Pricing remain the only business project files.
 

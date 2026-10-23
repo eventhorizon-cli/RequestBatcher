@@ -68,6 +68,11 @@ You are an AI coding assistant for this repository.
 - Keep `src/RequestBatcher/README.md`, the NuGet package README, synchronized with relevant user-facing behavior,
   configuration, and usage guidance in the root README.
 - Keep usage examples compilable and focused on the public abstraction rather than internal queue mechanics.
+- Chinese documents must reference Chinese diagrams, including text inside SVGs; do not reuse English diagrams when
+  maintaining a Chinese version. Keep a matching PNG backup for each diagram and synchronize its language and content
+  whenever the SVG changes. Prefer SVGs in Markdown and retain PNGs for publishing workflows that require raster images.
+- Reference repository images with local relative paths in repository documentation. Only the NuGet package README
+  (`src/RequestBatcher/README.md`) should use GitHub-hosted image URLs so images render on NuGet.
 - Document the durability boundary explicitly: RequestBatcher is in-process and does not recover pending requests after a
   process failure.
 
@@ -79,6 +84,10 @@ You are an AI coding assistant for this repository.
 - Use strict Moq mocks for interaction boundaries. Prefer stateful test collaborators only when a mock would obscure
   concurrency or lifecycle behavior.
 - Unit tests must not require network access or external services.
+- Keep OpenTelemetry sample validation sessions bounded and shut down their Docker Compose stack immediately after
+  collecting the required evidence, including on failure or cancellation. Follow the cleanup instructions in
+  [`samples/RequestBatcher.Observability/AGENTS.md`](samples/RequestBatcher.Observability/AGENTS.md); do not leave the stack
+  running during unrelated work or after the task finishes unless the user explicitly requests it.
 - Keep database performance comparisons in `tests/RequestBatcher.Benchmarks`, not in the unit-test project. Benchmark
   container startup, schema creation, pool warmup, and table reset must stay outside measured regions.
 - Keep direct and batched database paths comparable: use the same logical requests, schema, connection pool limit,

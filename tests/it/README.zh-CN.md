@@ -4,26 +4,37 @@
 
 这些 .NET 10 xUnit 测试通过真实 HTTP、PostgreSQL、OTLP 导出、Tempo 和 Prometheus 验证运行中的
 [可观测性示例](../../samples/RequestBatcher.Observability/README.zh-CN.md)。参考
-[EventHorizon.RocketMQ 集成测试](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ/tree/main/tests/it)
-的组织方式，集成测试与单元测试分开，并显式声明环境要求。它们复用示例的 Compose 环境，不自行启停或重置容器。
-普通单元测试不依赖外部服务。
-
-在仓库根目录执行以下命令，构建示例镜像、启动环境并等待健康检查通过：
-
-```bash
-docker compose -f samples/RequestBatcher.Observability/compose.yaml up --build -d --wait
-```
+[EventHorizon.RocketMQ.EventBus 集成测试](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ.EventBus/tree/main/tests/it)
+的组织方式，集成测试与单元测试分开，并显式声明环境要求。启用 live 测试后，Testcontainers fixture 会创建
+隔离网络，构建 Cart 和 Pricing 示例镜像，启动 PostgreSQL 17.6 与 OTEL-LGTM 0.29.0，并随机分配宿主机端口。
+测试结束后会清理容器、镜像和网络，包括启动失败时的部分资源；Testcontainers 的 resource reaper 也会作为额外
+清理保障。普通单元测试不依赖外部服务。
 
 显式启用并运行集成测试：
 
 ```bash
 REQUESTBATCHER_RUN_INTEGRATION_TESTS=1 dotnet test \
   tests/it/RequestBatcher.Observability.IntegrationTests/RequestBatcher.Observability.IntegrationTests.csproj \
-  --configuration Release --logger 'console;verbosity=detailed'
+  --configuration Release \
+  --collect:"XPlat Code Coverage" \
+  --settings tests/it/RequestBatcher.Observability.IntegrationTests/coverage.runsettings \
+  --results-directory TestResults/Integration \
+  --logger 'console;verbosity=detailed'
 ```
 
-未设置 `REQUESTBATCHER_RUN_INTEGRATION_TESTS=1` 时，测试报告为跳过。项目已加入 `RequestBatcher.slnx`，
-也可以在 Rider 中构建、运行。示例的流量生成器可以保持运行。
+覆盖率配置只统计 `RequestBatcher` 生产程序集，示例代码和测试程序集不会计入结果。
+覆盖数据来自进程内压力测试；测试宿主的 collector 不会插桩示例容器内的代码，容器测试单独验证实际导出的行为。
+CI 将该报告标记为 `integration` 上传，单元测试报告标记为 `unit`。
+
+同一个项目还包含不依赖 Docker 和环境开关的进程内测试，它们使用公共 API 和真实 OpenTelemetry SDK：
+`ExecuteAsync_ConcurrentWavesAtEachSamplingRate_ProcessesExactlyOnceAndLinksActualBatches` 在 0% 和 100% 采样下分别运行
+32 轮、每轮 512 个请求（每种采样率共 16,384 个请求），混合单请求和 16 请求批量提交，handler 异步等待 1 毫秒，并在每轮
+校验后清理 telemetry；`DisposeAsync_QueuedCancellationAndHandlerFailure_DrainsAcceptedWorkAndRejectsLateSubmissions` 覆盖取消、
+排空、失败和停止接收新提交。不设置 `REQUESTBATCHER_RUN_INTEGRATION_TESTS` 运行项目即可执行这些测试，且不会启动 live fixture。
+
+未设置 `REQUESTBATCHER_RUN_INTEGRATION_TESTS=1` 时，容器测试报告为跳过，进程内测试仍会运行。项目已加入 `RequestBatcher.slnx`，
+也可以在 Rider 中构建、运行。fixture 会向测试提供本次运行生成的 Cart 和 Grafana 地址，不需要固定端口环境变量。
+如果需要手动查看示例，请使用示例 README 中独立的 Compose 步骤，并在结束后停止 Compose 环境。
 
 测试分两轮发送 32 个并发 Cart 请求，每个请求使用独立的 W3C Trace 上下文，包含 2–10 个商品项，
 并特意包含重复商品。检查内容包括：
@@ -49,10 +60,7 @@ OTLP 导出、Tempo 索引和 Prometheus 抓取是异步的，所以每个验证
 | 环境变量 | 默认值 | 用途 |
 | --- | --- | --- |
 | `REQUESTBATCHER_RUN_INTEGRATION_TESTS` | 未设置 | 设为 `1` 启用真实环境测试。 |
-| `REQUESTBATCHER_CART_URL` | `http://127.0.0.1:5081` | Cart 地址，与 Compose 的 `CART_PORT` 覆盖值对应。 |
-| `REQUESTBATCHER_GRAFANA_URL` | `http://127.0.0.1:3000` | Grafana 地址，与 `GRAFANA_PORT` 覆盖值对应。 |
-| `REQUESTBATCHER_GRAFANA_USER` | `admin` | 本地 Grafana 用户名。 |
-| `REQUESTBATCHER_GRAFANA_PASSWORD` | `admin` | 本地 Grafana 密码。 |
+fixture 使用示例默认的 Grafana 凭据（`admin` / `admin`），并为每次运行生成 Cart 和 Grafana 的宿主机地址。
 
 测试通过 Grafana 的认证代理访问预置的 `requestbatcher-tempo` 和 `requestbatcher-prometheus` 数据源，
 不需要暴露额外的后端端口，也不需要给生产代码增加测试专用接口。

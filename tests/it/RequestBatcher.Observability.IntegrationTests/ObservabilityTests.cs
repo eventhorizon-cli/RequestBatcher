@@ -10,7 +10,7 @@ using Xunit.Sdk;
 
 namespace RequestBatcher.Observability.IntegrationTests;
 
-public sealed class ObservabilityTests(ITestOutputHelper output)
+public sealed class ObservabilityTests(ITestOutputHelper output, ObservabilityFixture fixture) : IClassFixture<ObservabilityFixture>
 {
     private const string ExecuteName = "RequestBatcher.Execute pricing-queries";
     private const string BatchName = "RequestBatcher.HandleBatch pricing-queries";
@@ -21,16 +21,15 @@ public sealed class ObservabilityTests(ITestOutputHelper output)
     {
         using var cart = new HttpClient
         {
-            BaseAddress = new Uri(GetSetting("REQUESTBATCHER_CART_URL", "http://127.0.0.1:5081")),
+            BaseAddress = fixture.CartUrl,
             Timeout = TimeSpan.FromSeconds(30)
         };
         using var grafana = new HttpClient
         {
-            BaseAddress = new Uri(GetSetting("REQUESTBATCHER_GRAFANA_URL", "http://127.0.0.1:3000")),
+            BaseAddress = fixture.GrafanaUrl,
             Timeout = TimeSpan.FromSeconds(30)
         };
-        var credentials = GetSetting("REQUESTBATCHER_GRAFANA_USER", "admin") + ":" +
-            GetSetting("REQUESTBATCHER_GRAFANA_PASSWORD", "admin");
+        const string credentials = "admin:admin";
         grafana.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue(
             "Basic", Convert.ToBase64String(Encoding.UTF8.GetBytes(credentials)));
         using var health = await cart.GetAsync("/health");
@@ -206,8 +205,10 @@ public sealed class ObservabilityTests(ITestOutputHelper output)
             span.ServiceName == "cart" && span.Kind == "SPAN_KIND_CLIENT");
         var server = Assert.Single(spans, span => span.ParentSpanId == client.SpanId &&
             span.ServiceName == "pricing" && span.Kind == "SPAN_KIND_SERVER");
-        var database = Assert.Single(spans, span => span.ParentSpanId == server.SpanId && span.ScopeName == "Npgsql");
+        var database = Assert.Single(spans, span => span.ParentSpanId == server.SpanId && span.ScopeName == "Npgsql" &&
+            span.Attributes.ContainsKey("db.query.text"));
         Assert.Equal("SPAN_KIND_CLIENT", database.Kind);
+        Assert.False(string.IsNullOrWhiteSpace(database.Attributes["db.query.text"]));
         Assert.Equal("200", client.Attributes["http.response.status_code"]);
         Assert.Equal("200", server.Attributes["http.response.status_code"]);
         Assert.All(spans, span =>
@@ -268,8 +269,6 @@ public sealed class ObservabilityTests(ITestOutputHelper output)
 
         throw new XunitException($"Telemetry did not satisfy the contract within {_telemetryTimeout}. Last failure: {lastFailure}");
     }
-
-    private static string GetSetting(string name, string fallback) => Environment.GetEnvironmentVariable(name) ?? fallback;
 
     private sealed record CartItem(int ProductId, int Quantity);
     private sealed record Probe(string TraceId, string ParentSpanId, CartItem[] Items);

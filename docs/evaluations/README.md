@@ -40,3 +40,15 @@ separately; its results are the reference for instrumentation cost.
 
 The [observability-overhead evaluation](observability-overhead/README.md) measures disabled, metrics-only, and
 tracing-plus-metrics OpenTelemetry providers around an asynchronous 20 ms pricing workload.
+
+The [tracing I/O evaluation](tracing-io-overhead/README.md) compares the published 0.2.4 baseline with 0.3.2 tracing
+disabled and SDK sampling at 0%, 1%, 10%, and 100%, using simulated 20 ms calls and exactly-once item validation.
+Its [allocation profile](tracing-io-overhead/allocation-profile.md) attributes the remaining optimized-source allocations
+to object types and call stacks using bounded EventPipe traces.
+The [compact-context and link evaluation](tracing-io-overhead/compact-links.md) records the subsequent reduction with
+matched before/after source snapshots and the same sampling matrix.
+The [pending completion evaluation](tracing-io-overhead/completion-optimization.md) compares internal Task, ValueTask,
+and callback completion bridges and explains the applicability of BufferQueue's reusable ValueTask source.
+
+The [metrics I/O evaluation](metrics-io-overhead/README.md) isolates SDK aggregation and periodic collection overhead
+with tracing disabled, using the same 1,024-request waves and simulated 20 ms calls.

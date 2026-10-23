@@ -1002,6 +1002,12 @@ distinct `Execute` spans that contributed requests, while database or HTTP spans
 Each recorded `Execute` span also links back to its batches before it ends, including when one submission spans several
 batches. These late links do not affect sampling of `Execute`; the application's parent span is not modified.
 
+Sampling is controlled by the application's tracing provider. A 0% sampler can still create propagation Activities,
+so it does not have the same overhead as leaving the RequestBatcher source unregistered. Propagation-only submissions
+retain their context for batch sampling, without collecting reverse links. Fixed call metadata is reused;
+span duration and task completion semantics are unchanged. See the [20 ms sampling evaluation](docs/evaluations/tracing-io-overhead/README.md)
+for the workload and measured allocation limits.
+
 For a named registration, the public span names append the configured name after a space, such as
 `RequestBatcher.Execute pricing-queries` and `RequestBatcher.HandleBatch pricing-queries`. Both spans also carry
 `requestbatcher.name`; unnamed registrations keep the base names and omit the tag. The name is the public DI

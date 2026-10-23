@@ -7,7 +7,9 @@ internal sealed class DelegateRequestBatcher<TRequest>(
     RequestBatchCoordinator<TRequest> coordinator,
     DelegateRequestBatchHandler<TRequest> handler) : IRequestBatcher<TRequest>, IDelegateRequestBatcher<TRequest>
 {
-    private static readonly string _requestTypeName = typeof(TRequest).FullName ?? typeof(TRequest).Name;
+    private readonly RequestBatcherTraceMetadata _traceMetadata = new(
+        typeof(TRequest).FullName ?? typeof(TRequest).Name,
+        coordinator.BatcherName);
 
     public Task ExecuteAsync(TRequest request, CancellationToken cancellationToken = default) =>
         throw MissingHandler();
@@ -20,11 +22,10 @@ internal sealed class DelegateRequestBatcher<TRequest>(
     public Task SubmitAsync(TRequest request, Delegate callback, CancellationToken cancellationToken) =>
         RequestBatcherTracing.Source.HasListeners()
             ? RequestBatcherTracing.TraceCall(
-                _requestTypeName,
+                _traceMetadata,
                 (Batcher: this, Request: request, Callback: callback, Token: cancellationToken),
                 static (state, context) => state.Batcher.SubmitCoreAsync(
-                    state.Request, state.Callback, state.Token, context),
-                coordinator.BatcherName)
+                    state.Request, state.Callback, state.Token, context))
             : SubmitCoreAsync(request, callback, cancellationToken);
 
     [RequiresDynamicCode("Delegate handlers compile a typed invoker on first use.")]
@@ -52,11 +53,10 @@ internal sealed class DelegateRequestBatcher<TRequest>(
         CancellationToken cancellationToken) =>
         RequestBatcherTracing.Source.HasListeners()
             ? RequestBatcherTracing.TraceCall(
-                _requestTypeName,
+                _traceMetadata,
                 (Batcher: this, Request: requests, Callback: callback, Token: cancellationToken),
                 static (state, context) => state.Batcher.SubmitCoreAsync(
-                    state.Request, state.Callback, state.Token, context),
-                coordinator.BatcherName)
+                    state.Request, state.Callback, state.Token, context))
             : SubmitCoreAsync(requests, callback, cancellationToken);
 
     [RequiresDynamicCode("Delegate handlers compile a typed invoker on first use.")]

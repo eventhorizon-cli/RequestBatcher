@@ -919,6 +919,10 @@ link 关联真正贡献请求的 `Execute` span；Handler 创建的数据库或 
 被记录的 `Execute` span 结束前也会补上指向所有相关批次的 link，一次提交跨多个批次时仍可逐一跳转。
 回链不参与 `Execute` 创建时的采样决策；库不会修改应用的 HTTP/业务父 span。
 
+采样由应用的 tracing provider 控制。0% 采样仍可能创建用于传播上下文的 Activity，因此开销不等于完全不注册
+RequestBatcher source。仅传播上下文的提交会保留供批次采样使用的上下文，但不收集反向链接。固定调用元数据会复用，
+span 时长和任务完成语义保持不变。工作负载和分配开销见 [20 ms 采样评估](docs/evaluations/tracing-io-overhead/README.md)。
+
 命名注册会在 span 基础名后追加一个空格和公开名称，例如 `RequestBatcher.Execute pricing-queries` 和
 `RequestBatcher.HandleBatch pricing-queries`，同时写入 `requestbatcher.name`。未命名注册保留基础名称并省略此 tag。
 Link 表示跨队列的因果关系，不代表共享父 span、Trace ID 或执行顺序；队列只传递 span context 和共享的回链收集状态，需要的请求 scope、baggage

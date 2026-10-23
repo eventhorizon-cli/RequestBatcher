@@ -11,13 +11,12 @@ internal static class RequestBatcherTracing
     internal static readonly ActivitySource Source = new(SourceName);
 
     public static Task TraceCall<TState>(
-        string requestTypeName,
+        RequestBatcherTraceMetadata metadata,
         TState state,
-        Func<TState, SubmissionTraceContext?, Task> submit,
-        string? batcherName = null)
+        Func<TState, SubmissionTraceContext?, Task> submit)
     {
         var parent = Activity.Current;
-        var activity = StartCall(requestTypeName, batcherName);
+        var activity = StartCall(metadata);
         var context = CreateContext(activity, parent);
         try
         {
@@ -55,13 +54,12 @@ internal static class RequestBatcherTracing
     }
 
     public static Task<TResult> TraceCall<TState, TResult>(
-        string requestTypeName,
+        RequestBatcherTraceMetadata metadata,
         TState state,
-        Func<TState, SubmissionTraceContext?, Task<TResult>> submit,
-        string? batcherName = null)
+        Func<TState, SubmissionTraceContext?, Task<TResult>> submit)
     {
         var parent = Activity.Current;
-        var activity = StartCall(requestTypeName, batcherName);
+        var activity = StartCall(metadata);
         var context = CreateContext(activity, parent);
         try
         {
@@ -107,9 +105,7 @@ internal static class RequestBatcherTracing
             return null;
         }
 
-        List<ActivityLink>? links = null;
-        List<SubmissionTraceContext>? submissions = null;
-        HashSet<(ActivityTraceId, ActivitySpanId)>? contexts = null;
+        BatchTraceLinks? links = null;
         foreach (var request in requests)
         {
             if (request is not TracedPendingBatchRequest<TRequest> traced)
@@ -117,12 +113,13 @@ internal static class RequestBatcherTracing
                 continue;
             }
 
-            var context = traced.TraceContext.Context;
-            contexts ??= [];
-            if (contexts.Add((context.TraceId, context.SpanId)))
+            if (links is null)
             {
-                (links ??= []).Add(new ActivityLink(context));
-                (submissions ??= []).Add(traced.TraceContext);
+                links = new BatchTraceLinks(traced.TraceContext);
+            }
+            else
+            {
+                links.Add(traced.TraceContext);
             }
         }
 
@@ -136,12 +133,9 @@ internal static class RequestBatcherTracing
             parentContext: default,
             tags: tags,
             links: links);
-        if (activity is not null && submissions is not null)
+        if (activity is not null)
         {
-            foreach (var submission in submissions)
-            {
-                submission.AddBatch(activity.Context);
-            }
+            links?.AddBatch(activity.Context);
         }
 
         return activity;
@@ -153,11 +147,11 @@ internal static class RequestBatcherTracing
         activity?.SetTag("error.type", exception.GetType().FullName);
     }
 
-    private static Activity? StartCall(string requestTypeName, string? batcherName) => Source.StartActivity(
-        GetCallName(batcherName),
+    private static Activity? StartCall(RequestBatcherTraceMetadata metadata) => Source.StartActivity(
+        metadata.CallName,
         ActivityKind.Internal,
         parentContext: Activity.Current?.Context ?? default,
-        tags: CreateTags(requestTypeName, batcherName));
+        tags: metadata.Tags);
 
     internal static string GetCallName(string? batcherName) => GetSpanName(CallName, batcherName);
 
@@ -181,7 +175,7 @@ internal static class RequestBatcherTracing
     {
         var context = activity?.Context ?? parent?.Context ?? default;
         return context.TraceId != default && context.SpanId != default
-            ? new SubmissionTraceContext(context, activity?.IsAllDataRequested == true)
+            ? SubmissionTraceContext.Create(context, activity?.IsAllDataRequested == true)
             : null;
     }
 

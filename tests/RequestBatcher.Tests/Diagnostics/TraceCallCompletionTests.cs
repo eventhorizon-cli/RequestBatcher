@@ -27,14 +27,14 @@ public sealed class TraceCallCompletionTests
                 if (useGeneric)
                 {
                     _ = RequestBatcherTracing.TraceCall<Exception, int>(
-                        "test",
+                        new RequestBatcherTraceMetadata("test"),
                         expected,
                         static (exception, _) => throw exception);
                 }
                 else
                 {
                     _ = RequestBatcherTracing.TraceCall<Exception>(
-                        "test",
+                        new RequestBatcherTraceMetadata("test"),
                         expected,
                         static (exception, _) => throw exception);
                 }
@@ -154,7 +154,7 @@ public sealed class TraceCallCompletionTests
         var canceled = new OperationCanceledException("faulted cancellation");
         var pending = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
         var returned = RequestBatcherTracing.TraceCall(
-            "pending-fault",
+            new RequestBatcherTraceMetadata("pending-fault"),
             pending.Task,
             static (task, _) => task);
 
@@ -180,7 +180,7 @@ public sealed class TraceCallCompletionTests
         using var cancellation = new CancellationTokenSource();
         var pending = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
         var returned = RequestBatcherTracing.TraceCall(
-            "pending-canceled",
+            new RequestBatcherTraceMetadata("pending-canceled"),
             pending.Task,
             static (task, _) => task);
 
@@ -276,7 +276,7 @@ public sealed class TraceCallCompletionTests
         Action<ActivityContext>? captureContext = null)
     {
         return RequestBatcherTracing.TraceCall(
-            requestTypeName,
+            new RequestBatcherTraceMetadata(requestTypeName),
             task,
             (state, context) =>
             {
@@ -291,7 +291,7 @@ public sealed class TraceCallCompletionTests
         Action<ActivityContext>? captureContext = null)
     {
         return RequestBatcherTracing.TraceCall(
-            requestTypeName,
+            new RequestBatcherTraceMetadata(requestTypeName),
             task,
             (state, context) =>
             {

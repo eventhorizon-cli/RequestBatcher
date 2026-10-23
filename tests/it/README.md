@@ -2,28 +2,43 @@
 
 [English](README.md) | [简体中文](README.zh-CN.md)
 
-These .NET 10 xUnit tests exercise the running [observability sample](../../samples/RequestBatcher.Observability/README.md)
+These .NET 10 xUnit tests exercise the [observability sample](../../samples/RequestBatcher.Observability/README.md)
 through real HTTP, PostgreSQL, OTLP export, Tempo, and Prometheus. Like the
-[EventHorizon.RocketMQ integration tests](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ/tree/main/tests/it),
-they live separately from unit tests and have explicit environment requirements. They reuse the sample's Compose
-stack and never start, stop, or reset containers themselves. Ordinary unit tests require no external services.
-
-From the repository root, build the sample images and wait for the stack to become healthy:
-
-```bash
-docker compose -f samples/RequestBatcher.Observability/compose.yaml up --build -d --wait
-```
+[EventHorizon.RocketMQ.EventBus integration tests](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ.EventBus/tree/main/tests/it),
+they live separately from unit tests and have explicit environment requirements. The live fixture creates an isolated
+Testcontainers network, builds the Cart and Pricing sample images, starts PostgreSQL 17.6 and OTEL-LGTM 0.29.0, and
+assigns random host ports. It tears down containers, images, and the network after the test, including partial startup.
+Testcontainers' resource reaper is an additional cleanup guard. Ordinary unit tests require no external services.
 
 Enable and run the integration test:
 
 ```bash
 REQUESTBATCHER_RUN_INTEGRATION_TESTS=1 dotnet test \
   tests/it/RequestBatcher.Observability.IntegrationTests/RequestBatcher.Observability.IntegrationTests.csproj \
-  --configuration Release --logger 'console;verbosity=detailed'
+  --configuration Release \
+  --collect:"XPlat Code Coverage" \
+  --settings tests/it/RequestBatcher.Observability.IntegrationTests/coverage.runsettings \
+  --results-directory TestResults/Integration \
+  --logger 'console;verbosity=detailed'
 ```
 
-Without `REQUESTBATCHER_RUN_INTEGRATION_TESTS=1`, the test is reported as skipped. The project is included in
-`RequestBatcher.slnx`, so it can also be built and run from Rider. The existing traffic generator can keep running.
+The coverage settings include only the `RequestBatcher` production assembly; sample and test assemblies are excluded.
+This collects coverage from the in-process stress tests. Code executing inside the sample containers is not instrumented
+by the test host's collector; the live test verifies exported behavior separately. CI uploads this report with the
+`integration` flag and unit-test reports with the `unit` flag.
+
+The same project also contains in-process tests that use the public API and the real OpenTelemetry SDK without Docker or
+the environment switch: `ExecuteAsync_ConcurrentWavesAtEachSamplingRate_ProcessesExactlyOnceAndLinksActualBatches`
+checks 32 waves of 512 requests (16,384 requests per sampling mode) at 0% and 100% sampling, with mixed single and
+16-request submissions, an asynchronous 1 ms handler delay, bounded pending capacity, and per-wave telemetry cleanup.
+`DisposeAsync_QueuedCancellationAndHandlerFailure_DrainsAcceptedWorkAndRejectsLateSubmissions` checks cancellation,
+draining, failures, and late admission. Run the project without `REQUESTBATCHER_RUN_INTEGRATION_TESTS` to execute these
+tests without starting the live fixture.
+
+Without `REQUESTBATCHER_RUN_INTEGRATION_TESTS=1`, the live test is reported as skipped. The project is included in
+`RequestBatcher.slnx`, so it can also be built and run from Rider. The fixture owns the test environment and supplies
+the generated Cart and Grafana URLs; no fixed-port environment variables are required. For a manually inspected
+sample, use the separate Compose instructions in the sample README and stop that stack when finished.
 
 The test sends two bursts of 32 concurrent Cart requests with unique W3C trace contexts. Each request contains 2–10
 product items, including a duplicate. It verifies:
@@ -51,10 +66,9 @@ The test uses the sample's seeded product IDs 1–100 and prices (`id × 1.25`);
 | Environment variable | Default | Purpose |
 | --- | --- | --- |
 | `REQUESTBATCHER_RUN_INTEGRATION_TESTS` | unset | Set to `1` to enable live tests. |
-| `REQUESTBATCHER_CART_URL` | `http://127.0.0.1:5081` | Cart address, matching any Compose `CART_PORT` override. |
-| `REQUESTBATCHER_GRAFANA_URL` | `http://127.0.0.1:3000` | Grafana address, matching any `GRAFANA_PORT` override. |
-| `REQUESTBATCHER_GRAFANA_USER` | `admin` | Local Grafana user. |
-| `REQUESTBATCHER_GRAFANA_PASSWORD` | `admin` | Local Grafana password. |
+
+The fixture uses the sample's default Grafana credentials (`admin` / `admin`) and generates the Cart and Grafana host
+addresses for each run.
 
 The tests use the provisioned `requestbatcher-tempo` and `requestbatcher-prometheus` data-source UIDs through Grafana's
 authenticated proxy. No additional backend ports or test-only production endpoints are needed.

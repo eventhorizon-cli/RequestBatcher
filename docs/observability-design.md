@@ -107,8 +107,27 @@ check HasListeners before creating closures or tracing state. With no listener,
 the existing task path is used without an async wrapper, span, link collection,
 or extra per-item tracing allocation. Traced pending requests use an internal
 subclass that stores shared submission tracing state, keeping the untraced pending object's size unchanged.
-The state contains the submission context and, for recorded calls, a lazily allocated
-collection of batch contexts protected against concurrent dispatch. It never holds an Activity.
+Propagation-only state contains the submission context. A separate recorded-state subtype stores the first batch
+context directly and allocates a collection only for additional batches, protected against concurrent dispatch.
+Completing the state drains those contexts exactly once and ignores later additions. The recorded-only fields do not
+increase propagation-state size. Neither state holds an Activity or participates in a pool.
+Fixed call names and immutable sampling tags are prepared once per coordinator/adapter rather than per submission.
+They remain available to samplers at Activity creation and are not mutable through the shared tag collection.
+The metadata type, sampling-dependent state, deduplication, and Activity lifetime stay under Diagnostics. Submission
+adapters only hold metadata and invoke the tracing boundary; queue admission, capacity, dispatch, and request
+completion do not inspect sampling flags or manage Activities. The existing completion bridge stays in Diagnostics
+rather than adding telemetry callbacks to business completion contracts.
+The no-listener hot path does not access them. A submission that does not request all Activity data allocates
+neither a reverse-link synchronization gate nor a reverse-link collection. Batch dispatch still supplies every
+distinct forward context to the sampler, including unsampled contexts, but delivers reverse links only
+to submissions that collect those links. A batch link collection stores its first submission directly and lazily
+creates one dictionary for additional distinct TraceId/SpanId pairs. It exposes forward links by enumeration and
+retains the same submission references for reverse-link delivery. This avoids growing separate link and recipient
+lists; repeated items from one explicit submission allocate no dictionary. Repeated sampler enumeration is supported
+and does not mutate the collection. Dictionary capacity grows with observed distinct contexts, rather than reserving
+space for every item in a duplicate-heavy batch.
+The collection decision follows IsAllDataRequested, not the Recorded flag: record-only Activities still collect
+reverse links, while propagation-only Activities do not.
 Call completion writes the collected links before stopping the Activity, so exporters see
 the complete links without concurrent Activity mutation. Dropped calls retain only their
 available context and do not collect reverse links. Tracing-enabled calls retain only contexts on queued items; request arrays,
@@ -142,15 +161,35 @@ isolation with the new implementation without listeners, and compare disabled,
 dropped, and recorded tracing for single and explicit submissions. Validate
 processed counts, report time and allocations, and do not claim zero overhead.
 README guidance and simplified SVG diagrams explain lifetime and correlation.
+Allocation regressions are evaluated against the published 0.3.2 package with the same 20 ms workload and SDK
+sampling rates (disabled, 0%, 1%, 10%, 100%). Verify mixed sampled/dropped submissions in one batch, links from
+unsampled submissions to independently sampled batches, creation-time tag availability, and unmodified reverse-link
+deduplication. Activity lifetimes, completion bridges, original exception collections, and cancellation tokens are
+unchanged by allocation reductions.
+Focused tests cover zero/one/multiple reverse links, concurrent additions, idempotent completion, sparse repeated
+contexts, multiple enumeration of sampler links, and both propagation-only and record-only states. Compare isolated
+source snapshots before/after the reduction, including disabled tracing, low sampling, full sampling, and explicit groups.
 Tracing and metrics registration extensions ship in the core RequestBatcher package.
 
 ## Live integration coverage
 
-The opt-in `tests/it/RequestBatcher.Observability.IntegrationTests` project targets .NET 10 and uses the existing sample
-Compose stack. Ordinary unit tests remain independent of Docker and network access. The integration suite does not
-start or stop containers; its README documents startup and environment overrides. It uses real Cart HTTP requests,
-Grafana's Tempo and Prometheus data-source proxies, and unique W3C trace IDs to isolate its evidence from continuous
-sample traffic. No production dependency or public API changes are required.
+The integration project also contains bounded in-process stress tests using the public API and real OpenTelemetry SDK.
+These run without Docker and cover repeated concurrent single/group submissions at 0% and 100% sampling, constrained
+capacity, and many handler batches. Each request ID must be processed exactly once; recorded Execute/HandleBatch
+links must match actual batch membership in both directions, with no parent links or contexts from an earlier wave.
+A separate coordinated stress case holds handler dispatch while queued work is canceled, then drains success/failure
+outcomes during disposal and rejects later submissions. Completion and failure checks use barriers and captured
+outcomes rather than timing-only assertions. Tests have bounded deadlines, dispose providers, and keep telemetry
+capture bounded to the current wave. The existing CI invocation runs these tests without extra environment steps.
+
+The opt-in `tests/it/RequestBatcher.Observability.IntegrationTests` project targets .NET 10 and owns an isolated
+Testcontainers environment containing the existing sample's PostgreSQL, OTEL-LGTM, Cart, and Pricing services.
+The fixture builds the application images, assigns random host ports, and explicitly cleans up partial or completed
+startup; Testcontainers' resource reaper provides an additional cleanup guard. Ordinary unit tests remain independent
+of Docker and network access. The live suite uses real Cart HTTP requests, Grafana's Tempo and Prometheus data-source
+proxies, and unique W3C trace IDs to isolate its evidence from other sample traffic. The Compose sample remains
+available for manual inspection but is not started by the automated integration project. No production dependency or
+public API changes are required.
 
 Concurrent Cart requests each submit 2–10 product IDs through the native enumerable API. The suite verifies ordered
 prices including duplicates, exactly one Execute span per HTTP request, its HTTP parent, and independent HandleBatch
