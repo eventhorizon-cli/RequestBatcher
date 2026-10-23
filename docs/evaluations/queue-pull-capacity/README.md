@@ -79,8 +79,10 @@ There is no before/after multi-batch-pull implementation comparison.
   Records are reference objects containing an integer ID; no RequestBatcher pending state
   is constructed. Timing includes enumerator creation/disposal, per-item ID bookkeeping,
   and per-batch size/synchronous-completion counters. Validation and the 30-second safety
-  timeout setup are outside measurement. Integer routing spreads 256 records into each
-  of sixteen partitions, and each drain verifies those counts. Segment size follows
+  timeout setup are outside measurement. Numeric routing is expected to spread 256 records
+  into each of sixteen partitions. Validation attributes each returned batch to its first
+  ID's partition-key residue and checks balanced counts; it does not observe the queue's
+  actual partition IDs. Segment size follows
   production (`max(16, BatchSize)`). Reported BDN time/allocation is per record because
   the pull benchmark declares 4,096 operations per invocation.
 - `DispatchCapacityBenchmarks` submits 4,096 distinct requests in one explicit submission,
