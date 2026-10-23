@@ -70,14 +70,23 @@ Requests are held in memory and cannot be recovered after a process failure.
 
 ## When to Use It
 
-Use RequestBatcher for independent database, cache, or downstream operations that benefit from a batch API. It also
-fits short traffic bursts that need bounded internal queue capacity and downstream concurrency, related requests that
-benefit from batch-level merging without relying on handler ordering, and work where caller cancellation should remove
-only requests that have not yet been dispatched. Dispatched work is allowed to finish independently of that caller.
+**Independent read-only queries are the recommended starting point**: database lookups, cache reads, and downstream
+batch-query APIs. They can often share a batch or deduplicate equivalent queries without introducing write side effects.
+Requests must still be independent, temporary in-memory queuing must be acceptable, and the downstream operation
+must benefit from receiving multiple items:
 
-For database updates, if partial success within one handler invocation would leave inconsistent state, the handler
-should execute that invocation in one transaction. RequestBatcher propagates the handler outcome but cannot roll back
-writes that have already been committed.
+- database queries that can fetch multiple IDs together, cache multi-gets, and downstream batch reads;
+- short traffic bursts where internal queue capacity and downstream concurrency must be bounded;
+- work where caller cancellation should discard only requests that have not been dispatched, while dispatched work
+  must be allowed to finish independently of that caller;
+- related requests that benefit from batch-level merging without relying on handler ordering.
+
+Batch `INSERT`, `UPDATE`, `UPSERT`, and cache writes are also possible, but the application must handle retry
+idempotency, concurrent writes across batches, and transaction boundaries. Even equal partition keys do not serialize
+handler execution. If partial success within one handler invocation would leave inconsistent state, execute that
+invocation in one transaction. A single submission can span several handler batches, so a transaction per handler
+does not make the entire submission atomic. RequestBatcher propagates the handler outcome but cannot roll back
+writes that have already been committed or recover pending work after a process failure.
 
 ## When Not to Use It
 
