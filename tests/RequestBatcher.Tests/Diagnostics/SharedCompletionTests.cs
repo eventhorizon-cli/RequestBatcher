@@ -126,6 +126,54 @@ public sealed class SharedCompletionTests
     }
 
     [Fact]
+    public async Task CallCompletionObserver_RepeatedAttach_ReturnsOriginalDecision()
+    {
+        using var capture = new ActivityCapture();
+        var activity = StartActivity();
+        var observer = new CallCompletionObserver(activity, null);
+        var completion = new TracedRequestCompletion(observer);
+
+        Assert.False(observer.TryAttach(Task.CompletedTask));
+        Assert.False(observer.TryAttach(completion.Task));
+
+        completion.CompleteSuccessfully();
+        await completion.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Empty(capture.Stopped);
+        activity.Dispose();
+    }
+
+    [Fact]
+    public async Task CallCompletionObserver_SuppressedExecutionContext_RestoresAmbientActivity()
+    {
+        using var capture = new ActivityCapture();
+        var previous = Activity.Current;
+        var activity = StartActivity();
+        CallCompletionObserver observer;
+        try
+        {
+            using (ExecutionContext.SuppressFlow())
+            {
+                observer = new CallCompletionObserver(activity, null);
+            }
+
+            var completion = new TracedRequestCompletion(observer);
+            Assert.True(observer.TryAttach(completion.Task));
+
+            using var workerParent = new Activity("worker-parent").Start();
+            completion.CompleteSuccessfully();
+            await completion.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            Assert.Same(workerParent, Activity.Current);
+            Assert.Single(capture.Stopped);
+        }
+        finally
+        {
+            Activity.Current = previous;
+        }
+    }
+
+    [Fact]
     public async Task TracedResponseCompletion_AttachAndPublish_ReturnsTypedResultAndStopsSpan()
     {
         using var capture = new ActivityCapture();
@@ -139,6 +187,69 @@ public sealed class SharedCompletionTests
         completion.CompleteSuccessfully();
 
         Assert.Equal("answer", await completion.Task.WaitAsync(TimeSpan.FromSeconds(5)));
+        Assert.Single(capture.Stopped);
+    }
+
+    [Fact]
+    public async Task TracedResponseCompletion_Error_PublishesOriginalFailureAndStopsSpan()
+    {
+        using var capture = new ActivityCapture();
+        var expected = new InvalidOperationException("response failed");
+        var activity = StartActivity();
+        var observer = new CallCompletionObserver(activity, null);
+        var completion = new TracedResponseCompletion<int, string>(new RequestBatchEntry<int, string>(1), observer);
+
+        Assert.True(observer.TryAttach(completion.Task));
+        completion.CompleteWithError(expected);
+
+        var actual = await Assert.ThrowsAsync<InvalidOperationException>(() => completion.Task);
+        Assert.Same(expected, actual);
+        Assert.True(completion.Task.IsFaulted);
+        var span = Assert.Single(capture.Stopped);
+        Assert.Equal(ActivityStatusCode.Error, span.Status);
+        Assert.Equal(typeof(InvalidOperationException).FullName, span.GetTagItem("error.type"));
+    }
+
+    [Fact]
+    public async Task TracedResponseCompletion_Canceled_PreservesTokenAndStopsSpan()
+    {
+        using var capture = new ActivityCapture();
+        using var cancellation = new CancellationTokenSource();
+        var activity = StartActivity();
+        var observer = new CallCompletionObserver(activity, null);
+        var completion = new TracedResponseCompletion<int, string>(new RequestBatchEntry<int, string>(1), observer);
+        Assert.True(observer.TryAttach(completion.Task));
+
+        completion.CompleteCanceled(cancellation.Token);
+
+        var actual = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => completion.Task);
+        Assert.Equal(cancellation.Token, actual.CancellationToken);
+        Assert.True(completion.Task.IsCanceled);
+        var span = Assert.Single(capture.Stopped);
+        Assert.Equal(true, span.GetTagItem("requestbatcher.canceled"));
+    }
+
+    [Fact]
+    public async Task RequestBatcherTracing_GenericObservedCompletion_ReturnsOriginalTypedTask()
+    {
+        using var capture = new ActivityCapture();
+        TracedResponseCompletion<int, string>? completion = null;
+        var returned = RequestBatcherTracing.TraceCall(
+            new RequestBatcherTraceMetadata("typed-observed"),
+            7,
+            (request, _, observer) =>
+            {
+                var entry = new RequestBatchEntry<int, string>(request);
+                entry.SetResponse("typed-result");
+                completion = new TracedResponseCompletion<int, string>(entry, observer!);
+                return completion.Task;
+            });
+
+        Assert.NotNull(completion);
+        Assert.Same(completion.Task, returned);
+        completion.CompleteSuccessfully();
+
+        Assert.Equal("typed-result", await returned.WaitAsync(TimeSpan.FromSeconds(5)));
         Assert.Single(capture.Stopped);
     }
 
@@ -207,6 +318,67 @@ public sealed class SharedCompletionTests
         Assert.Contains(completion.Task.Exception.InnerExceptions, exception => ReferenceEquals(exception, second));
         Assert.Same(first, actual);
         Assert.Single(capture.Stopped);
+    }
+
+    [Fact]
+    public async Task TracedBatchSubmissionCompletion_CanceledFinalItem_PublishesCancellation()
+    {
+        using var capture = new ActivityCapture();
+        using var cancellation = new CancellationTokenSource();
+        var activity = StartActivity();
+        var observer = new CallCompletionObserver(activity, null);
+        var completion = new TracedBatchSubmissionCompletion(2, cancellation.Token, observer);
+        Assert.True(observer.TryAttach(completion.Task));
+
+        completion.CompleteCanceled();
+        Assert.False(completion.Task.IsCompleted);
+        completion.CompleteSuccessfully();
+
+        var actual = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => completion.Task);
+        Assert.Equal(cancellation.Token, actual.CancellationToken);
+        Assert.True(completion.Task.IsCanceled);
+        Assert.Single(capture.Stopped);
+        Assert.Equal(true, Assert.Single(capture.Stopped).GetTagItem("requestbatcher.canceled"));
+    }
+
+    [Fact]
+    public async Task RequestBatcherTracing_ObservedSubmissionFailure_StopsSpanAndRethrows()
+    {
+        using var capture = new ActivityCapture();
+        var expected = new InvalidOperationException("submission failed");
+
+        var actual = await Assert.ThrowsAsync<InvalidOperationException>(() => RequestBatcherTracing.TraceCall(
+            new RequestBatcherTraceMetadata("observed-failure"),
+            expected,
+            (exception, _, _) => throw exception));
+
+        Assert.Same(expected, actual);
+        var span = Assert.Single(capture.Stopped);
+        Assert.Equal(ActivityStatusCode.Error, span.Status);
+        Assert.Equal(typeof(InvalidOperationException).FullName, span.GetTagItem("error.type"));
+    }
+
+    [Fact]
+    public async Task RequestBatcherTracing_GenericObservedSubmissionFailure_StopsSpanAndRethrows()
+    {
+        using var capture = new ActivityCapture();
+        var expected = new InvalidOperationException("generic submission failed");
+
+        var actual = await Assert.ThrowsAsync<InvalidOperationException>(() => RequestBatcherTracing.TraceCall<int, string>(
+            new RequestBatcherTraceMetadata("generic-observed-failure"),
+            42,
+            (value, _, _) => throw expected));
+
+        Assert.Same(expected, actual);
+        var span = Assert.Single(capture.Stopped);
+        Assert.Equal(ActivityStatusCode.Error, span.Status);
+        Assert.Equal(typeof(InvalidOperationException).FullName, span.GetTagItem("error.type"));
+    }
+
+    [Fact]
+    public void RequestBatcherRequestType_GenericNonEntry_ReturnsSimpleTypeName()
+    {
+        Assert.Equal("List`1", RequestBatcherRequestType.GetName(typeof(List<int>)));
     }
 
     private static Activity StartActivity()

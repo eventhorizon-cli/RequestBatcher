@@ -180,7 +180,6 @@ public sealed class ObservabilityTests(ITestOutputHelper output, ObservabilityFi
         Assert.Equal(http.SpanId, execute.ParentSpanId);
         Assert.Equal(probe.TraceId, execute.TraceId);
         Assert.Equal("cart", execute.ServiceName);
-        Assert.Equal("System.Int32", execute.Attributes["requestbatcher.request.type"]);
         Assert.Equal("pricing-queries", execute.Attributes["requestbatcher.name"]);
         Assert.Equal(nameof(Int32), execute.Attributes["requestbatcher.request.type"]);
         Assert.Equal("200", http.Attributes["http.response.status_code"]);
