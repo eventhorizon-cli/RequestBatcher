@@ -73,8 +73,10 @@ are never metric dimensions.
 
 ## Context and outcomes
 
-Only ActivityContext and a shared per-submission collection of batch contexts are transported. ExecutionContext, Activity instances,
-logging scopes, and baggage are not copied into the consumer. When a listener
+Batch correlation uses ActivityContext and a shared per-submission collection of batch contexts. Handler execution
+does not inherit the submitting caller's ExecutionContext, Activity, logging scopes, or baggage. Diagnostics retains
+the call Activity and captured ExecutionContext only for the completion notification, restoring that context around
+span finalization and restoring the completing thread afterward. When a listener
 drops a call Activity, an available caller context can still provide a link.
 No valid context means no link. Forward links and batch attributes are supplied at span
 creation, so samplers can inspect them. The application's sampler governs batch
@@ -87,7 +89,11 @@ separated by a space, such as `RequestBatcher.Execute pricing-queries` and
 the exact public DI registration name, never an internal topic or pipeline key. It is available at Activity creation for
 sampling and carried once on the coordinator through dispatch and response/delegate adapters,
 without adding per-request state. Tags also use `requestbatcher.request.type`,
-`requestbatcher.batch.size`, and `requestbatcher.canceled`. Faults set Error and
+`requestbatcher.batch.size`, and `requestbatcher.canceled`. Both Execute and HandleBatch use the public request type's
+simple name for `requestbatcher.request.type`, matching metrics and unwrapping internal response entries. Diagnostics
+owns the shared type-name resolver; callers cache its result rather than reflecting per request. Existing span queries
+and samplers filtering fully qualified request types must use short names. Tests cover class and delegate handlers,
+with and without responses, and creation-time tags. Faults set Error and
 `error.type`; payloads, tenant keys, exception messages and stacks are not emitted.
 Expected task cancellation sets the cancellation tag without Error; a faulted
 task containing OperationCanceledException remains a fault. Tracing preserves
@@ -115,8 +121,9 @@ Fixed call names and immutable sampling tags are prepared once per coordinator/a
 They remain available to samplers at Activity creation and are not mutable through the shared tag collection.
 The metadata type, sampling-dependent state, deduplication, and Activity lifetime stay under Diagnostics. Submission
 adapters only hold metadata and invoke the tracing boundary; queue admission, capacity, dispatch, and request
-completion do not inspect sampling flags or manage Activities. The existing completion bridge stays in Diagnostics
-rather than adding telemetry callbacks to business completion contracts.
+completion do not inspect sampling flags or manage Activities. Completion sources support an internal publication
+notification; Diagnostics supplies observed completion subclasses only when a call Activity exists. Ordinary completion
+sources retain their existing fields. The notification separates preparing an outcome from publishing the caller's Task.
 The no-listener hot path does not access them. A submission that does not request all Activity data allocates
 neither a reverse-link synchronization gate nor a reverse-link collection. Batch dispatch still supplies every
 distinct forward context to the sampler, including unsampled contexts, but delivers reverse links only
@@ -130,14 +137,21 @@ The collection decision follows IsAllDataRequested, not the Recorded flag: recor
 reverse links, while propagation-only Activities do not.
 Call completion writes the collected links before stopping the Activity, so exporters see
 the complete links without concurrent Activity mutation. Dropped calls retain only their
-available context and do not collect reverse links. Tracing-enabled calls retain only contexts on queued items; request arrays,
-completion contracts, routing, cancellation, and lifecycle stay unchanged.
+available context and do not collect reverse links. Traced pending items carry correlation contexts and an observed
+completion source; request payloads, routing, cancellation, and public lifecycle semantics stay unchanged.
 
-An enabled call starts its Activity, invokes the normal core path, and restores
-caller ambient context synchronously. Already completed tasks are returned
-unchanged after ending the span. Incomplete recorded calls use a completion
-bridge that ends the span before publishing the same success, cancellation, or
-original fault collection. No Task.Run or extra thread is added per call/batch.
+An enabled call starts its Activity, invokes the core path, and restores caller ambient context synchronously.
+An observed completion registers before admission. It holds publication until the submission boundary identifies
+the returned Task. When that Task is the registered completion's Task, Diagnostics ends the span and publishes the
+existing completion directly, eliminating the extra tracing TCS and async waiter. A lock on the observer coordinates
+completion racing with submission; callbacks run outside the lock and publication occurs exactly once. The observer
+captures ExecutionContext while the call Activity is current and restores it for span completion without leaking the
+Activity or AsyncLocal values into consumer/cancellation threads.
+Already completed unobserved tasks are returned unchanged after ending the span. Producer slow paths and response-group
+materialization can return a different Task; their observed source is released without ending the span, and a Diagnostics
+completion bridge covers the entire returned Task. This preserves admission cleanup, response conversion, all original
+faults, and cancellation semantics while optimizing the ordinary admission path. Explicit request-only groups observe
+only the final aggregate publication, never an individual item's completion. No Task.Run or extra thread is added per call/batch.
 Response and delegate adapters invoke uninstrumented core methods under their
 outer call span to avoid duplicate spans and include their own preparation.
 
@@ -164,8 +178,9 @@ README guidance and simplified SVG diagrams explain lifetime and correlation.
 Allocation regressions are evaluated against the published 0.3.2 package with the same 20 ms workload and SDK
 sampling rates (disabled, 0%, 1%, 10%, 100%). Verify mixed sampled/dropped submissions in one batch, links from
 unsampled submissions to independently sampled batches, creation-time tag availability, and unmodified reverse-link
-deduplication. Activity lifetimes, completion bridges, original exception collections, and cancellation tokens are
-unchanged by allocation reductions.
+deduplication. Activity lifetimes, original exception collections, and cancellation tokens are unchanged by allocation reductions.
+Completion tests cover outcome preparation before and after observer attachment, direct Task identity, fallback wrapper
+identity, captured AsyncLocal/Activity restoration, aggregate faults, and exactly-once span completion before publication.
 Focused tests cover zero/one/multiple reverse links, concurrent additions, idempotent completion, sparse repeated
 contexts, multiple enumeration of sampler links, and both propagation-only and record-only states. Compare isolated
 source snapshots before/after the reduction, including disabled tracing, low sampling, full sampling, and explicit groups.

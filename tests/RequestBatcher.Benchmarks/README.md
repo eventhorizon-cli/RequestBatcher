@@ -27,6 +27,8 @@ These benchmarks run in process without Docker. Some use simulated asynchronous 
 | [DeduplicationConcurrencyBenchmarks](InMemory/DeduplicationConcurrencyBenchmarks.cs) | Batch size, concurrency, duplicates and submission size; bulk reads, chunked WhenAll and per-key fan-out with simulated I/O. |
 | [TaskWhenAllOverheadBenchmarks](InMemory/TaskWhenAllOverheadBenchmarks.cs) | WhenAll versus awaiting already-started tasks, with completed and pending task sets. |
 | [DelayDownstreamOverheadBenchmarks](InMemory/DelayDownstreamOverheadBenchmarks.cs) | Direct and batched calls with simulated 50 ms I/O. Paced arrivals by default; set `REQUEST_BATCHER_TRAFFIC=burst` for bursts. |
+| [QueuePullBenchmarks](InMemory/QueuePullBenchmarks.cs) | One consumer drains 4,096 prefilled BufferQueue records; batch limits 32/128 and 1/16 partitions. See the [pull capacity evaluation](../../docs/evaluations/queue-pull-capacity/README.md). |
+| [DispatchCapacityBenchmarks](InMemory/DispatchCapacityBenchmarks.cs) | Direct full batches versus public explicit submission, synchronous/20 ms handlers, concurrency 8/32 and 1/16 partitions. |
 | [PartitionKeySubmissionBenchmarks](InMemory/PartitionKeySubmissionBenchmarks.cs) | Concurrent single submissions versus one explicit submission under partition-key routing. |
 | [ExplicitSubmissionBenchmarks](InMemory/ExplicitSubmissionBenchmarks.cs) | Explicit groups versus mixed single/group submissions. |
 | [NamedBatchingBenchmarks](InMemory/NamedBatchingBenchmarks.cs) | Named versus unnamed pipelines, single/list submissions and singleton/scoped handlers. |
@@ -76,7 +78,7 @@ links, sampling, and performance boundaries.
 | Source / filter class | Comparison |
 | --- | --- |
 | [ObservabilityOverheadBenchmarks](InMemory/ObservabilityOverheadBenchmarks.cs) | Disabled, metrics-only, and tracing-plus-metrics OpenTelemetry providers around 256 named async pricing requests with a 20 ms handler delay. |
-| [TracingIoOverheadBenchmarks](InMemory/TracingIoOverheadBenchmarks.cs) | Published 0.2.4 versus 0.3.2, with tracing disabled or SDK sampling at 0%, 1%, 10%, and 100%, for single and explicit submissions with 20 ms simulated downstream calls. See the [comparison runner and report](../../docs/evaluations/tracing-io-overhead/README.md). |
+| [TracingIoOverheadBenchmarks](InMemory/TracingIoOverheadBenchmarks.cs) | Published versions and source snapshots, with tracing disabled or SDK sampling at 0%, 1%, 10%, and 100%, for single and explicit submissions with 20 ms simulated downstream calls. See the [comparison runner and original report](../../docs/evaluations/tracing-io-overhead/README.md) and the [shared completion results](../../docs/evaluations/tracing-io-overhead/shared-completion.md). |
 | [MetricsIoOverheadBenchmarks](InMemory/MetricsIoOverheadBenchmarks.cs) | Metrics disabled, SDK aggregation only, and periodic collection every 1,000 ms or 100 ms, with tracing disabled and 20 ms simulated downstream calls. See the [metrics evaluation](../../docs/evaluations/metrics-io-overhead/README.md). |
 
 The corresponding [observability overhead evaluation](../../docs/evaluations/observability-overhead/README.md) records the

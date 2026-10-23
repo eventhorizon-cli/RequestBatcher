@@ -1,6 +1,6 @@
 namespace RequestBatcher.PendingRequests;
 
-internal sealed class BatchSubmissionCompletion : TaskCompletionSource, IRequestCompletion
+internal class BatchSubmissionCompletion : TaskCompletionSource, IRequestCompletion
 {
     private readonly CancellationToken _cancellationToken;
     private Exception? _firstException;
@@ -65,6 +65,15 @@ internal sealed class BatchSubmissionCompletion : TaskCompletionSource, IRequest
             return;
         }
 
+        Publish();
+    }
+
+    protected Exception? Error => _exceptions?.FirstOrDefault() ?? _firstException;
+
+    protected bool IsCanceled => _firstException is null && _wasCanceled != 0;
+
+    protected virtual void Publish()
+    {
         // Error writers publish before decrementing, so the last item owns a stable exception set.
         if (Volatile.Read(ref _exceptions) is { } exceptions)
         {

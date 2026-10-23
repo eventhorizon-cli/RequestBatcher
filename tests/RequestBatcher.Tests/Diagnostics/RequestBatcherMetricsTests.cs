@@ -58,11 +58,11 @@ public sealed class RequestBatcherMetricsTests
     [Theory]
     [InlineData(typeof(int), "Int32")]
     [InlineData(typeof(RequestBatchEntry<int, string>), "Int32")]
-    public void GetMetricRequestTypeName_Type_ReturnsSimpleRequestTypeName(
+    public void GetName_Type_ReturnsSimpleRequestTypeName(
         Type requestType,
         string expected)
     {
-        Assert.Equal(expected, RequestBatcherMetrics.GetMetricRequestTypeName(requestType));
+        Assert.Equal(expected, RequestBatcherRequestType.GetName(requestType));
     }
 
     [Fact]

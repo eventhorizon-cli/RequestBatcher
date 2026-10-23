@@ -11,6 +11,7 @@ Find reports by question; versions, workloads, and limitations are documented in
 
 ## Scheduling and External I/O
 
+- [queue-pull-capacity](queue-pull-capacity/README.md): isolates prefilled queue draining and compares the complete pipeline with direct full batches for synchronous and 20 ms asynchronous handlers.
 - [arrival-scheduling](arrival-scheduling/README.md): compares direct handlers with controlled `Task.Run` for async I/O, CPU, and synchronous blocking workloads (local PostgreSQL/Redis included).
 - [external-io-scheduling](external-io-scheduling/README.md): evaluates `Task.Run`, handler concurrency, and connection count for real HTTP calls (local HTTP).
 - [external-io-latency](external-io-latency/README.md): examines client time, server wait, connection pooling, and synchronous CPU prefixes (local HTTP).
@@ -49,6 +50,8 @@ The [compact-context and link evaluation](tracing-io-overhead/compact-links.md) 
 matched before/after source snapshots and the same sampling matrix.
 The [pending completion evaluation](tracing-io-overhead/completion-optimization.md) compares internal Task, ValueTask,
 and callback completion bridges and explains the applicability of BufferQueue's reusable ValueTask source.
+The [shared tracing completion evaluation](tracing-io-overhead/shared-completion.md) compares the ordinary admission
+path before and after reusing the request's completion source, with a fresh 0.2.4 baseline and all sampling rates.
 
 The [metrics I/O evaluation](metrics-io-overhead/README.md) isolates SDK aggregation and periodic collection overhead
 with tracing disabled, using the same 1,024-request waves and simulated 20 ms calls.

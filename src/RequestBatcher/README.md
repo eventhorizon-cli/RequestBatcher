@@ -36,14 +36,14 @@ RequestBatcher uses [BufferQueue](https://github.com/eventhorizon-cli/BufferQueu
 separately.
 
 This is **opportunistic batching**: writing a request to BufferQueue sends a push notification that wakes an idle
-consumer. Once it has an execution slot, the consumer pulls requests queued at that moment; it does not wait for a
-fixed time window to fill `BatchSize`.
+consumer. It first acquires one execution slot, then pulls up to `BatchSize` requests (default: 128) from one partition
+and dispatches that batch. If fewer requests are available, it takes those immediately without waiting to fill the batch.
 
 Callers obtain `IRequestBatcher<TRequest>` or `IRequestBatcher<TRequest, TResponse>` through DI, submit requests, and
 await their individual results.
 
 After dispatching a batch, the loop continues. If another slot is available, it can pull and dispatch the next batch
-without waiting for the previous batch to finish.
+without waiting for the previous batch to finish. Each batch holds one slot until its processing completes.
 
 **It waits for the next push notification only when none of the assigned partitions has data.**
 
@@ -67,6 +67,34 @@ Requests are held in memory and cannot be recovered after a process failure.
 
 [Full documentation](https://github.com/eventhorizon-cli/RequestBatcher#readme) |
 [简体中文](https://github.com/eventhorizon-cli/RequestBatcher/blob/main/README.zh-CN.md)
+
+## When to Use It
+
+**Independent read-only queries are the recommended starting point**: database lookups, cache reads, and downstream
+batch-query APIs. They can often share a batch or deduplicate equivalent queries without introducing write side effects.
+Requests must still be independent, temporary in-memory queuing must be acceptable, and the downstream operation
+must benefit from receiving multiple items:
+
+- database queries that can fetch multiple IDs together, cache multi-gets, and downstream batch reads;
+- short traffic bursts where internal queue capacity and downstream concurrency must be bounded;
+- work where caller cancellation should discard only requests that have not been dispatched, while dispatched work
+  must be allowed to finish independently of that caller;
+- related requests that benefit from batch-level merging without relying on handler ordering.
+
+Batch `INSERT`, `UPDATE`, `UPSERT`, and cache writes are also possible, but the application must handle retry
+idempotency, concurrent writes across batches, and transaction boundaries. Even equal partition keys do not serialize
+handler execution. If partial success within one handler invocation would leave inconsistent state, execute that
+invocation in one transaction. A single submission can span several handler batches, so a transaction per handler
+does not make the entire submission atomic. RequestBatcher propagates the handler outcome but cannot roll back
+writes that have already been committed or recover pending work after a process failure.
+
+## When Not to Use It
+
+Do not use RequestBatcher when work must survive process failure, remain inside the caller's transaction, wait for a
+minimum batch size, or rely on automatic retries or exactly-once effects. It is also not
+suitable when an in-flight downstream operation must stop as soon as its individual caller disconnects, times out, or
+cancels. One handler batch can contain requests from several callers, so caller cancellation tokens are not forwarded
+to the handler and cannot cancel the shared handler call.
 
 ## Installation and DI Registration
 
@@ -106,247 +134,6 @@ var quote = await batcher.ExecuteAsync(new PriceQuery(ProductId: 101));
 Use `Microsoft.Extensions.DependencyInjection` and `RequestBatcher`. The [Request/Response Batching](#requestresponse-batching)
 section below defines `PriceQuery`, `PriceQuote`, `PriceQueryHandler`, and the `IPriceStore` dependency. In application
 services, constructor-inject `IRequestBatcher<PriceQuery, PriceQuote?>` instead of resolving it manually.
-
-## Named Batchers and Primitive Requests
-
-A request can be a primitive ID. Use the `batcherName` overload when several operations accept the same request type:
-for example, `"price"` and `"stock"` can each register an independent `int` pipeline. Each name has its own handler,
-options, queue capacity, and concurrency limit. Named and unnamed registrations may coexist.
-
-```csharp
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Options;
-using RequestBatcher;
-
-services.AddRequestBatcher<int, decimal?, PriceByIdHandler>(
-    batcherName: "price",
-    handlerLifetime: ServiceLifetime.Scoped,
-    configure: options =>
-    {
-        options.BatchSize = 100;
-        options.MaxConcurrency = 4;
-        options.UsePartitionKey(id => id, partitionCount: 8);
-    });
-
-var batcher = serviceProvider.GetRequiredKeyedService<IRequestBatcher<int, decimal?>>("price");
-var prices = await batcher.ExecuteAsync(new[] { 101, 102, 101 });
-var options = serviceProvider.GetRequiredService<IOptionsMonitor<RequestBatchOptions<int>>>().Get("price");
-```
-
-The handler below uses the `IPriceStore` contract from the request/response example. Register its implementation
-in the application's service collection as shown above:
-
-```csharp
-public sealed class PriceByIdHandler(IPriceStore store) : IRequestBatchHandler<int, decimal?>
-{
-    public async ValueTask HandleAsync(
-        IReadOnlyList<RequestBatchEntry<int, decimal?>> entries,
-        CancellationToken cancellationToken = default)
-    {
-        var ids = entries.Select(entry => (long)entry.Request).Distinct().ToArray();
-        var prices = await store.FindAsync(ids, cancellationToken).ConfigureAwait(false);
-        var pricesById = prices.ToDictionary(price => price.ProductId);
-        entries.SetResponses(id => pricesById.GetValueOrDefault(id)?.Price);
-    }
-}
-```
-
-Results follow input order, including duplicates; missing products return null. An explicit list can split into
-multiple handler batches.
-
-In application services, inject the named batcher through the constructor. Register `PriceLookup` with
-`services.AddScoped<PriceLookup>()`; the attribute selects the same `"price"` name used during batcher registration:
-
-```csharp
-using Microsoft.Extensions.DependencyInjection;
-using RequestBatcher;
-
-public sealed class PriceLookup(
-    [FromKeyedServices("price")] IRequestBatcher<int, decimal?> batcher)
-{
-    public Task<IReadOnlyList<decimal?>> FindAsync(
-        IEnumerable<int> productIds,
-        CancellationToken cancellationToken = default) =>
-        batcher.ExecuteAsync(productIds, cancellationToken);
-}
-```
-
-In ASP.NET Core MVC, the same attribute can inject the batcher directly into a Controller Action parameter:
-
-```csharp
-using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.DependencyInjection;
-using RequestBatcher;
-
-[ApiController]
-[Route("api/prices")]
-public sealed class PricesController : ControllerBase
-{
-    [HttpPost("query")]
-    public Task<IReadOnlyList<decimal?>> FindAsync(
-        [FromBody] int[] productIds,
-        [FromKeyedServices("price")] IRequestBatcher<int, decimal?> batcher,
-        CancellationToken cancellationToken) =>
-        batcher.ExecuteAsync(productIds, cancellationToken);
-}
-```
-
-Register MVC with `builder.Services.AddControllers()` and map it with `app.MapControllers()`. Minimal API handler
-parameters support the same attribute, as shown in the runnable sample. See Microsoft's official documentation for
-[keyed services and constructor injection](https://learn.microsoft.com/en-us/dotnet/core/extensions/dependency-injection/overview#keyed-services)
-and [Controller Action injection](https://learn.microsoft.com/en-us/aspnet/core/mvc/controllers/dependency-injection?view=aspnetcore-8.0#action-injection-with-fromkeyedservices).
-
-The request-only overload also accepts `batcherName`. Names are case-sensitive and must not be null, empty, or
-whitespace; a request type and name identify one pipeline, regardless of response type. Use the original overload
-for the unnamed default. Configuration is captured at registration; named options expose that configuration and
-do not provide runtime queue reconfiguration. `UsePartitionKey` routes requests within the selected batcher and
-does not select a batcher or serialize its handler batches.
-
-The [named versus unnamed benchmark](https://github.com/eventhorizon-cli/RequestBatcher/blob/main/docs/evaluations/named-batching/README.md) keeps request/response types,
-handlers and batching options identical, comparing single and explicit submissions with singleton and scoped handlers.
-
-The runnable [PostgreSQL sample](https://github.com/eventhorizon-cli/RequestBatcher/tree/main/samples/RequestBatcher.Deduplication) uses a named `int` price-query batcher with
-`decimal?` responses, widens IDs for its PostgreSQL `bigint` column, and accepts a JSON `int[]` at `POST /prices/query`.
-
-## Delegate Handlers
-
-Delegate handlers keep short batch-processing logic next to the `ExecuteAsync` call that submits the work, so you
-can read and update the submission and handling code together. They suit straightforward batch lookups or result
-mapping. At the call site, use a static lambda, static anonymous method, static local function, or static method
-group. When the logic grows or needs to be reused and tested independently, use a separate `IRequestBatchHandler`
-class.
-
-**Delegate handlers are optimized for repeated execution**: signature inspection and expression-tree compilation of a
-strongly typed invoker happen once on first binding. Subsequent submissions use a reference-equality fast path, and
-dispatched batches reuse the cached invoker without reflection, `DynamicInvoke` or argument arrays. This automatic
-binding mode requires dynamic code and is not supported for NativeAOT or trimming.
-
-In-memory benchmarks using the same configuration show individual-submission means for delegate and typed handlers
-differing by about 1%, with similar allocations and no clear steady-state regression. These measurements exclude the
-initial compilation cost; see the [delegate-handler performance comparison](https://github.com/eventhorizon-cli/RequestBatcher/blob/main/docs/evaluations/delegate-handlers/README.md).
-
-Use `AddDelegateRequestBatcher` to declare the request/response contract and options, then supply a static handler
-target at the call site:
-
-**Handlers must use static implementations without capturing locals or instance state.** Lambdas, anonymous
-methods and local functions must explicitly declare `static`; method groups must refer to ordinary or generic
-static methods. Receive services through injected parameters. Delegates may be passed directly or through variables,
-fields, parameters, properties or factories, including explicit construction, parentheses and casts.
-
-```csharp
-using Microsoft.Extensions.DependencyInjection;
-using RequestBatcher;
-
-services.AddKeyedScoped<IPriceStore, PriceStore>("catalog");
-services.AddDelegateRequestBatcher<int, decimal?>(
-    batcherName: "price",
-    configure: options =>
-    {
-        options.BatchSize = 100;
-        options.MaxConcurrency = 4;
-    });
-
-var batcher = serviceProvider.GetRequiredKeyedService<IRequestBatcher<int, decimal?>>("price");
-var prices = await batcher.ExecuteAsync(
-    new[] { 101, 102, 101 },
-    static async ValueTask (
-        IReadOnlyList<RequestBatchEntry<int, decimal?>> entries,
-        [FromKeyedServices("catalog")] IPriceStore store,
-        CancellationToken batchCancellation) =>
-    {
-        var ids = entries.Select(entry => (long)entry.Request).Distinct().ToArray();
-        var rows = await store.FindAsync(ids, batchCancellation).ConfigureAwait(false);
-        var pricesById = rows.ToDictionary(row => row.ProductId);
-        entries.SetResponses(id => pricesById.GetValueOrDefault(id)?.Price);
-    });
-```
-
-Alternatively, replace the lambda above with a static method or static local function. Choose one form per pipeline:
-
-```csharp
-var price = await batcher.ExecuteAsync(101, HandlePricesAsync);
-
-static async ValueTask HandlePricesAsync(
-    IReadOnlyList<RequestBatchEntry<int, decimal?>> entries,
-    [FromKeyedServices("catalog")] IPriceStore store,
-    CancellationToken batchCancellation)
-{
-    var ids = entries.Select(entry => (long)entry.Request).Distinct();
-    var rows = await store.FindAsync(ids, batchCancellation).ConfigureAwait(false);
-    var pricesById = rows.ToDictionary(row => row.ProductId);
-    entries.SetResponses(id => pricesById.GetValueOrDefault(id)?.Price);
-}
-```
-
-This uses the `IPriceStore` contract from the request/response example below; register your own implementation
-(shown as `PriceStore`). Request-only pipelines use `AddDelegateRequestBatcher<TRequest>()` with a first lambda
-parameter of `IReadOnlyList<TRequest>`. Both modes support individual requests and explicit lists through the
-`ExecuteAsync` extension methods; the original interfaces have no added members.
-
-For simple or shared request types such as `int` or `string`, prefer a distinct `batcherName` for each
-business operation. For example, name a price `int` pipeline `"price"` when another operation also uses `int`,
-to avoid delegate collisions or accidental binding. Omit `batcherName` to use the default pipeline. A request type
-and name can use only one registration mode: delegate registrations require the handler on every submission, while
-typed-handler registrations use the original overloads.
-
-The first valid call binds one delegate to that pipeline. Repeated calls with an equal delegate reuse it; a
-different delegate fails before enqueueing. Different handler targets represent different handlers even when their
-bodies look identical, so use different batcher names for different operations. Concurrent first calls bind atomically.
-Services are supplied per dispatched batch, not captured from the caller's scope.
-
-The first parameter must be the exact batch list type. Other parameters are required DI services, with
-`[FromKeyedServices(key)]` selecting a keyed service. The key must be explicit; inherited keys are unsupported.
-Web applications may write `[FromServices]` on ordinary
-service parameters; it is optional because services are injected by convention. The handler may omit the batch
-lifecycle `CancellationToken`; if present, it must declare exactly one and must not give it a default such as
-`= default`. This injected token is shared by the batch and is distinct from the optional caller
-`ExecuteAsync` `cancellationToken`. The lambda may return `void`,
-`Task` or `ValueTask`; `async void` and result-bearing return types are rejected. Every response entry must still
-receive a response. List results preserve order and duplicates even when submission spans multiple handler batches.
-
-The delegate handler and its bound delegate are always singleton per pipeline; registration has no
-`ServiceLifetime` argument. Injected services retain their registered lifetimes: singleton instances are shared by
-the container, scoped instances are shared within one batch, and transient instances are resolved separately for
-each parameter. Resolved services are never cached in the singleton handler. Typed-handler registrations continue
-to honor their explicit handler lifetime.
-
-Each batch that injects services owns an async DI scope, and callers complete after scope disposal. A delegate
-without service parameters skips scope creation.
-
-**The built-in analyzer provides basic compile-time checks.** Both diagnostics are errors by default:
-
-- `RB0001` rejects known non-static lambdas, local functions and instance methods.
-- `RB0002` checks known delegate signatures, including batch-list and return types, parameter modifiers and defaults,
-  and the restrictions on `CancellationToken` and `[FromKeyedServices]`.
-
-Delegate targets may be unknown after passing through parameters, properties or factories. These forms remain
-allowed; callers must ensure the eventual target is static. Runtime binding validates the actual signature, service
-binding and delegate identity, but cannot reliably distinguish static-lambda source from a non-capturing ordinary
-lambda. Ordinary typed-handler calls are unaffected, and consumers can disable the analyzers. See the
-[delegate-handler design](https://github.com/eventhorizon-cli/RequestBatcher/blob/main/docs/delegate-handlers-design.md).
-
-The standalone [delegate PostgreSQL sample](https://github.com/eventhorizon-cli/RequestBatcher/tree/main/samples/RequestBatcher.Delegates) uses delegate handlers for both price updates and
-`POST /prices/query` list lookups. Each static lambda injects a keyed scoped `PriceStore` per handler batch.
-The [typed-handler sample](https://github.com/eventhorizon-cli/RequestBatcher/tree/main/samples/RequestBatcher.Deduplication) provides the original handler-class examples separately.
-
-## When to Use It
-
-Use RequestBatcher for independent database, cache, or downstream operations that benefit from a batch API. It also
-fits short traffic bursts that need bounded internal queue capacity and downstream concurrency, related requests that
-benefit from batch-level merging without relying on handler ordering, and work where caller cancellation should remove
-only requests that have not yet been dispatched. Dispatched work is allowed to finish independently of that caller.
-
-For database updates, if partial success within one handler invocation would leave inconsistent state, the handler
-should execute that invocation in one transaction. RequestBatcher propagates the handler outcome but cannot roll back
-writes that have already been committed.
-
-## When Not to Use It
-
-Do not use RequestBatcher when work must survive process failure, remain inside the caller's transaction, wait for a
-minimum batch size, or rely on automatic retries or exactly-once effects. It is also not
-suitable when an in-flight downstream operation must stop as soon as its individual caller disconnects, times out, or
-cancels. One handler batch can contain requests from several callers, so caller cancellation tokens are not forwarded
-to the handler and cannot cancel the shared handler call.
 
 ## APIs
 
@@ -625,6 +412,244 @@ key. `MaxConcurrency = 1` limits handler concurrency but does not merge keyed pa
 | Failure | Fails when its handler batch fails. | Can contain both successful work and failed work; the returned `Task` faults without rolling back successes. |
 | Cancellation | Cancels only before dispatch. | Applies one token to every item; dispatched items still report their actual outcome. |
 
+## Named Batchers and Primitive Requests
+
+A request can be a primitive ID. Use the `batcherName` overload when several operations accept the same request type:
+for example, `"price"` and `"stock"` can each register an independent `int` pipeline. Each name has its own handler,
+options, queue capacity, and concurrency limit. Named and unnamed registrations may coexist.
+
+```csharp
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using RequestBatcher;
+
+services.AddRequestBatcher<int, decimal?, PriceByIdHandler>(
+    batcherName: "price",
+    handlerLifetime: ServiceLifetime.Scoped,
+    configure: options =>
+    {
+        options.BatchSize = 100;
+        options.MaxConcurrency = 4;
+        options.UsePartitionKey(id => id, partitionCount: 8);
+    });
+
+var batcher = serviceProvider.GetRequiredKeyedService<IRequestBatcher<int, decimal?>>("price");
+var prices = await batcher.ExecuteAsync(new[] { 101, 102, 101 });
+var options = serviceProvider.GetRequiredService<IOptionsMonitor<RequestBatchOptions<int>>>().Get("price");
+```
+
+The handler below uses the `IPriceStore` contract from the request/response example. Register its implementation
+in the application's service collection as shown above:
+
+```csharp
+public sealed class PriceByIdHandler(IPriceStore store) : IRequestBatchHandler<int, decimal?>
+{
+    public async ValueTask HandleAsync(
+        IReadOnlyList<RequestBatchEntry<int, decimal?>> entries,
+        CancellationToken cancellationToken = default)
+    {
+        var ids = entries.Select(entry => (long)entry.Request).Distinct().ToArray();
+        var prices = await store.FindAsync(ids, cancellationToken).ConfigureAwait(false);
+        var pricesById = prices.ToDictionary(price => price.ProductId);
+        entries.SetResponses(id => pricesById.GetValueOrDefault(id)?.Price);
+    }
+}
+```
+
+Results follow input order, including duplicates; missing products return null. An explicit list can split into
+multiple handler batches.
+
+In application services, inject the named batcher through the constructor. Register `PriceLookup` with
+`services.AddScoped<PriceLookup>()`; the attribute selects the same `"price"` name used during batcher registration:
+
+```csharp
+using Microsoft.Extensions.DependencyInjection;
+using RequestBatcher;
+
+public sealed class PriceLookup(
+    [FromKeyedServices("price")] IRequestBatcher<int, decimal?> batcher)
+{
+    public Task<IReadOnlyList<decimal?>> FindAsync(
+        IEnumerable<int> productIds,
+        CancellationToken cancellationToken = default) =>
+        batcher.ExecuteAsync(productIds, cancellationToken);
+}
+```
+
+In ASP.NET Core MVC, the same attribute can inject the batcher directly into a Controller Action parameter:
+
+```csharp
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.DependencyInjection;
+using RequestBatcher;
+
+[ApiController]
+[Route("api/prices")]
+public sealed class PricesController : ControllerBase
+{
+    [HttpPost("query")]
+    public Task<IReadOnlyList<decimal?>> FindAsync(
+        [FromBody] int[] productIds,
+        [FromKeyedServices("price")] IRequestBatcher<int, decimal?> batcher,
+        CancellationToken cancellationToken) =>
+        batcher.ExecuteAsync(productIds, cancellationToken);
+}
+```
+
+Register MVC with `builder.Services.AddControllers()` and map it with `app.MapControllers()`. Minimal API handler
+parameters support the same attribute, as shown in the runnable sample. See Microsoft's official documentation for
+[keyed services and constructor injection](https://learn.microsoft.com/en-us/dotnet/core/extensions/dependency-injection/overview#keyed-services)
+and [Controller Action injection](https://learn.microsoft.com/en-us/aspnet/core/mvc/controllers/dependency-injection?view=aspnetcore-8.0#action-injection-with-fromkeyedservices).
+
+The request-only overload also accepts `batcherName`. Names are case-sensitive and must not be null, empty, or
+whitespace; a request type and name identify one pipeline, regardless of response type. Use the original overload
+for the unnamed default. Configuration is captured at registration; named options expose that configuration and
+do not provide runtime queue reconfiguration. `UsePartitionKey` routes requests within the selected batcher and
+does not select a batcher or serialize its handler batches.
+
+The [named versus unnamed benchmark](https://github.com/eventhorizon-cli/RequestBatcher/blob/main/docs/evaluations/named-batching/README.md) keeps request/response types,
+handlers and batching options identical, comparing single and explicit submissions with singleton and scoped handlers.
+
+The runnable [PostgreSQL sample](https://github.com/eventhorizon-cli/RequestBatcher/tree/main/samples/RequestBatcher.Deduplication) uses a named `int` price-query batcher with
+`decimal?` responses, widens IDs for its PostgreSQL `bigint` column, and accepts a JSON `int[]` at `POST /prices/query`.
+
+## Delegate Handlers
+
+Delegate handlers keep short batch-processing logic next to the `ExecuteAsync` call that submits the work, so you
+can read and update the submission and handling code together. They suit straightforward batch lookups or result
+mapping. At the call site, use a static lambda, static anonymous method, static local function, or static method
+group. When the logic grows or needs to be reused and tested independently, use a separate `IRequestBatchHandler`
+class.
+
+**Delegate handlers are optimized for repeated execution**: signature inspection and expression-tree compilation of a
+strongly typed invoker happen once on first binding. Subsequent submissions use a reference-equality fast path, and
+dispatched batches reuse the cached invoker without reflection, `DynamicInvoke` or argument arrays. This automatic
+binding mode requires dynamic code and is not supported for NativeAOT or trimming.
+
+In-memory benchmarks using the same configuration show individual-submission means for delegate and typed handlers
+differing by about 1%, with similar allocations and no clear steady-state regression. These measurements exclude the
+initial compilation cost; see the [delegate-handler performance comparison](https://github.com/eventhorizon-cli/RequestBatcher/blob/main/docs/evaluations/delegate-handlers/README.md).
+
+Use `AddDelegateRequestBatcher` to declare the request/response contract and options, then supply a static handler
+target at the call site:
+
+**Handlers must use static implementations without capturing locals or instance state.** Lambdas, anonymous
+methods and local functions must explicitly declare `static`; method groups must refer to ordinary or generic
+static methods. Receive services through injected parameters. Delegates may be passed directly or through variables,
+fields, parameters, properties or factories, including explicit construction, parentheses and casts.
+
+```csharp
+using Microsoft.Extensions.DependencyInjection;
+using RequestBatcher;
+
+services.AddKeyedScoped<IPriceStore, PriceStore>("catalog");
+services.AddDelegateRequestBatcher<int, decimal?>(
+    batcherName: "price",
+    configure: options =>
+    {
+        options.BatchSize = 100;
+        options.MaxConcurrency = 4;
+    });
+
+var batcher = serviceProvider.GetRequiredKeyedService<IRequestBatcher<int, decimal?>>("price");
+var prices = await batcher.ExecuteAsync(
+    new[] { 101, 102, 101 },
+    static async ValueTask (
+        IReadOnlyList<RequestBatchEntry<int, decimal?>> entries,
+        [FromKeyedServices("catalog")] IPriceStore store,
+        CancellationToken batchCancellation) =>
+    {
+        var ids = entries.Select(entry => (long)entry.Request).Distinct().ToArray();
+        var rows = await store.FindAsync(ids, batchCancellation).ConfigureAwait(false);
+        var pricesById = rows.ToDictionary(row => row.ProductId);
+        entries.SetResponses(id => pricesById.GetValueOrDefault(id)?.Price);
+    });
+```
+
+Alternatively, replace the lambda above with a static method or static local function. Choose one form per pipeline:
+
+```csharp
+var price = await batcher.ExecuteAsync(101, HandlePricesAsync);
+
+static async ValueTask HandlePricesAsync(
+    IReadOnlyList<RequestBatchEntry<int, decimal?>> entries,
+    [FromKeyedServices("catalog")] IPriceStore store,
+    CancellationToken batchCancellation)
+{
+    var ids = entries.Select(entry => (long)entry.Request).Distinct();
+    var rows = await store.FindAsync(ids, batchCancellation).ConfigureAwait(false);
+    var pricesById = rows.ToDictionary(row => row.ProductId);
+    entries.SetResponses(id => pricesById.GetValueOrDefault(id)?.Price);
+}
+```
+
+This uses the `IPriceStore` contract from the request/response example above; register your own implementation
+(shown as `PriceStore`). Request-only pipelines use `AddDelegateRequestBatcher<TRequest>()` with a first lambda
+parameter of `IReadOnlyList<TRequest>`. Both modes support individual requests and explicit lists through the
+`ExecuteAsync` extension methods; the original interfaces have no added members.
+
+For simple or shared request types such as `int` or `string`, prefer a distinct `batcherName` for each
+business operation. For example, name a price `int` pipeline `"price"` when another operation also uses `int`,
+to avoid delegate collisions or accidental binding. Omit `batcherName` to use the default pipeline. A request type
+and name can use only one registration mode: delegate registrations require the handler on every submission, while
+typed-handler registrations use the original overloads.
+
+The first valid call binds one delegate to that pipeline. Repeated calls with an equal delegate reuse it; a
+different delegate fails before enqueueing. Different handler targets represent different handlers even when their
+bodies look identical, so use different batcher names for different operations. Concurrent first calls bind atomically.
+Services are supplied per dispatched batch, not captured from the caller's scope.
+
+The first parameter must be the exact batch list type. Other parameters are required DI services, with
+`[FromKeyedServices(key)]` selecting a keyed service. The key must be explicit; inherited keys are unsupported.
+Web applications may write `[FromServices]` on ordinary
+service parameters; it is optional because services are injected by convention. The handler may omit the batch
+lifecycle `CancellationToken`; if present, it must declare exactly one and must not give it a default such as
+`= default`. This injected token is shared by the batch and is distinct from the optional caller
+`ExecuteAsync` `cancellationToken`. The lambda may return `void`,
+`Task` or `ValueTask`; `async void` and result-bearing return types are rejected. Every response entry must still
+receive a response. List results preserve order and duplicates even when submission spans multiple handler batches.
+
+The delegate handler and its bound delegate are always singleton per pipeline; registration has no
+`ServiceLifetime` argument. Injected services retain their registered lifetimes: singleton instances are shared by
+the container, scoped instances are shared within one batch, and transient instances are resolved separately for
+each parameter. Resolved services are never cached in the singleton handler. Typed-handler registrations continue
+to honor their explicit handler lifetime.
+
+Each batch that injects services owns an async DI scope, and callers complete after scope disposal. A delegate
+without service parameters skips scope creation.
+
+**The built-in analyzer provides basic compile-time checks.** Both diagnostics are errors by default:
+
+- `RB0001` rejects known non-static lambdas, local functions and instance methods.
+- `RB0002` checks known delegate signatures, including batch-list and return types, parameter modifiers and defaults,
+  and the restrictions on `CancellationToken` and `[FromKeyedServices]`.
+
+Delegate targets may be unknown after passing through parameters, properties or factories. These forms remain
+allowed; callers must ensure the eventual target is static. Runtime binding validates the actual signature, service
+binding and delegate identity, but cannot reliably distinguish static-lambda source from a non-capturing ordinary
+lambda. Ordinary typed-handler calls are unaffected, and consumers can disable the analyzers. See the
+[delegate-handler design](https://github.com/eventhorizon-cli/RequestBatcher/blob/main/docs/delegate-handlers-design.md).
+
+The standalone [delegate PostgreSQL sample](https://github.com/eventhorizon-cli/RequestBatcher/tree/main/samples/RequestBatcher.Delegates) uses delegate handlers for both price updates and
+`POST /prices/query` list lookups. Each static lambda injects a keyed scoped `PriceStore` per handler batch.
+The [typed-handler sample](https://github.com/eventhorizon-cli/RequestBatcher/tree/main/samples/RequestBatcher.Deduplication) provides the original handler-class examples separately.
+
+## Batch Size and Capacity
+
+- A handler batch contains at most `BatchSize` requests that are already queued.
+- RequestBatcher does not add a fixed delay or wait for a minimum batch size.
+- `MaxPendingRequests` is the internal BufferQueue capacity for requests that have not yet been pulled. A pulled batch
+  is auto-committed before its handler starts, so up to `MaxConcurrency * BatchSize` requests can execute in addition
+  to queued capacity. It does not limit the size of one explicit submission or the number of callers waiting for
+  capacity.
+- `Wait` admits a group no larger than the capacity atomically and splits a larger group into consecutive
+  capacity-sized slices. `Fail` rejects the whole submission unless it fits immediately.
+- Caller cancellation removes a request only before handler dispatch. After dispatch, the caller observes the real
+  handler outcome.
+- `DisposeAsync` rejects new calls, drains accepted submissions including those waiting for capacity, and releases
+  coordinator-owned resources. Concurrent and repeated calls share one operation; the application container owns
+  async disposal. Requests still cannot be recovered after a process failure.
+
 ## Configuration
 
 | Option | Default | Behavior |
@@ -760,22 +785,6 @@ QPS alone do not determine the best configuration.
 Size `MaxPendingRequests`, the queue capacity, from `items/second per batcher × acceptable queue time`, then verify
 admission latency and memory use under bursts.
 
-## Batch Size and Capacity
-
-- A handler batch contains at most `BatchSize` requests that are already queued.
-- RequestBatcher does not add a fixed delay or wait for a minimum batch size.
-- `MaxPendingRequests` is the internal BufferQueue capacity for requests that have not yet been pulled. A pulled batch
-  is auto-committed before its handler starts, so up to `MaxConcurrency * BatchSize` requests can execute in addition
-  to queued capacity. It does not limit the size of one explicit submission or the number of callers waiting for
-  capacity.
-- `Wait` admits a group no larger than the capacity atomically and splits a larger group into consecutive
-  capacity-sized slices. `Fail` rejects the whole submission unless it fits immediately.
-- Caller cancellation removes a request only before handler dispatch. After dispatch, the caller observes the real
-  handler outcome.
-- `DisposeAsync` rejects new calls, drains accepted submissions including those waiting for capacity, and releases
-  coordinator-owned resources. Concurrent and repeated calls share one operation; the application container owns
-  async disposal. Requests still cannot be recovered after a process failure.
-
 ## Routing Rules and Dispatch
 
 The queue rotates pull opportunities among readable partitions. This does not promise equal handler execution time
@@ -843,45 +852,21 @@ product ID with `entries.SetResponses(id => pricesById.GetValueOrDefault(id)?.Pr
 prices, with `null` for missing products. Both single-ID and list submissions use this handler; list results retain
 input order and duplicates even when requests span several handler batches.
 
-## Execution Context and Tracing
+## Observability
+
+### Execution Context and Tracing
 
 Background dispatch and consumer monitoring run without inheriting the initializing caller's execution context.
 Handlers do not inherit HTTP request activities (`Activity.Current`), logging scopes, or other `AsyncLocal` values
 from initialization or submission. The caller's context is preserved after resolution and after awaiting completion.
 Pass required application data, such as tenant identifiers, explicitly in requests. Activities created inside a
-handler flow normally across its awaits. The `RequestBatcher` package includes an
-`AddRequestBatcherInstrumentation()` extension for OpenTelemetry SDK integration; the core package depends only on the
-lightweight provider-builder API and does not include the full SDK or an exporter. Singleton constructors must not capture request-specific state; they follow the container's normal creation
-rules.
+handler flow normally across its awaits. Singleton constructors must not capture request-specific state; they follow
+the container's normal creation rules.
 
-## Sample Application
+### OpenTelemetry Integration
 
-The [continuous-read observability sample](https://github.com/eventhorizon-cli/RequestBatcher/blob/main/samples/RequestBatcher.Observability/README.md) starts the Cart and Pricing Web APIs, a C# traffic generator, PostgreSQL,
-and Grafana OTel LGTM with Docker Compose. It shows complete call spans, independent linked batch spans,
-and downstream database spans while concurrent Cart requests submit 2–10 item carts that share RequestBatcher batches.
-
-The [PostgreSQL Web API sample](https://github.com/eventhorizon-cli/RequestBatcher/tree/main/samples/RequestBatcher.Deduplication) demonstrates two pipelines in a Minimal API:
-
-- `POST /prices` submits a structured `PriceUpdate` to the unnamed write batcher. The handler merges updates by
-  product ID, keeps the highest version in its batch, and performs a PostgreSQL upsert.
-- `GET /prices/{productId}` submits one `int` ID to the named `"price"` batcher and returns a price value, or `404`
-  when the product is missing.
-- `POST /prices/query` submits a JSON `int[]` to the same named batcher and returns a `decimal?` array in input order,
-  preserving duplicates and returning `null` for missing products.
-
-Both query endpoints inject `[FromKeyedServices("price")] IRequestBatcher<int, decimal?>`. With product `101` stored
-at `17.90` and products `102` and `999` absent, submitting `[101,102,101,999]` returns `[17.90,null,17.90,null]`.
-The list can span multiple handler batches; duplicate IDs share a database lookup only within each handler batch.
-See the [sample README](https://github.com/eventhorizon-cli/RequestBatcher/blob/main/samples/RequestBatcher.Deduplication/README.md) for Docker startup and complete curl commands.
-
-The standalone [delegate-handler PostgreSQL sample](https://github.com/eventhorizon-cli/RequestBatcher/tree/main/samples/RequestBatcher.Delegates) uses `AddDelegateRequestBatcher` and static lambdas
-for both `POST /prices` updates and `POST /prices/query` list lookups. The query pipeline is named `"price"` and accepts
-primitive `int` IDs with `decimal?` responses. Each lambda receives a keyed scoped `PriceStore` from its batch scope;
-the delegate handler is singleton and registration has no lifetime argument. The original sample remains the
-handler-class version. The delegate sample has its own HTTP and database ports; see its
-[README](https://github.com/eventhorizon-cli/RequestBatcher/blob/main/samples/RequestBatcher.Delegates/README.md) for startup and curl commands.
-
-## Observability
+The `RequestBatcher` package includes `AddRequestBatcherInstrumentation()` for OpenTelemetry SDK integration.
+The core package depends only on the lightweight provider-builder API and does not include the full SDK or an exporter.
 
 Install the OpenTelemetry hosting and exporter packages in the application, then register both providers:
 
@@ -911,6 +896,8 @@ duration. Each non-empty batch creates an independent `RequestBatcher.HandleBatc
 distinct `Execute` spans that contributed requests. Handler database and HTTP spans are children of that batch span.
 Each recorded `Execute` also links back to its batches before it ends. These late links do not affect its sampling;
 the application's parent span is not modified. Follow the links from `Execute` to inspect each batch's downstream spans.
+Both spans use the public request type's simple name for `requestbatcher.request.type` (for example, `Int32`),
+without namespaces or internal response wrappers. Span queries and samplers must match these short names.
 
 Sampling is controlled by the application's tracing provider. A 0% sampler can still create propagation Activities,
 so it does not have the same overhead as leaving the RequestBatcher source unregistered. Propagation-only submissions
@@ -920,8 +907,8 @@ span duration and task completion semantics are unchanged.
 Named registrations append the public name after a space, for example `RequestBatcher.Execute pricing-queries` and
 `RequestBatcher.HandleBatch pricing-queries`; both spans also include `requestbatcher.name`. Unnamed registrations
 keep the base names and omit the tag. Links are causal references across the queue, not shared parent edges, trace IDs,
-or ordering guarantees. Only span contexts and shared link-collection state are transported; request scopes, baggage, and other `AsyncLocal` values
-must be passed explicitly when needed.
+or ordering guarantees. Handler execution does not inherit the caller's execution context; request scopes, baggage,
+and other `AsyncLocal` values must be passed explicitly when needed.
 
 ![RequestBatcher observability model](https://raw.githubusercontent.com/eventhorizon-cli/RequestBatcher/main/docs/diagrams/observability.svg)
 
@@ -935,6 +922,33 @@ provider listens to the meter.
 Instrument names already include `requestbatcher.`, for example `requestbatcher.batches.processed`. The sample exports
 `requestbatcher_batches_processed_total` to Prometheus. An additional exporter namespace/prefix of `requestbatcher`
 would duplicate that prefix, so leave it unset.
+
+## Sample Application
+
+The [continuous-read observability sample](https://github.com/eventhorizon-cli/RequestBatcher/blob/main/samples/RequestBatcher.Observability/README.md) starts the Cart and Pricing Web APIs, a C# traffic generator, PostgreSQL,
+and Grafana OTel LGTM with Docker Compose. It shows complete call spans, independent linked batch spans,
+and downstream database spans while concurrent Cart requests submit 2–10 item carts that share RequestBatcher batches.
+
+The [PostgreSQL Web API sample](https://github.com/eventhorizon-cli/RequestBatcher/tree/main/samples/RequestBatcher.Deduplication) demonstrates two pipelines in a Minimal API:
+
+- `POST /prices` submits a structured `PriceUpdate` to the unnamed write batcher. The handler merges updates by
+  product ID, keeps the highest version in its batch, and performs a PostgreSQL upsert.
+- `GET /prices/{productId}` submits one `int` ID to the named `"price"` batcher and returns a price value, or `404`
+  when the product is missing.
+- `POST /prices/query` submits a JSON `int[]` to the same named batcher and returns a `decimal?` array in input order,
+  preserving duplicates and returning `null` for missing products.
+
+Both query endpoints inject `[FromKeyedServices("price")] IRequestBatcher<int, decimal?>`. With product `101` stored
+at `17.90` and products `102` and `999` absent, submitting `[101,102,101,999]` returns `[17.90,null,17.90,null]`.
+The list can span multiple handler batches; duplicate IDs share a database lookup only within each handler batch.
+See the [sample README](https://github.com/eventhorizon-cli/RequestBatcher/blob/main/samples/RequestBatcher.Deduplication/README.md) for Docker startup and complete curl commands.
+
+The standalone [delegate-handler PostgreSQL sample](https://github.com/eventhorizon-cli/RequestBatcher/tree/main/samples/RequestBatcher.Delegates) uses `AddDelegateRequestBatcher` and static lambdas
+for both `POST /prices` updates and `POST /prices/query` list lookups. The query pipeline is named `"price"` and accepts
+primitive `int` IDs with `decimal?` responses. Each lambda receives a keyed scoped `PriceStore` from its batch scope;
+the delegate handler is singleton and registration has no lifetime argument. The original sample remains the
+handler-class version. The delegate sample has its own HTTP and database ports; see its
+[README](https://github.com/eventhorizon-cli/RequestBatcher/blob/main/samples/RequestBatcher.Delegates/README.md) for startup and curl commands.
 
 ## License
 

@@ -180,8 +180,8 @@ public sealed class ObservabilityTests(ITestOutputHelper output, ObservabilityFi
         Assert.Equal(http.SpanId, execute.ParentSpanId);
         Assert.Equal(probe.TraceId, execute.TraceId);
         Assert.Equal("cart", execute.ServiceName);
-        Assert.Equal("System.Int32", execute.Attributes["requestbatcher.request.type"]);
         Assert.Equal("pricing-queries", execute.Attributes["requestbatcher.name"]);
+        Assert.Equal(nameof(Int32), execute.Attributes["requestbatcher.request.type"]);
         Assert.Equal("200", http.Attributes["http.response.status_code"]);
         Assert.InRange(execute.StartTimeUnixNano, http.StartTimeUnixNano, http.EndTimeUnixNano);
         Assert.InRange(execute.EndTimeUnixNano, execute.StartTimeUnixNano + 1, http.EndTimeUnixNano);
@@ -196,6 +196,7 @@ public sealed class ObservabilityTests(ITestOutputHelper output, ObservabilityFi
         Assert.Equal("SPAN_KIND_CONSUMER", root.Kind);
         Assert.Empty(root.ParentSpanId);
         Assert.Equal("pricing-queries", root.Attributes["requestbatcher.name"]);
+        Assert.Equal(nameof(Int32), root.Attributes["requestbatcher.request.type"]);
         var size = int.Parse(root.Attributes["requestbatcher.batch.size"], CultureInfo.InvariantCulture);
         Assert.InRange(size, 1, 20);
         Assert.InRange(root.Links.Count, 1, size);

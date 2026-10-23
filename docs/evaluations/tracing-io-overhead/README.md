@@ -10,6 +10,8 @@ The subsequent [compact-context and link comparison](compact-links.md) measures 
 snapshot of that implementation, without changing the Task completion bridge.
 The [pending completion evaluation](completion-optimization.md) separately compares Task, ValueTask, and callback
 bridges with every source still pending at registration.
+The [shared completion comparison](shared-completion.md) measures the subsequent removal of tracing-only completion
+sources on the ordinary admission path, including a fresh 0.2.4 baseline and the complete sampling matrix.
 
 ## Workload and sampling contract
 
@@ -64,7 +66,7 @@ Allocations are more sensitive. Reducing sampling from 100% to 1% lowers single-
 1.47x disabled for groups. Lower sampling therefore does not make the built-in instrumentation allocation cost
 proportional to the percentage of traces recorded.
 
-The current [tracing implementation](../../../src/RequestBatcher/Diagnostics/RequestBatcherTracing.cs) creates
+The measured [0.3.2 tracing implementation](https://github.com/eventhorizon-cli/RequestBatcher/blob/v0.3.2/src/RequestBatcher/Diagnostics/RequestBatcherTracing.cs) creates
 submission context and completion wrappers whenever a propagation Activity exists, and collects links for handler
 batches before the sampling decision. Sampled Execute spans additionally collect reverse links. This explains
 why much of the allocation remains at 0%. Explicit submission amortizes Execute tracing across 32 items.

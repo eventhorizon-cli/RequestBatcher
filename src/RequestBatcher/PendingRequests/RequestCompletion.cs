@@ -1,11 +1,11 @@
 namespace RequestBatcher.PendingRequests;
 
-internal sealed class RequestCompletion()
+internal class RequestCompletion()
     : TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously), IRequestCompletion
 {
-    public void CompleteSuccessfully() => TrySetResult();
+    public virtual void CompleteSuccessfully() => TrySetResult();
 
-    public void CompleteWithError(Exception exception) => TrySetException(exception);
+    public virtual void CompleteWithError(Exception exception) => TrySetException(exception);
 
-    public void CompleteCanceled(CancellationToken cancellationToken) => TrySetCanceled(cancellationToken);
+    public virtual void CompleteCanceled(CancellationToken cancellationToken) => TrySetCanceled(cancellationToken);
 }

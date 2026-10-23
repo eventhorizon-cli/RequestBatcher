@@ -1,5 +1,6 @@
 using System.Diagnostics.CodeAnalysis;
 using RequestBatcher.Diagnostics;
+using RequestBatcher.PendingRequests;
 
 namespace RequestBatcher.DelegateHandlers;
 
@@ -9,7 +10,7 @@ internal sealed class DelegateRequestBatcher<TRequest, TResponse>(
     : IRequestBatcher<TRequest, TResponse>, IDelegateRequestBatcher<TRequest, TResponse>
 {
     private readonly RequestBatcherTraceMetadata _traceMetadata = new(
-        typeof(TRequest).FullName ?? typeof(TRequest).Name,
+        RequestBatcherRequestType.GetName(typeof(TRequest)),
         batcher.BatcherName);
 
     public Task<TResponse> ExecuteAsync(TRequest request, CancellationToken cancellationToken = default) =>
@@ -26,8 +27,8 @@ internal sealed class DelegateRequestBatcher<TRequest, TResponse>(
             ? RequestBatcherTracing.TraceCall(
                 _traceMetadata,
                 (Batcher: this, Request: request, Callback: callback, Token: cancellationToken),
-                static (state, context) => state.Batcher.SubmitCoreAsync(
-                    state.Request, state.Callback, state.Token, context))
+                static (state, context, observer) => state.Batcher.SubmitCoreAsync(
+                    state.Request, state.Callback, state.Token, context, observer))
             : SubmitCoreAsync(request, callback, cancellationToken);
 
     [RequiresDynamicCode("Delegate handlers compile a typed invoker on first use.")]
@@ -36,7 +37,8 @@ internal sealed class DelegateRequestBatcher<TRequest, TResponse>(
         TRequest request,
         Delegate callback,
         CancellationToken cancellationToken,
-        SubmissionTraceContext? traceContext = default)
+        SubmissionTraceContext? traceContext = default,
+        IRequestCompletionObserver? completionObserver = null)
     {
         if (cancellationToken.IsCancellationRequested)
         {
@@ -44,7 +46,7 @@ internal sealed class DelegateRequestBatcher<TRequest, TResponse>(
         }
 
         handler.Bind(callback);
-        return batcher.ExecuteCoreAsync(request, cancellationToken, traceContext);
+        return batcher.ExecuteCoreAsync(request, cancellationToken, traceContext, completionObserver);
     }
 
     [RequiresDynamicCode("Delegate handlers compile a typed invoker on first use.")]

@@ -82,6 +82,7 @@ public sealed class RequestBatcherTracingTests
         Assert.True(callA.StartTimeUtc <= batch.StartTimeUtc);
         Assert.True(callA.StartTimeUtc + callA.Duration >= batch.StartTimeUtc + batch.Duration);
         Assert.True(callB.StartTimeUtc + callB.Duration >= batch.StartTimeUtc + batch.Duration);
+        AssertIntRequestType(capture);
     }
 
     [Fact]
@@ -266,6 +267,7 @@ public sealed class RequestBatcherTracingTests
             Assert.All(capture.Batches, batch => Assert.Equal(call.Context, Assert.Single(batch.Links).Context));
             Assert.Equal(capture.Batches.Count(), call.Links.Count());
             Assert.All(capture.Batches, batch => Assert.Contains(call.Links, link => link.Context == batch.Context));
+            AssertIntRequestType(capture);
         }
     }
 
@@ -292,7 +294,38 @@ public sealed class RequestBatcherTracingTests
             }
 
             Assert.Single(capture.Calls);
+            AssertIntRequestType(capture);
         }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_NamespacedRequest_UsesSimpleRequestTypeForSamplingAndSpans()
+    {
+        var sampledRequestTypes = new ConcurrentQueue<(string Name, string? RequestType)>();
+        using var capture = new TraceCapture(options =>
+        {
+            sampledRequestTypes.Enqueue((
+                options.Name,
+                options.Tags?.SingleOrDefault(tag => tag.Key == "requestbatcher.request.type").Value as string));
+            return ActivitySamplingResult.AllDataAndRecorded;
+        });
+        var services = new ServiceCollection();
+        services.AddRequestBatcher<NamespacedRequest, NamespacedHandler>(ServiceLifetime.Singleton);
+        await using var provider = services.BuildServiceProvider();
+
+        await provider.GetRequiredService<IRequestBatcher<NamespacedRequest>>().ExecuteAsync(new NamespacedRequest());
+
+        Assert.Contains(
+            sampledRequestTypes,
+            item => item.Name == RequestBatcherTracing.CallName && item.RequestType == nameof(NamespacedRequest));
+        Assert.Contains(
+            sampledRequestTypes,
+            item => item.Name == RequestBatcherTracing.BatchName && item.RequestType == nameof(NamespacedRequest));
+        Assert.NotEmpty(capture.Calls);
+        Assert.NotEmpty(capture.Batches);
+        Assert.All(
+            capture.Calls.Concat(capture.Batches),
+            span => Assert.Equal(nameof(NamespacedRequest), span.GetTagItem("requestbatcher.request.type")));
     }
 
     [Theory]
@@ -326,6 +359,7 @@ public sealed class RequestBatcherTracingTests
             Assert.Single(capture.Calls);
             var batch = Assert.Single(capture.Batches);
             Assert.Equal(batch.Context, probe.Context);
+            AssertIntRequestType(capture);
         }
     }
 
@@ -510,6 +544,26 @@ public sealed class RequestBatcherTracingTests
     {
         public ValueTask HandleAsync(IReadOnlyList<int> requests, CancellationToken cancellationToken = default) =>
             handler(requests, cancellationToken);
+    }
+
+    private sealed class NamespacedRequest
+    {
+    }
+
+    private sealed class NamespacedHandler : IRequestBatchHandler<NamespacedRequest>
+    {
+        public ValueTask HandleAsync(
+            IReadOnlyList<NamespacedRequest> requests,
+            CancellationToken cancellationToken = default) => ValueTask.CompletedTask;
+    }
+
+    private static void AssertIntRequestType(TraceCapture capture)
+    {
+        Assert.NotEmpty(capture.Calls);
+        Assert.NotEmpty(capture.Batches);
+        Assert.All(
+            capture.Calls.Concat(capture.Batches),
+            span => Assert.Equal(nameof(Int32), span.GetTagItem("requestbatcher.request.type")));
     }
 
     private sealed class TraceCapture : IDisposable
