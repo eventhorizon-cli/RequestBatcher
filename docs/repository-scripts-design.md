@@ -31,6 +31,9 @@ the artifact directory, then compares the 0.3.2 package with that fixed source s
 The runner verifies resolved package/project assets, retains package hashes and complete reports, requires exactly two
 CSV data rows for 0.2.4 and ten for each current-version scenario, rejects `NA` results, and fails on child-process
 errors. It neither changes the checkout's package references nor exports telemetry.
+With `--compare-source --baseline-source <repository-tree>`, both sides use source snapshots taken before the run;
+the baseline tree replaces the published 0.3.2 package. Both scenarios compile the same current benchmark file and
+require ten complete result rows. This isolates incremental optimizations against an archived source commit.
 
 `ProfileTracingAllocations.cs` reuses the tracing I/O benchmark workload in a standalone diagnostic process. It accepts
 `Disabled`, `Sample0`, or `Sample100` and a positive measured wave count, warms up ten waves, then emits

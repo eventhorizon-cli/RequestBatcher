@@ -1,0 +1,633 @@
+// Validating benchmarks:
+// ***** BenchmarkRunner: Start   *****
+// ***** Found 3 benchmark(s) in total *****
+// ***** Building 1 exe(s) in Parallel: Start   *****
+// start dotnet  restore --nodeReuse:false /p:UseSharedCompilation=false /p:Deterministic=true /p:Optimize=true /p:ArtifactsPath="/private/tmp/requestbatcher-tracing-completion/bin/Release/net8.0/TracingCompletion-TracingCompletion-1/" /p:OutDir="/private/tmp/requestbatcher-tracing-completion/bin/Release/net8.0/TracingCompletion-TracingCompletion-1/bin/Release/net8.0/" /p:OutputPath="/private/tmp/requestbatcher-tracing-completion/bin/Release/net8.0/TracingCompletion-TracingCompletion-1/bin/Release/net8.0/" /p:PublishDir="/private/tmp/requestbatcher-tracing-completion/bin/Release/net8.0/TracingCompletion-TracingCompletion-1/publish/" in /private/tmp/requestbatcher-tracing-completion/bin/Release/net8.0/TracingCompletion-TracingCompletion-1
+// command took 3.04 sec and exited with 0
+// start dotnet  build -c Release --no-restore --nodeReuse:false /p:UseSharedCompilation=false /p:Deterministic=true /p:Optimize=true /p:ArtifactsPath="/private/tmp/requestbatcher-tracing-completion/bin/Release/net8.0/TracingCompletion-TracingCompletion-1/" /p:OutDir="/private/tmp/requestbatcher-tracing-completion/bin/Release/net8.0/TracingCompletion-TracingCompletion-1/bin/Release/net8.0/" /p:OutputPath="/private/tmp/requestbatcher-tracing-completion/bin/Release/net8.0/TracingCompletion-TracingCompletion-1/bin/Release/net8.0/" /p:PublishDir="/private/tmp/requestbatcher-tracing-completion/bin/Release/net8.0/TracingCompletion-TracingCompletion-1/publish/" --output "/private/tmp/requestbatcher-tracing-completion/bin/Release/net8.0/TracingCompletion-TracingCompletion-1/bin/Release/net8.0/" in /private/tmp/requestbatcher-tracing-completion/bin/Release/net8.0/TracingCompletion-TracingCompletion-1
+// command took 3.5 sec and exited with 0
+// ***** Done, took 00:00:06 (6.59 sec)   *****
+// Found 3 benchmarks:
+//   TracingCompletionBenchmarks.'Async Task helper + TCS': TracingCompletion(InvocationCount=8, IterationCount=12, LaunchCount=2, RunStrategy=Throughput, UnrollFactor=1, WarmupCount=4)
+//   TracingCompletionBenchmarks.'Async ValueTask helper + TCS': TracingCompletion(InvocationCount=8, IterationCount=12, LaunchCount=2, RunStrategy=Throughput, UnrollFactor=1, WarmupCount=4)
+//   TracingCompletionBenchmarks.'Awaiter callback object + TCS': TracingCompletion(InvocationCount=8, IterationCount=12, LaunchCount=2, RunStrategy=Throughput, UnrollFactor=1, WarmupCount=4)
+
+// **************************
+// Benchmark: TracingCompletionBenchmarks.'Async Task helper + TCS': TracingCompletion(InvocationCount=8, IterationCount=12, LaunchCount=2, RunStrategy=Throughput, UnrollFactor=1, WarmupCount=4)
+// *** Execute ***
+// Launch: 1 / 2
+// Execute: dotnet TracingCompletion-TracingCompletion-1.dll --anonymousPipes 117 118 --benchmarkName RequestBatcher.Benchmarks.InMemory.TracingCompletionBenchmarks.AsyncTaskHelperAsync --job TracingCompletion --benchmarkId 0 in /private/tmp/requestbatcher-tracing-completion/bin/Release/net8.0/TracingCompletion-TracingCompletion-1/bin/Release/net8.0
+// Failed to set up high priority (Permission denied). In order to run benchmarks with high priority, make sure you have the right permissions.
+// BeforeAnythingElse
+
+// Benchmark Process Environment Information:
+// BenchmarkDotNet v0.15.8
+// Runtime=.NET 8.0.25 (8.0.25, 8.0.2526.11203), Arm64 RyuJIT armv8.0-a
+// GC=Concurrent Workstation
+// HardwareIntrinsics=ArmBase+AdvSimd,AES,CRC32,DP,RDM,SHA1,SHA256 VectorSize=128
+// Job: TracingCompletion(InvocationCount=8, IterationCount=12, LaunchCount=2, RunStrategy=Throughput, UnrollFactor=1, WarmupCount=4)
+
+OverheadJitting  1: 1 op, 62166.00 ns, 62.1660 us/op
+WorkloadJitting  1: 1 op, 3110375.00 ns, 3.1104 ms/op
+
+OverheadWarmup   1: 8 op, 250.00 ns, 31.2500 ns/op
+OverheadWarmup   2: 8 op, 42.00 ns, 5.2500 ns/op
+OverheadWarmup   3: 8 op, 42.00 ns, 5.2500 ns/op
+OverheadWarmup   4: 8 op, 125.00 ns, 15.6250 ns/op
+OverheadWarmup   5: 8 op, 125.00 ns, 15.6250 ns/op
+OverheadWarmup   6: 8 op, 125.00 ns, 15.6250 ns/op
+
+OverheadActual   1: 8 op, 125.00 ns, 15.6250 ns/op
+OverheadActual   2: 8 op, 0.00 ns, 0.0000 ns/op
+OverheadActual   3: 8 op, 125.00 ns, 15.6250 ns/op
+OverheadActual   4: 8 op, 125.00 ns, 15.6250 ns/op
+OverheadActual   5: 8 op, 42.00 ns, 5.2500 ns/op
+OverheadActual   6: 8 op, 42.00 ns, 5.2500 ns/op
+OverheadActual   7: 8 op, 42.00 ns, 5.2500 ns/op
+OverheadActual   8: 8 op, 42.00 ns, 5.2500 ns/op
+OverheadActual   9: 8 op, 42.00 ns, 5.2500 ns/op
+OverheadActual  10: 8 op, 41.00 ns, 5.1250 ns/op
+OverheadActual  11: 8 op, 0.00 ns, 0.0000 ns/op
+OverheadActual  12: 8 op, 0.00 ns, 0.0000 ns/op
+OverheadActual  13: 8 op, 42.00 ns, 5.2500 ns/op
+OverheadActual  14: 8 op, 125.00 ns, 15.6250 ns/op
+OverheadActual  15: 8 op, 125.00 ns, 15.6250 ns/op
+OverheadActual  16: 8 op, 84.00 ns, 10.5000 ns/op
+OverheadActual  17: 8 op, 42.00 ns, 5.2500 ns/op
+OverheadActual  18: 8 op, 83.00 ns, 10.3750 ns/op
+OverheadActual  19: 8 op, 125.00 ns, 15.6250 ns/op
+OverheadActual  20: 8 op, 42.00 ns, 5.2500 ns/op
+
+WorkloadWarmup   1: 8 op, 5009917.00 ns, 626.2396 us/op
+WorkloadWarmup   2: 8 op, 6213500.00 ns, 776.6875 us/op
+WorkloadWarmup   3: 8 op, 4939708.00 ns, 617.4635 us/op
+WorkloadWarmup   4: 8 op, 4989958.00 ns, 623.7448 us/op
+
+// BeforeActualRun
+WorkloadActual   1: 8 op, 4769208.00 ns, 596.1510 us/op
+WorkloadActual   2: 8 op, 4491875.00 ns, 561.4844 us/op
+WorkloadActual   3: 8 op, 4461792.00 ns, 557.7240 us/op
+WorkloadActual   4: 8 op, 4963375.00 ns, 620.4219 us/op
+WorkloadActual   5: 8 op, 4413084.00 ns, 551.6355 us/op
+WorkloadActual   6: 8 op, 4409209.00 ns, 551.1511 us/op
+WorkloadActual   7: 8 op, 4621208.00 ns, 577.6510 us/op
+WorkloadActual   8: 8 op, 4442750.00 ns, 555.3438 us/op
+WorkloadActual   9: 8 op, 4946958.00 ns, 618.3698 us/op
+WorkloadActual  10: 8 op, 4995584.00 ns, 624.4480 us/op
+WorkloadActual  11: 8 op, 5038541.00 ns, 629.8176 us/op
+WorkloadActual  12: 8 op, 5062750.00 ns, 632.8438 us/op
+
+// AfterActualRun
+WorkloadResult   1: 8 op, 4769166.00 ns, 596.1458 us/op
+WorkloadResult   2: 8 op, 4491833.00 ns, 561.4791 us/op
+WorkloadResult   3: 8 op, 4461750.00 ns, 557.7188 us/op
+WorkloadResult   4: 8 op, 4963333.00 ns, 620.4166 us/op
+WorkloadResult   5: 8 op, 4413042.00 ns, 551.6303 us/op
+WorkloadResult   6: 8 op, 4409167.00 ns, 551.1459 us/op
+WorkloadResult   7: 8 op, 4621166.00 ns, 577.6458 us/op
+WorkloadResult   8: 8 op, 4442708.00 ns, 555.3385 us/op
+WorkloadResult   9: 8 op, 4946916.00 ns, 618.3645 us/op
+WorkloadResult  10: 8 op, 4995542.00 ns, 624.4428 us/op
+WorkloadResult  11: 8 op, 5038499.00 ns, 629.8124 us/op
+WorkloadResult  12: 8 op, 5062708.00 ns, 632.8385 us/op
+// GC:  0 0 0 4014176 8
+// Threading:  14769 0 8
+
+// AfterAll
+// Benchmark Process 32435 has exited with code 0.
+// Launch: 2 / 2
+// Execute: dotnet TracingCompletion-TracingCompletion-1.dll --anonymousPipes 117 118 --benchmarkName RequestBatcher.Benchmarks.InMemory.TracingCompletionBenchmarks.AsyncTaskHelperAsync --job TracingCompletion --benchmarkId 0 in /private/tmp/requestbatcher-tracing-completion/bin/Release/net8.0/TracingCompletion-TracingCompletion-1/bin/Release/net8.0
+// Failed to set up high priority (Permission denied). In order to run benchmarks with high priority, make sure you have the right permissions.
+// BeforeAnythingElse
+
+// Benchmark Process Environment Information:
+// BenchmarkDotNet v0.15.8
+// Runtime=.NET 8.0.25 (8.0.25, 8.0.2526.11203), Arm64 RyuJIT armv8.0-a
+// GC=Concurrent Workstation
+// HardwareIntrinsics=ArmBase+AdvSimd,AES,CRC32,DP,RDM,SHA1,SHA256 VectorSize=128
+// Job: TracingCompletion(InvocationCount=8, IterationCount=12, LaunchCount=2, RunStrategy=Throughput, UnrollFactor=1, WarmupCount=4)
+
+OverheadJitting  1: 1 op, 69042.00 ns, 69.0420 us/op
+WorkloadJitting  1: 1 op, 3533500.00 ns, 3.5335 ms/op
+
+OverheadWarmup   1: 8 op, 125.00 ns, 15.6250 ns/op
+OverheadWarmup   2: 8 op, 84.00 ns, 10.5000 ns/op
+OverheadWarmup   3: 8 op, 42.00 ns, 5.2500 ns/op
+OverheadWarmup   4: 8 op, 167.00 ns, 20.8750 ns/op
+OverheadWarmup   5: 8 op, 0.00 ns, 0.0000 ns/op
+OverheadWarmup   6: 8 op, 84.00 ns, 10.5000 ns/op
+OverheadWarmup   7: 8 op, 42.00 ns, 5.2500 ns/op
+
+OverheadActual   1: 8 op, 83.00 ns, 10.3750 ns/op
+OverheadActual   2: 8 op, 125.00 ns, 15.6250 ns/op
+OverheadActual   3: 8 op, 125.00 ns, 15.6250 ns/op
+OverheadActual   4: 8 op, 84.00 ns, 10.5000 ns/op
+OverheadActual   5: 8 op, 83.00 ns, 10.3750 ns/op
+OverheadActual   6: 8 op, 0.00 ns, 0.0000 ns/op
+OverheadActual   7: 8 op, 84.00 ns, 10.5000 ns/op
+OverheadActual   8: 8 op, 83.00 ns, 10.3750 ns/op
+OverheadActual   9: 8 op, 41.00 ns, 5.1250 ns/op
+OverheadActual  10: 8 op, 42.00 ns, 5.2500 ns/op
+OverheadActual  11: 8 op, 42.00 ns, 5.2500 ns/op
+OverheadActual  12: 8 op, 41.00 ns, 5.1250 ns/op
+OverheadActual  13: 8 op, 42.00 ns, 5.2500 ns/op
+OverheadActual  14: 8 op, 42.00 ns, 5.2500 ns/op
+OverheadActual  15: 8 op, 42.00 ns, 5.2500 ns/op
+OverheadActual  16: 8 op, 42.00 ns, 5.2500 ns/op
+OverheadActual  17: 8 op, 375.00 ns, 46.8750 ns/op
+OverheadActual  18: 8 op, 125.00 ns, 15.6250 ns/op
+OverheadActual  19: 8 op, 42.00 ns, 5.2500 ns/op
+OverheadActual  20: 8 op, 41.00 ns, 5.1250 ns/op
+
+WorkloadWarmup   1: 8 op, 4929291.00 ns, 616.1614 us/op
+WorkloadWarmup   2: 8 op, 6289625.00 ns, 786.2031 us/op
+WorkloadWarmup   3: 8 op, 4498458.00 ns, 562.3073 us/op
+WorkloadWarmup   4: 8 op, 5249167.00 ns, 656.1459 us/op
+
+// BeforeActualRun
+WorkloadActual   1: 8 op, 4727917.00 ns, 590.9896 us/op
+WorkloadActual   2: 8 op, 4565042.00 ns, 570.6303 us/op
+WorkloadActual   3: 8 op, 4986125.00 ns, 623.2656 us/op
+WorkloadActual   4: 8 op, 4990042.00 ns, 623.7553 us/op
+WorkloadActual   5: 8 op, 5061792.00 ns, 632.7240 us/op
+WorkloadActual   6: 8 op, 4172209.00 ns, 521.5261 us/op
+WorkloadActual   7: 8 op, 5411916.00 ns, 676.4895 us/op
+WorkloadActual   8: 8 op, 4584083.00 ns, 573.0104 us/op
+WorkloadActual   9: 8 op, 4413917.00 ns, 551.7396 us/op
+WorkloadActual  10: 8 op, 4446875.00 ns, 555.8594 us/op
+WorkloadActual  11: 8 op, 4776750.00 ns, 597.0938 us/op
+WorkloadActual  12: 8 op, 5269333.00 ns, 658.6666 us/op
+
+// AfterActualRun
+WorkloadResult   1: 8 op, 4727875.00 ns, 590.9844 us/op
+WorkloadResult   2: 8 op, 4565000.00 ns, 570.6250 us/op
+WorkloadResult   3: 8 op, 4986083.00 ns, 623.2604 us/op
+WorkloadResult   4: 8 op, 4990000.00 ns, 623.7500 us/op
+WorkloadResult   5: 8 op, 5061750.00 ns, 632.7188 us/op
+WorkloadResult   6: 8 op, 4172167.00 ns, 521.5209 us/op
+WorkloadResult   7: 8 op, 5411874.00 ns, 676.4843 us/op
+WorkloadResult   8: 8 op, 4584041.00 ns, 573.0051 us/op
+WorkloadResult   9: 8 op, 4413875.00 ns, 551.7344 us/op
+WorkloadResult  10: 8 op, 4446833.00 ns, 555.8541 us/op
+WorkloadResult  11: 8 op, 4776708.00 ns, 597.0885 us/op
+WorkloadResult  12: 8 op, 5269291.00 ns, 658.6614 us/op
+// GC:  0 0 0 4011808 8
+// Threading:  14664 0 8
+
+// AfterAll
+// Benchmark Process 32436 has exited with code 0.
+
+Mean = 593.861 μs, StdErr = 8.132 μs (1.37%), N = 24, StdDev = 39.840 μs
+Min = 521.521 μs, Q1 = 557.253 μs, Median = 593.565 μs, Q3 = 623.923 μs, Max = 676.484 μs
+IQR = 66.671 μs, LowerFence = 457.247 μs, UpperFence = 723.929 μs
+ConfidenceInterval = [563.221 μs; 624.501 μs] (CI 99.9%), Margin = 30.640 μs (5.16% of Mean)
+Skewness = 0.19, Kurtosis = 1.96, MValue = 3.8
+
+// ** Remained 2 (66.7%) benchmark(s) to run. Estimated finish 2026-10-23 6:28 (0h 0m from now) **
+// **************************
+// Benchmark: TracingCompletionBenchmarks.'Async ValueTask helper + TCS': TracingCompletion(InvocationCount=8, IterationCount=12, LaunchCount=2, RunStrategy=Throughput, UnrollFactor=1, WarmupCount=4)
+// *** Execute ***
+// Launch: 1 / 2
+// Execute: dotnet TracingCompletion-TracingCompletion-1.dll --anonymousPipes 119 120 --benchmarkName RequestBatcher.Benchmarks.InMemory.TracingCompletionBenchmarks.AsyncValueTaskHelperAsync --job TracingCompletion --benchmarkId 1 in /private/tmp/requestbatcher-tracing-completion/bin/Release/net8.0/TracingCompletion-TracingCompletion-1/bin/Release/net8.0
+// Failed to set up high priority (Permission denied). In order to run benchmarks with high priority, make sure you have the right permissions.
+// BeforeAnythingElse
+
+// Benchmark Process Environment Information:
+// BenchmarkDotNet v0.15.8
+// Runtime=.NET 8.0.25 (8.0.25, 8.0.2526.11203), Arm64 RyuJIT armv8.0-a
+// GC=Concurrent Workstation
+// HardwareIntrinsics=ArmBase+AdvSimd,AES,CRC32,DP,RDM,SHA1,SHA256 VectorSize=128
+// Job: TracingCompletion(InvocationCount=8, IterationCount=12, LaunchCount=2, RunStrategy=Throughput, UnrollFactor=1, WarmupCount=4)
+
+OverheadJitting  1: 1 op, 54875.00 ns, 54.8750 us/op
+WorkloadJitting  1: 1 op, 3248375.00 ns, 3.2484 ms/op
+
+OverheadWarmup   1: 8 op, 167.00 ns, 20.8750 ns/op
+OverheadWarmup   2: 8 op, 167.00 ns, 20.8750 ns/op
+OverheadWarmup   3: 8 op, 125.00 ns, 15.6250 ns/op
+OverheadWarmup   4: 8 op, 41.00 ns, 5.1250 ns/op
+OverheadWarmup   5: 8 op, 125.00 ns, 15.6250 ns/op
+OverheadWarmup   6: 8 op, 0.00 ns, 0.0000 ns/op
+
+OverheadActual   1: 8 op, 0.00 ns, 0.0000 ns/op
+OverheadActual   2: 8 op, 83.00 ns, 10.3750 ns/op
+OverheadActual   3: 8 op, 0.00 ns, 0.0000 ns/op
+OverheadActual   4: 8 op, 41.00 ns, 5.1250 ns/op
+OverheadActual   5: 8 op, 125.00 ns, 15.6250 ns/op
+OverheadActual   6: 8 op, 83.00 ns, 10.3750 ns/op
+OverheadActual   7: 8 op, 42.00 ns, 5.2500 ns/op
+OverheadActual   8: 8 op, 41.00 ns, 5.1250 ns/op
+OverheadActual   9: 8 op, 42.00 ns, 5.2500 ns/op
+OverheadActual  10: 8 op, 41.00 ns, 5.1250 ns/op
+OverheadActual  11: 8 op, 42.00 ns, 5.2500 ns/op
+OverheadActual  12: 8 op, 0.00 ns, 0.0000 ns/op
+OverheadActual  13: 8 op, 42.00 ns, 5.2500 ns/op
+OverheadActual  14: 8 op, 83.00 ns, 10.3750 ns/op
+OverheadActual  15: 8 op, 83.00 ns, 10.3750 ns/op
+OverheadActual  16: 8 op, 83.00 ns, 10.3750 ns/op
+OverheadActual  17: 8 op, 0.00 ns, 0.0000 ns/op
+OverheadActual  18: 8 op, 125.00 ns, 15.6250 ns/op
+OverheadActual  19: 8 op, 0.00 ns, 0.0000 ns/op
+OverheadActual  20: 8 op, 0.00 ns, 0.0000 ns/op
+
+WorkloadWarmup   1: 8 op, 5079833.00 ns, 634.9791 us/op
+WorkloadWarmup   2: 8 op, 5796000.00 ns, 724.5000 us/op
+WorkloadWarmup   3: 8 op, 4410417.00 ns, 551.3021 us/op
+WorkloadWarmup   4: 8 op, 4345833.00 ns, 543.2291 us/op
+
+// BeforeActualRun
+WorkloadActual   1: 8 op, 4972167.00 ns, 621.5209 us/op
+WorkloadActual   2: 8 op, 5620041.00 ns, 702.5051 us/op
+WorkloadActual   3: 8 op, 4673209.00 ns, 584.1511 us/op
+WorkloadActual   4: 8 op, 4654750.00 ns, 581.8438 us/op
+WorkloadActual   5: 8 op, 4703000.00 ns, 587.8750 us/op
+WorkloadActual   6: 8 op, 4638042.00 ns, 579.7553 us/op
+WorkloadActual   7: 8 op, 5211667.00 ns, 651.4584 us/op
+WorkloadActual   8: 8 op, 4762000.00 ns, 595.2500 us/op
+WorkloadActual   9: 8 op, 5069041.00 ns, 633.6301 us/op
+WorkloadActual  10: 8 op, 4821500.00 ns, 602.6875 us/op
+WorkloadActual  11: 8 op, 5084792.00 ns, 635.5990 us/op
+WorkloadActual  12: 8 op, 6152542.00 ns, 769.0678 us/op
+
+// AfterActualRun
+WorkloadResult   1: 8 op, 4972125.00 ns, 621.5156 us/op
+WorkloadResult   2: 8 op, 5619999.00 ns, 702.4999 us/op
+WorkloadResult   3: 8 op, 4673167.00 ns, 584.1459 us/op
+WorkloadResult   4: 8 op, 4654708.00 ns, 581.8385 us/op
+WorkloadResult   5: 8 op, 4702958.00 ns, 587.8698 us/op
+WorkloadResult   6: 8 op, 4638000.00 ns, 579.7500 us/op
+WorkloadResult   7: 8 op, 5211625.00 ns, 651.4531 us/op
+WorkloadResult   8: 8 op, 4761958.00 ns, 595.2448 us/op
+WorkloadResult   9: 8 op, 5068999.00 ns, 633.6249 us/op
+WorkloadResult  10: 8 op, 4821458.00 ns, 602.6823 us/op
+WorkloadResult  11: 8 op, 5084750.00 ns, 635.5938 us/op
+// GC:  0 0 0 4008544 8
+// Threading:  14599 0 8
+
+// AfterAll
+// Benchmark Process 32437 has exited with code 0.
+// Launch: 2 / 2
+// Execute: dotnet TracingCompletion-TracingCompletion-1.dll --anonymousPipes 119 120 --benchmarkName RequestBatcher.Benchmarks.InMemory.TracingCompletionBenchmarks.AsyncValueTaskHelperAsync --job TracingCompletion --benchmarkId 1 in /private/tmp/requestbatcher-tracing-completion/bin/Release/net8.0/TracingCompletion-TracingCompletion-1/bin/Release/net8.0
+// Failed to set up high priority (Permission denied). In order to run benchmarks with high priority, make sure you have the right permissions.
+// BeforeAnythingElse
+
+// Benchmark Process Environment Information:
+// BenchmarkDotNet v0.15.8
+// Runtime=.NET 8.0.25 (8.0.25, 8.0.2526.11203), Arm64 RyuJIT armv8.0-a
+// GC=Concurrent Workstation
+// HardwareIntrinsics=ArmBase+AdvSimd,AES,CRC32,DP,RDM,SHA1,SHA256 VectorSize=128
+// Job: TracingCompletion(InvocationCount=8, IterationCount=12, LaunchCount=2, RunStrategy=Throughput, UnrollFactor=1, WarmupCount=4)
+
+OverheadJitting  1: 1 op, 67917.00 ns, 67.9170 us/op
+WorkloadJitting  1: 1 op, 3160000.00 ns, 3.1600 ms/op
+
+OverheadWarmup   1: 8 op, 84.00 ns, 10.5000 ns/op
+OverheadWarmup   2: 8 op, 41.00 ns, 5.1250 ns/op
+OverheadWarmup   3: 8 op, 125.00 ns, 15.6250 ns/op
+OverheadWarmup   4: 8 op, 41.00 ns, 5.1250 ns/op
+OverheadWarmup   5: 8 op, 125.00 ns, 15.6250 ns/op
+OverheadWarmup   6: 8 op, 42.00 ns, 5.2500 ns/op
+
+OverheadActual   1: 8 op, 42.00 ns, 5.2500 ns/op
+OverheadActual   2: 8 op, 167.00 ns, 20.8750 ns/op
+OverheadActual   3: 8 op, 83.00 ns, 10.3750 ns/op
+OverheadActual   4: 8 op, 125.00 ns, 15.6250 ns/op
+OverheadActual   5: 8 op, 41.00 ns, 5.1250 ns/op
+OverheadActual   6: 8 op, 84.00 ns, 10.5000 ns/op
+OverheadActual   7: 8 op, 83.00 ns, 10.3750 ns/op
+OverheadActual   8: 8 op, 83.00 ns, 10.3750 ns/op
+OverheadActual   9: 8 op, 41.00 ns, 5.1250 ns/op
+OverheadActual  10: 8 op, 42.00 ns, 5.2500 ns/op
+OverheadActual  11: 8 op, 125.00 ns, 15.6250 ns/op
+OverheadActual  12: 8 op, 42.00 ns, 5.2500 ns/op
+OverheadActual  13: 8 op, 0.00 ns, 0.0000 ns/op
+OverheadActual  14: 8 op, 83.00 ns, 10.3750 ns/op
+OverheadActual  15: 8 op, 42.00 ns, 5.2500 ns/op
+OverheadActual  16: 8 op, 83.00 ns, 10.3750 ns/op
+OverheadActual  17: 8 op, 83.00 ns, 10.3750 ns/op
+OverheadActual  18: 8 op, 42.00 ns, 5.2500 ns/op
+OverheadActual  19: 8 op, 125.00 ns, 15.6250 ns/op
+OverheadActual  20: 8 op, 42.00 ns, 5.2500 ns/op
+
+WorkloadWarmup   1: 8 op, 5054916.00 ns, 631.8645 us/op
+WorkloadWarmup   2: 8 op, 6099208.00 ns, 762.4010 us/op
+WorkloadWarmup   3: 8 op, 4740917.00 ns, 592.6146 us/op
+WorkloadWarmup   4: 8 op, 4645166.00 ns, 580.6458 us/op
+
+// BeforeActualRun
+WorkloadActual   1: 8 op, 4883792.00 ns, 610.4740 us/op
+WorkloadActual   2: 8 op, 4849541.00 ns, 606.1926 us/op
+WorkloadActual   3: 8 op, 4725583.00 ns, 590.6979 us/op
+WorkloadActual   4: 8 op, 4692125.00 ns, 586.5156 us/op
+WorkloadActual   5: 8 op, 4976833.00 ns, 622.1041 us/op
+WorkloadActual   6: 8 op, 4746042.00 ns, 593.2553 us/op
+WorkloadActual   7: 8 op, 5246375.00 ns, 655.7969 us/op
+WorkloadActual   8: 8 op, 5083750.00 ns, 635.4688 us/op
+WorkloadActual   9: 8 op, 5189209.00 ns, 648.6511 us/op
+WorkloadActual  10: 8 op, 5128459.00 ns, 641.0574 us/op
+WorkloadActual  11: 8 op, 5165834.00 ns, 645.7293 us/op
+WorkloadActual  12: 8 op, 5046834.00 ns, 630.8543 us/op
+
+// AfterActualRun
+WorkloadResult   1: 8 op, 4883709.00 ns, 610.4636 us/op
+WorkloadResult   2: 8 op, 4849458.00 ns, 606.1823 us/op
+WorkloadResult   3: 8 op, 4725500.00 ns, 590.6875 us/op
+WorkloadResult   4: 8 op, 4692042.00 ns, 586.5053 us/op
+WorkloadResult   5: 8 op, 4976750.00 ns, 622.0938 us/op
+WorkloadResult   6: 8 op, 4745959.00 ns, 593.2449 us/op
+WorkloadResult   7: 8 op, 5246292.00 ns, 655.7865 us/op
+WorkloadResult   8: 8 op, 5083667.00 ns, 635.4584 us/op
+WorkloadResult   9: 8 op, 5189126.00 ns, 648.6408 us/op
+WorkloadResult  10: 8 op, 5128376.00 ns, 641.0470 us/op
+WorkloadResult  11: 8 op, 5165751.00 ns, 645.7189 us/op
+WorkloadResult  12: 8 op, 5046751.00 ns, 630.8439 us/op
+// GC:  0 0 0 4015264 8
+// Threading:  14799 0 8
+
+// AfterAll
+// Benchmark Process 32438 has exited with code 0.
+
+Mean = 619.256 μs, StdErr = 6.452 μs (1.04%), N = 23, StdDev = 30.944 μs
+Min = 579.750 μs, Q1 = 591.966 μs, Median = 621.516 μs, Q3 = 638.320 μs, Max = 702.500 μs
+IQR = 46.354 μs, LowerFence = 522.435 μs, UpperFence = 707.852 μs
+ConfidenceInterval = [594.788 μs; 643.724 μs] (CI 99.9%), Margin = 24.468 μs (3.95% of Mean)
+Skewness = 0.65, Kurtosis = 2.95, MValue = 3.4
+
+// ** Remained 1 (33.3%) benchmark(s) to run. Estimated finish 2026-10-23 6:28 (0h 0m from now) **
+// **************************
+// Benchmark: TracingCompletionBenchmarks.'Awaiter callback object + TCS': TracingCompletion(InvocationCount=8, IterationCount=12, LaunchCount=2, RunStrategy=Throughput, UnrollFactor=1, WarmupCount=4)
+// *** Execute ***
+// Launch: 1 / 2
+// Execute: dotnet TracingCompletion-TracingCompletion-1.dll --anonymousPipes 119 120 --benchmarkName RequestBatcher.Benchmarks.InMemory.TracingCompletionBenchmarks.AwaiterCallbackAsync --job TracingCompletion --benchmarkId 2 in /private/tmp/requestbatcher-tracing-completion/bin/Release/net8.0/TracingCompletion-TracingCompletion-1/bin/Release/net8.0
+// Failed to set up high priority (Permission denied). In order to run benchmarks with high priority, make sure you have the right permissions.
+// BeforeAnythingElse
+
+// Benchmark Process Environment Information:
+// BenchmarkDotNet v0.15.8
+// Runtime=.NET 8.0.25 (8.0.25, 8.0.2526.11203), Arm64 RyuJIT armv8.0-a
+// GC=Concurrent Workstation
+// HardwareIntrinsics=ArmBase+AdvSimd,AES,CRC32,DP,RDM,SHA1,SHA256 VectorSize=128
+// Job: TracingCompletion(InvocationCount=8, IterationCount=12, LaunchCount=2, RunStrategy=Throughput, UnrollFactor=1, WarmupCount=4)
+
+OverheadJitting  1: 1 op, 79666.00 ns, 79.6660 us/op
+WorkloadJitting  1: 1 op, 2510667.00 ns, 2.5107 ms/op
+
+OverheadWarmup   1: 8 op, 167.00 ns, 20.8750 ns/op
+OverheadWarmup   2: 8 op, 334.00 ns, 41.7500 ns/op
+OverheadWarmup   3: 8 op, 125.00 ns, 15.6250 ns/op
+OverheadWarmup   4: 8 op, 125.00 ns, 15.6250 ns/op
+OverheadWarmup   5: 8 op, 42.00 ns, 5.2500 ns/op
+
+OverheadActual   1: 8 op, 125.00 ns, 15.6250 ns/op
+OverheadActual   2: 8 op, 42.00 ns, 5.2500 ns/op
+OverheadActual   3: 8 op, 83.00 ns, 10.3750 ns/op
+OverheadActual   4: 8 op, 84.00 ns, 10.5000 ns/op
+OverheadActual   5: 8 op, 84.00 ns, 10.5000 ns/op
+OverheadActual   6: 8 op, 125.00 ns, 15.6250 ns/op
+OverheadActual   7: 8 op, 42.00 ns, 5.2500 ns/op
+OverheadActual   8: 8 op, 84.00 ns, 10.5000 ns/op
+OverheadActual   9: 8 op, 0.00 ns, 0.0000 ns/op
+OverheadActual  10: 8 op, 42.00 ns, 5.2500 ns/op
+OverheadActual  11: 8 op, 125.00 ns, 15.6250 ns/op
+OverheadActual  12: 8 op, 208.00 ns, 26.0000 ns/op
+OverheadActual  13: 8 op, 167.00 ns, 20.8750 ns/op
+OverheadActual  14: 8 op, 125.00 ns, 15.6250 ns/op
+OverheadActual  15: 8 op, 42.00 ns, 5.2500 ns/op
+OverheadActual  16: 8 op, 42.00 ns, 5.2500 ns/op
+OverheadActual  17: 8 op, 42.00 ns, 5.2500 ns/op
+OverheadActual  18: 8 op, 41.00 ns, 5.1250 ns/op
+OverheadActual  19: 8 op, 42.00 ns, 5.2500 ns/op
+OverheadActual  20: 8 op, 42.00 ns, 5.2500 ns/op
+
+WorkloadWarmup   1: 8 op, 4331667.00 ns, 541.4584 us/op
+WorkloadWarmup   2: 8 op, 5699958.00 ns, 712.4948 us/op
+WorkloadWarmup   3: 8 op, 4015458.00 ns, 501.9323 us/op
+WorkloadWarmup   4: 8 op, 4559541.00 ns, 569.9426 us/op
+
+// BeforeActualRun
+WorkloadActual   1: 8 op, 4363500.00 ns, 545.4375 us/op
+WorkloadActual   2: 8 op, 4003500.00 ns, 500.4375 us/op
+WorkloadActual   3: 8 op, 4426875.00 ns, 553.3594 us/op
+WorkloadActual   4: 8 op, 4603416.00 ns, 575.4270 us/op
+WorkloadActual   5: 8 op, 3850375.00 ns, 481.2969 us/op
+WorkloadActual   6: 8 op, 4500083.00 ns, 562.5104 us/op
+WorkloadActual   7: 8 op, 4406084.00 ns, 550.7605 us/op
+WorkloadActual   8: 8 op, 4097250.00 ns, 512.1563 us/op
+WorkloadActual   9: 8 op, 4060584.00 ns, 507.5730 us/op
+WorkloadActual  10: 8 op, 4149041.00 ns, 518.6301 us/op
+WorkloadActual  11: 8 op, 3680083.00 ns, 460.0104 us/op
+WorkloadActual  12: 8 op, 3895958.00 ns, 486.9948 us/op
+
+// AfterActualRun
+WorkloadResult   1: 8 op, 4363437.50 ns, 545.4297 us/op
+WorkloadResult   2: 8 op, 4003437.50 ns, 500.4297 us/op
+WorkloadResult   3: 8 op, 4426812.50 ns, 553.3516 us/op
+WorkloadResult   4: 8 op, 4603353.50 ns, 575.4192 us/op
+WorkloadResult   5: 8 op, 3850312.50 ns, 481.2891 us/op
+WorkloadResult   6: 8 op, 4500020.50 ns, 562.5026 us/op
+WorkloadResult   7: 8 op, 4406021.50 ns, 550.7527 us/op
+WorkloadResult   8: 8 op, 4097187.50 ns, 512.1484 us/op
+WorkloadResult   9: 8 op, 4060521.50 ns, 507.5652 us/op
+WorkloadResult  10: 8 op, 4148978.50 ns, 518.6223 us/op
+WorkloadResult  11: 8 op, 3680020.50 ns, 460.0026 us/op
+WorkloadResult  12: 8 op, 3895895.50 ns, 486.9869 us/op
+// GC:  0 0 0 4063520 8
+// Threading:  14263 0 8
+
+// AfterAll
+// Benchmark Process 32439 has exited with code 0.
+// Launch: 2 / 2
+// Execute: dotnet TracingCompletion-TracingCompletion-1.dll --anonymousPipes 119 120 --benchmarkName RequestBatcher.Benchmarks.InMemory.TracingCompletionBenchmarks.AwaiterCallbackAsync --job TracingCompletion --benchmarkId 2 in /private/tmp/requestbatcher-tracing-completion/bin/Release/net8.0/TracingCompletion-TracingCompletion-1/bin/Release/net8.0
+// Failed to set up high priority (Permission denied). In order to run benchmarks with high priority, make sure you have the right permissions.
+// BeforeAnythingElse
+
+// Benchmark Process Environment Information:
+// BenchmarkDotNet v0.15.8
+// Runtime=.NET 8.0.25 (8.0.25, 8.0.2526.11203), Arm64 RyuJIT armv8.0-a
+// GC=Concurrent Workstation
+// HardwareIntrinsics=ArmBase+AdvSimd,AES,CRC32,DP,RDM,SHA1,SHA256 VectorSize=128
+// Job: TracingCompletion(InvocationCount=8, IterationCount=12, LaunchCount=2, RunStrategy=Throughput, UnrollFactor=1, WarmupCount=4)
+
+OverheadJitting  1: 1 op, 64750.00 ns, 64.7500 us/op
+WorkloadJitting  1: 1 op, 2856625.00 ns, 2.8566 ms/op
+
+OverheadWarmup   1: 8 op, 83.00 ns, 10.3750 ns/op
+OverheadWarmup   2: 8 op, 84.00 ns, 10.5000 ns/op
+OverheadWarmup   3: 8 op, 125.00 ns, 15.6250 ns/op
+OverheadWarmup   4: 8 op, 83.00 ns, 10.3750 ns/op
+OverheadWarmup   5: 8 op, 42.00 ns, 5.2500 ns/op
+OverheadWarmup   6: 8 op, 83.00 ns, 10.3750 ns/op
+OverheadWarmup   7: 8 op, 41.00 ns, 5.1250 ns/op
+
+OverheadActual   1: 8 op, 84.00 ns, 10.5000 ns/op
+OverheadActual   2: 8 op, 84.00 ns, 10.5000 ns/op
+OverheadActual   3: 8 op, 125.00 ns, 15.6250 ns/op
+OverheadActual   4: 8 op, 125.00 ns, 15.6250 ns/op
+OverheadActual   5: 8 op, 83.00 ns, 10.3750 ns/op
+OverheadActual   6: 8 op, 84.00 ns, 10.5000 ns/op
+OverheadActual   7: 8 op, 41.00 ns, 5.1250 ns/op
+OverheadActual   8: 8 op, 83.00 ns, 10.3750 ns/op
+OverheadActual   9: 8 op, 42.00 ns, 5.2500 ns/op
+OverheadActual  10: 8 op, 42.00 ns, 5.2500 ns/op
+OverheadActual  11: 8 op, 83.00 ns, 10.3750 ns/op
+OverheadActual  12: 8 op, 0.00 ns, 0.0000 ns/op
+OverheadActual  13: 8 op, 41.00 ns, 5.1250 ns/op
+OverheadActual  14: 8 op, 0.00 ns, 0.0000 ns/op
+OverheadActual  15: 8 op, 84.00 ns, 10.5000 ns/op
+OverheadActual  16: 8 op, 41.00 ns, 5.1250 ns/op
+OverheadActual  17: 8 op, 250.00 ns, 31.2500 ns/op
+OverheadActual  18: 8 op, 83.00 ns, 10.3750 ns/op
+OverheadActual  19: 8 op, 83.00 ns, 10.3750 ns/op
+OverheadActual  20: 8 op, 83.00 ns, 10.3750 ns/op
+
+WorkloadWarmup   1: 8 op, 4641417.00 ns, 580.1771 us/op
+WorkloadWarmup   2: 8 op, 5591458.00 ns, 698.9323 us/op
+WorkloadWarmup   3: 8 op, 4363375.00 ns, 545.4219 us/op
+WorkloadWarmup   4: 8 op, 4093791.00 ns, 511.7239 us/op
+
+// BeforeActualRun
+WorkloadActual   1: 8 op, 4187875.00 ns, 523.4844 us/op
+WorkloadActual   2: 8 op, 3614667.00 ns, 451.8334 us/op
+WorkloadActual   3: 8 op, 4608125.00 ns, 576.0156 us/op
+WorkloadActual   4: 8 op, 4458000.00 ns, 557.2500 us/op
+WorkloadActual   5: 8 op, 4667875.00 ns, 583.4844 us/op
+WorkloadActual   6: 8 op, 4199625.00 ns, 524.9531 us/op
+WorkloadActual   7: 8 op, 4381500.00 ns, 547.6875 us/op
+WorkloadActual   8: 8 op, 4786083.00 ns, 598.2604 us/op
+WorkloadActual   9: 8 op, 4360041.00 ns, 545.0051 us/op
+WorkloadActual  10: 8 op, 4716625.00 ns, 589.5781 us/op
+WorkloadActual  11: 8 op, 4629875.00 ns, 578.7344 us/op
+WorkloadActual  12: 8 op, 4865042.00 ns, 608.1303 us/op
+
+// AfterActualRun
+WorkloadResult   1: 8 op, 4187792.00 ns, 523.4740 us/op
+WorkloadResult   2: 8 op, 3614584.00 ns, 451.8230 us/op
+WorkloadResult   3: 8 op, 4608042.00 ns, 576.0053 us/op
+WorkloadResult   4: 8 op, 4457917.00 ns, 557.2396 us/op
+WorkloadResult   5: 8 op, 4667792.00 ns, 583.4740 us/op
+WorkloadResult   6: 8 op, 4199542.00 ns, 524.9428 us/op
+WorkloadResult   7: 8 op, 4381417.00 ns, 547.6771 us/op
+WorkloadResult   8: 8 op, 4786000.00 ns, 598.2500 us/op
+WorkloadResult   9: 8 op, 4359958.00 ns, 544.9948 us/op
+WorkloadResult  10: 8 op, 4716542.00 ns, 589.5678 us/op
+WorkloadResult  11: 8 op, 4629792.00 ns, 578.7240 us/op
+WorkloadResult  12: 8 op, 4864959.00 ns, 608.1199 us/op
+// GC:  0 0 0 4068832 8
+// Threading:  14429 0 8
+
+// AfterAll
+// Benchmark Process 32440 has exited with code 0.
+
+Mean = 539.116 μs, StdErr = 8.765 μs (1.63%), N = 24, StdDev = 42.938 μs
+Min = 451.823 μs, Q1 = 511.003 μs, Median = 546.553 μs, Q3 = 575.566 μs, Max = 608.120 μs
+IQR = 64.563 μs, LowerFence = 414.158 μs, UpperFence = 672.410 μs
+ConfidenceInterval = [506.094 μs; 572.139 μs] (CI 99.9%), Margin = 33.022 μs (6.13% of Mean)
+Skewness = -0.36, Kurtosis = 2.1, MValue = 3.27
+
+// ** Remained 0 (0.0%) benchmark(s) to run. Estimated finish 2026-10-23 6:28 (0h 0m from now) **
+// ***** BenchmarkRunner: Finish  *****
+
+// * Export *
+  artifacts/results/RequestBatcher.Benchmarks.InMemory.TracingCompletionBenchmarks-report.csv
+  artifacts/results/RequestBatcher.Benchmarks.InMemory.TracingCompletionBenchmarks-report-github.md
+  artifacts/results/RequestBatcher.Benchmarks.InMemory.TracingCompletionBenchmarks-report.html
+
+// * Detailed results *
+TracingCompletionBenchmarks.'Awaiter callback object + TCS': TracingCompletion(InvocationCount=8, IterationCount=12, LaunchCount=2, RunStrategy=Throughput, UnrollFactor=1, WarmupCount=4)
+Runtime = .NET 8.0.25 (8.0.25, 8.0.2526.11203), Arm64 RyuJIT armv8.0-a; GC = Concurrent Workstation
+Mean = 539.116 μs, StdErr = 8.765 μs (1.63%), N = 24, StdDev = 42.938 μs
+Min = 451.823 μs, Q1 = 511.003 μs, Median = 546.553 μs, Q3 = 575.566 μs, Max = 608.120 μs
+IQR = 64.563 μs, LowerFence = 414.158 μs, UpperFence = 672.410 μs
+ConfidenceInterval = [506.094 μs; 572.139 μs] (CI 99.9%), Margin = 33.022 μs (6.13% of Mean)
+Skewness = -0.36, Kurtosis = 2.1, MValue = 3.27
+-------------------- Histogram --------------------
+[447.018 μs ; 486.427 μs) | @@@
+[486.427 μs ; 525.503 μs) | @@@@@@@
+[525.503 μs ; 544.697 μs) | 
+[544.697 μs ; 583.772 μs) | @@@@@@@@@@@
+[583.772 μs ; 627.658 μs) | @@@
+---------------------------------------------------
+
+TracingCompletionBenchmarks.'Async Task helper + TCS': TracingCompletion(InvocationCount=8, IterationCount=12, LaunchCount=2, RunStrategy=Throughput, UnrollFactor=1, WarmupCount=4)
+Runtime = .NET 8.0.25 (8.0.25, 8.0.2526.11203), Arm64 RyuJIT armv8.0-a; GC = Concurrent Workstation
+Mean = 593.861 μs, StdErr = 8.132 μs (1.37%), N = 24, StdDev = 39.840 μs
+Min = 521.521 μs, Q1 = 557.253 μs, Median = 593.565 μs, Q3 = 623.923 μs, Max = 676.484 μs
+IQR = 66.671 μs, LowerFence = 457.247 μs, UpperFence = 723.929 μs
+ConfidenceInterval = [563.221 μs; 624.501 μs] (CI 99.9%), Margin = 30.640 μs (5.16% of Mean)
+Skewness = 0.19, Kurtosis = 1.96, MValue = 3.8
+-------------------- Histogram --------------------
+[503.393 μs ; 546.268 μs) | @
+[546.268 μs ; 582.524 μs) | @@@@@@@@@@
+[582.524 μs ; 596.835 μs) | @@
+[596.835 μs ; 633.092 μs) | @@@@@@@@@
+[633.092 μs ; 649.445 μs) | 
+[649.445 μs ; 685.701 μs) | @@
+---------------------------------------------------
+
+TracingCompletionBenchmarks.'Async ValueTask helper + TCS': TracingCompletion(InvocationCount=8, IterationCount=12, LaunchCount=2, RunStrategy=Throughput, UnrollFactor=1, WarmupCount=4)
+Runtime = .NET 8.0.25 (8.0.25, 8.0.2526.11203), Arm64 RyuJIT armv8.0-a; GC = Concurrent Workstation
+Mean = 619.256 μs, StdErr = 6.452 μs (1.04%), N = 23, StdDev = 30.944 μs
+Min = 579.750 μs, Q1 = 591.966 μs, Median = 621.516 μs, Q3 = 638.320 μs, Max = 702.500 μs
+IQR = 46.354 μs, LowerFence = 522.435 μs, UpperFence = 707.852 μs
+ConfidenceInterval = [594.788 μs; 643.724 μs] (CI 99.9%), Margin = 24.468 μs (3.95% of Mean)
+Skewness = 0.65, Kurtosis = 2.95, MValue = 3.4
+-------------------- Histogram --------------------
+[578.685 μs ; 607.248 μs) | @@@@@@@@@@
+[607.248 μs ; 629.034 μs) | @@@
+[629.034 μs ; 657.597 μs) | @@@@@@@@@
+[657.597 μs ; 688.218 μs) | 
+[688.218 μs ; 716.781 μs) | @
+---------------------------------------------------
+
+// * Summary *
+
+BenchmarkDotNet v0.15.8, macOS 27.0.1 (26A434) [Darwin 27.0.0]
+Unknown processor
+.NET SDK 10.0.100
+  [Host]            : .NET 8.0.25 (8.0.25, 8.0.2526.11203), Arm64 RyuJIT armv8.0-a
+  TracingCompletion : .NET 8.0.25 (8.0.25, 8.0.2526.11203), Arm64 RyuJIT armv8.0-a
+
+Job=TracingCompletion  InvocationCount=8  IterationCount=12  
+LaunchCount=2  RunStrategy=Throughput  UnrollFactor=1  
+WarmupCount=4  
+
+| Method                          | Mean     | Error    | StdDev   | Ratio | RatioSD | Rank | Allocated | Alloc Ratio |
+|-------------------------------- |---------:|---------:|---------:|------:|--------:|-----:|----------:|------------:|
+| 'Awaiter callback object + TCS' | 539.1 μs | 33.02 μs | 42.94 μs |  0.91 |    0.09 |    1 | 496.68 KB |        1.01 |
+| 'Async Task helper + TCS'       | 593.9 μs | 30.64 μs | 39.84 μs |  1.00 |    0.09 |    1 | 489.72 KB |        1.00 |
+| 'Async ValueTask helper + TCS'  | 619.3 μs | 24.47 μs | 30.94 μs |  1.05 |    0.09 |    1 | 490.14 KB |        1.00 |
+
+// * Warnings *
+MinIterationTime
+  TracingCompletionBenchmarks.'Awaiter callback object + TCS': TracingCompletion -> The minimum observed iteration time is 3.615ms which is very small. It's recommended to increase it to at least 100ms using more operations.
+  TracingCompletionBenchmarks.'Async Task helper + TCS': TracingCompletion       -> The minimum observed iteration time is 4.172ms which is very small. It's recommended to increase it to at least 100ms using more operations.
+  TracingCompletionBenchmarks.'Async ValueTask helper + TCS': TracingCompletion  -> The minimum observed iteration time is 4.638ms which is very small. It's recommended to increase it to at least 100ms using more operations.
+MultimodalDistribution
+  TracingCompletionBenchmarks.'Awaiter callback object + TCS': TracingCompletion -> It seems that the distribution is bimodal (mValue = 3.27)
+  TracingCompletionBenchmarks.'Async Task helper + TCS': TracingCompletion       -> It seems that the distribution is bimodal (mValue = 3.8)
+  TracingCompletionBenchmarks.'Async ValueTask helper + TCS': TracingCompletion  -> It seems that the distribution is bimodal (mValue = 3.4)
+
+// * Hints *
+Outliers
+  TracingCompletionBenchmarks.'Async ValueTask helper + TCS': TracingCompletion -> 1 outlier  was  removed (769.07 μs)
+
+// * Legends *
+  Mean        : Arithmetic mean of all measurements
+  Error       : Half of 99.9% confidence interval
+  StdDev      : Standard deviation of all measurements
+  Ratio       : Mean of the ratio distribution ([Current]/[Baseline])
+  RatioSD     : Standard deviation of the ratio distribution ([Current]/[Baseline])
+  Rank        : Relative position of current benchmark mean among all benchmarks (Arabic style)
+  Allocated   : Allocated memory per single operation (managed only, inclusive, 1KB = 1024B)
+  Alloc Ratio : Allocated memory ratio distribution ([Current]/[Baseline])
+  1 μs        : 1 Microsecond (0.000001 sec)
+
+// * Diagnostic Output - MemoryDiagnoser *
+
+
+// ***** BenchmarkRunner: End *****
+Run time: 00:00:01 (1.65 sec), executed benchmarks: 3
+
+Global total time: 00:00:08 (8.55 sec), executed benchmarks: 3
+// * Artifacts cleanup *
+Artifacts cleanup is finished

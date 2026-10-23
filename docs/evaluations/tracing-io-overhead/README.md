@@ -6,6 +6,10 @@ OpenTelemetry root sampling rates of 0%, 1%, 10%, and 100%.
 
 The [allocation optimization comparison](optimization.md) separately measures 0.3.2 against the optimized source
 with identical sampling modes, retaining all tracing and completion semantics.
+The subsequent [compact-context and link comparison](compact-links.md) measures the next reduction against a source
+snapshot of that implementation, without changing the Task completion bridge.
+The [pending completion evaluation](completion-optimization.md) separately compares Task, ValueTask, and callback
+bridges with every source still pending at registration.
 
 ## Workload and sampling contract
 

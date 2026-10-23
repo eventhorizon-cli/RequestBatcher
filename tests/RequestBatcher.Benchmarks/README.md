@@ -42,6 +42,7 @@ These benchmarks run in process without Docker. Some use simulated asynchronous 
 | [BatchCompletionBenchmarks](InMemory/BatchCompletionBenchmarks.cs) | Per-request TCS plus WhenAll versus shared batch completion. |
 | [RequestCompletionBenchmarks](InMemory/RequestCompletionBenchmarks.cs) | Internal pending-request success, failure and cancellation, without the full queue pipeline. |
 | [PendingRequestAllocationBenchmarks](InMemory/PendingRequestAllocationBenchmarks.cs) | One completed pending request, with and without a cancellable caller token. |
+| [TracingCompletionBenchmarks](InMemory/TracingCompletionBenchmarks.cs) | Task, ValueTask, and callback tracing completion bridges with all 1,024 sources pending at registration; see the [evaluation](../../docs/evaluations/tracing-io-overhead/completion-optimization.md). |
 | [ResponseCompletionBenchmarks](InMemory/ResponseCompletionBenchmarks.cs) | Public response success, failure and pre-dispatch cancellation, with request-only and explicit-submission controls. |
 | [ExplicitCompletionBenchmarks](InMemory/ExplicitCompletionBenchmarks.cs) | Public explicit-submission success, failure, partial cancellation, capacity waiting and mixed submissions. |
 | [BatchErrorAggregationBenchmarks](InMemory/BatchErrorAggregationBenchmarks.cs) | Shared completion accounting for success, repeated exception references and distinct exceptions, sequentially and concurrently. |

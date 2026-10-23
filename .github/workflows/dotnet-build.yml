@@ -68,6 +68,7 @@ jobs:
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           directory: ${{ github.workspace }}/TestResults
+          flags: unit
           fail_ci_if_error: true
 
       - name: Pack
@@ -90,21 +91,22 @@ jobs:
         with:
           global-json-file: global.json
 
-      - name: Start observability sample
-        run: docker compose -f samples/RequestBatcher.Observability/compose.yaml up --build -d --wait
-
       - name: Verify exported traces and metrics
         env:
           REQUESTBATCHER_RUN_INTEGRATION_TESTS: "1"
         run: >-
           dotnet test tests/it/RequestBatcher.Observability.IntegrationTests/RequestBatcher.Observability.IntegrationTests.csproj
           --configuration Release
+          --collect:"XPlat Code Coverage"
+          --settings tests/it/RequestBatcher.Observability.IntegrationTests/coverage.runsettings
+          --results-directory "${{ github.workspace }}/TestResults/Integration"
           --logger 'console;verbosity=detailed'
 
-      - name: Show service diagnostics on failure
-        if: failure()
-        run: docker compose -f samples/RequestBatcher.Observability/compose.yaml logs --no-color --tail 200
-
-      - name: Clean up integration environment
-        if: always()
-        run: docker compose -f samples/RequestBatcher.Observability/compose.yaml down --volumes
+      - name: Upload integration coverage to Codecov
+        if: github.event_name == 'push' || github.event.pull_request.head.repo.full_name == github.repository
+        uses: codecov/codecov-action@v5
+        with:
+          token: ${{ secrets.CODECOV_TOKEN }}
+          directory: ${{ github.workspace }}/TestResults/Integration
+          flags: integration
+          fail_ci_if_error: true

@@ -105,10 +105,7 @@ internal static class RequestBatcherTracing
             return null;
         }
 
-        List<ActivityLink>? links = null;
-        List<SubmissionTraceContext>? submissions = null;
-        HashSet<(ActivityTraceId, ActivitySpanId)>? contexts = null;
-        (ActivityTraceId, ActivitySpanId) firstContext = default;
+        BatchTraceLinks? links = null;
         foreach (var request in requests)
         {
             if (request is not TracedPendingBatchRequest<TRequest> traced)
@@ -116,31 +113,13 @@ internal static class RequestBatcherTracing
                 continue;
             }
 
-            var context = traced.TraceContext.Context;
-            var key = (context.TraceId, context.SpanId);
             if (links is null)
             {
-                firstContext = key;
-                links = [];
+                links = new BatchTraceLinks(traced.TraceContext);
             }
-            else if (contexts is null)
+            else
             {
-                if (key == firstContext)
-                {
-                    continue;
-                }
-
-                contexts = [firstContext, key];
-            }
-            else if (!contexts.Add(key))
-            {
-                continue;
-            }
-
-            links.Add(new ActivityLink(context));
-            if (traced.TraceContext.CollectBatchLinks)
-            {
-                (submissions ??= []).Add(traced.TraceContext);
+                links.Add(traced.TraceContext);
             }
         }
 
@@ -154,12 +133,9 @@ internal static class RequestBatcherTracing
             parentContext: default,
             tags: tags,
             links: links);
-        if (activity is not null && submissions is not null)
+        if (activity is not null)
         {
-            foreach (var submission in submissions)
-            {
-                submission.AddBatch(activity.Context);
-            }
+            links?.AddBatch(activity.Context);
         }
 
         return activity;
@@ -199,7 +175,7 @@ internal static class RequestBatcherTracing
     {
         var context = activity?.Context ?? parent?.Context ?? default;
         return context.TraceId != default && context.SpanId != default
-            ? new SubmissionTraceContext(context, activity?.IsAllDataRequested == true)
+            ? SubmissionTraceContext.Create(context, activity?.IsAllDataRequested == true)
             : null;
     }
 

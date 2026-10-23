@@ -13,17 +13,26 @@ internal static class CompareTracingIoOverhead
     {
         if (args is ["--help"])
         {
-            Console.WriteLine("CompareTracingIoOverhead [--compare-source] [artifact-parent]\nCompares published 0.2.4 and 0.3.2 with identical 20 ms simulated downstream work. The 0.2.4 baseline runs two Disabled cases; 0.3.2 runs Disabled, Sample0, Sample1, Sample10, and Sample100. With --compare-source, compares the 0.3.2 package with a source snapshot using the ten current-version cases. Retains package hashes and BenchmarkDotNet reports.");
+            Console.WriteLine("CompareTracingIoOverhead [--compare-source [--baseline-source path]] [artifact-parent]\nCompares published 0.2.4 and 0.3.2 with identical 20 ms simulated downstream work. The 0.2.4 baseline runs two Disabled cases; 0.3.2 runs Disabled, Sample0, Sample1, Sample10, and Sample100. With --compare-source, compares the 0.3.2 package with a source snapshot using the ten current-version cases. --baseline-source replaces that package baseline with a snapshot of the specified repository tree. Retains source snapshots, package hashes, and BenchmarkDotNet reports.");
             return 0;
         }
 
         var compareSource = false;
+        string? baselineSource = null;
         string? parentArgument = null;
-        foreach (var argument in args)
+        for (var index = 0; index < args.Length; index++)
         {
+            var argument = args[index];
             if (argument == "--compare-source" && !compareSource)
             {
                 compareSource = true;
+                continue;
+            }
+
+            if (argument == "--baseline-source" && baselineSource is null && index + 1 < args.Length &&
+                !args[index + 1].StartsWith('-'))
+            {
+                baselineSource = Path.GetFullPath(args[++index]);
                 continue;
             }
 
@@ -34,6 +43,12 @@ internal static class CompareTracingIoOverhead
             }
 
             parentArgument = argument;
+        }
+
+        if (baselineSource is not null && !compareSource)
+        {
+            Console.Error.WriteLine("--baseline-source requires --compare-source.");
+            return 2;
         }
 
         try
@@ -48,12 +63,18 @@ internal static class CompareTracingIoOverhead
             {
                 CreateSourceSnapshot(repo, sourceTree);
             }
+            if (baselineSource is not null)
+            {
+                CreateSourceSnapshot(baselineSource, Path.Combine(artifacts, "baseline-source-tree"));
+            }
 
             var scenarios = compareSource
                 ? new[]
                 {
-                    new Scenario("0.3.2-package", "0.3.2", IsSource: false),
-                    new Scenario("source", PackageVersion: null, IsSource: true),
+                    baselineSource is null
+                        ? new Scenario("0.3.2-package", "0.3.2", IsSource: false)
+                        : new Scenario("baseline-source", PackageVersion: null, IsSource: true, "baseline-source-tree"),
+                    new Scenario("source", PackageVersion: null, IsSource: true, "source-tree"),
                 }
                 : new[]
                 {
@@ -76,7 +97,7 @@ internal static class CompareTracingIoOverhead
                     "BenchmarkDotNet.Running.BenchmarkSwitcher.FromAssembly(typeof(RequestBatcher.Benchmarks.InMemory.TracingIoOverheadBenchmarks).Assembly).Run(args);\n");
                 var project = Path.Combine(projectDirectory, "TracingIoComparison.csproj");
                 var requestBatcherReference = scenario.IsSource
-                    ? "        <ProjectReference Include=\"../source-tree/src/RequestBatcher/RequestBatcher.csproj\" />"
+                    ? $"        <ProjectReference Include=\"../{scenario.SourceDirectory}/src/RequestBatcher/RequestBatcher.csproj\" />"
                     : $"        <PackageReference Include=\"RequestBatcher\" Version=\"{scenario.PackageVersion}\" />";
                 File.WriteAllText(project, $"""
                     <Project Sdk="Microsoft.NET.Sdk">
@@ -208,7 +229,7 @@ internal static class CompareTracingIoOverhead
         }
     }
 
-    private sealed record Scenario(string Name, string? PackageVersion, bool IsSource);
+    private sealed record Scenario(string Name, string? PackageVersion, bool IsSource, string? SourceDirectory = null);
 
     private static string SourceFile([CallerFilePath] string path = "") => path;
 }
