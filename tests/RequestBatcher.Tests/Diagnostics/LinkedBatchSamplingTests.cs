@@ -263,6 +263,116 @@ public sealed class LinkedBatchSamplingTests
         Assert.Equal(1, sampler.DisposeCount);
     }
 
+    [Fact]
+    public void AddRequestBatcherInstrumentation_Default_DisposedSamplerDropsAndDoesNotCallOriginal()
+    {
+        var original = new DecisionSampler(_ => _sampled);
+        using var capture = new CaptureProcessor();
+        var captured = BuildCapturedTracer(original, capture);
+        using var provider = captured.Provider;
+        var sampler = captured.Sampler;
+        var parameters = new SamplingParameters(
+            default,
+            ActivityTraceId.CreateRandom(),
+            RequestBatcherTracing.CallName,
+            ActivityKind.Internal);
+
+        Assert.NotSame(original, sampler);
+        Assert.Equal(SamplingDecision.RecordAndSample, sampler.ShouldSample(parameters).Decision);
+        Assert.Single(original.Decisions);
+
+        provider.Dispose();
+
+        Assert.Equal(SamplingDecision.Drop, sampler.ShouldSample(parameters).Decision);
+        Assert.Single(original.Decisions);
+        Assert.Equal(1, original.DisposeCount);
+
+        provider.Dispose();
+        Assert.IsAssignableFrom<IDisposable>(sampler).Dispose();
+        Assert.Equal(1, original.DisposeCount);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void AddRequestBatcherInstrumentation_NoSampledCreationLinks_DropsBatch(bool includeUnsampledLink)
+    {
+        var original = new DecisionSampler(_ => _sampled);
+        using var capture = new CaptureProcessor();
+        var captured = BuildCapturedTracer(original, capture);
+        using var provider = captured.Provider;
+        var sampler = captured.Sampler;
+        var links = includeUnsampledLink
+            ? [new ActivityLink(new ActivityContext(
+                ActivityTraceId.CreateRandom(),
+                ActivitySpanId.CreateRandom(),
+                ActivityTraceFlags.None))]
+            : Array.Empty<ActivityLink>();
+
+        var result = sampler.ShouldSample(CreateBatchSamplingParameters(links, ValidBatchTags()));
+
+        Assert.Equal(SamplingDecision.Drop, result.Decision);
+        Assert.Empty(original.Decisions);
+    }
+
+    [Fact]
+    public void AddRequestBatcherInstrumentation_ParentedSameNameConsumer_DelegatesToOriginalSampler()
+    {
+        var original = new DecisionSampler(_ => _sampled);
+        using var capture = new CaptureProcessor();
+        var captured = BuildCapturedTracer(original, capture);
+        using var provider = captured.Provider;
+        var parent = new ActivityContext(
+            ActivityTraceId.CreateRandom(),
+            ActivitySpanId.CreateRandom(),
+            ActivityTraceFlags.Recorded);
+        var sampler = captured.Sampler;
+
+        var result = sampler.ShouldSample(CreateBatchSamplingParameters([], ValidBatchTags(), parent));
+
+        Assert.Equal(SamplingDecision.RecordAndSample, result.Decision);
+        Assert.Single(original.Decisions);
+    }
+
+    [Fact]
+    public void AddRequestBatcherInstrumentation_IncompleteCreationTags_DelegatesToOriginalSampler()
+    {
+        var original = new DecisionSampler(_ => _sampled);
+        using var capture = new CaptureProcessor();
+        var captured = BuildCapturedTracer(original, capture);
+        using var provider = captured.Provider;
+        var sampler = captured.Sampler;
+
+        var result = sampler.ShouldSample(CreateBatchSamplingParameters(
+            [new ActivityLink(new ActivityContext(
+                ActivityTraceId.CreateRandom(),
+                ActivitySpanId.CreateRandom(),
+                ActivityTraceFlags.None))],
+            [new("requestbatcher.request.type", "Int32")]));
+
+        Assert.Equal(SamplingDecision.RecordAndSample, result.Decision);
+        Assert.Single(original.Decisions);
+    }
+
+    [Fact]
+    public void AddRequestBatcherInstrumentation_InvalidCreationTags_DelegatesToOriginalSampler()
+    {
+        var original = new DecisionSampler(_ => _sampled);
+        using var capture = new CaptureProcessor();
+        var captured = BuildCapturedTracer(original, capture);
+        using var provider = captured.Provider;
+
+        var result = captured.Sampler.ShouldSample(CreateBatchSamplingParameters(
+            [],
+            [
+                new("requestbatcher.batch.size", 0),
+                new("requestbatcher.request.type", 42),
+            ]));
+
+        Assert.Equal(SamplingDecision.RecordAndSample, result.Decision);
+        Assert.Single(original.Decisions);
+    }
+
     private static TracedPendingBatchRequest<int> NewRequest(
         PendingSubmission submission,
         IRequestCompletion completion) =>
@@ -319,6 +429,43 @@ public sealed class LinkedBatchSamplingTests
 
         return builder.AddProcessor(capture).Build();
     }
+
+    private static (TracerProvider Provider, Sampler Sampler) BuildCapturedTracer(
+        Sampler original,
+        CaptureProcessor capture)
+    {
+        Sampler? captured = null;
+        var provider = Sdk.CreateTracerProviderBuilder()
+            .AddRequestBatcherInstrumentation()
+            .ConfigureSampler((_, sampler) =>
+            {
+                captured = sampler;
+                return sampler;
+            })
+            .SetSampler(original)
+            .AddProcessor(capture)
+            .Build();
+
+        return (provider, captured ?? throw new InvalidOperationException("The SDK sampler was not captured."));
+    }
+
+    private static SamplingParameters CreateBatchSamplingParameters(
+        IEnumerable<ActivityLink> links,
+        IEnumerable<KeyValuePair<string, object?>> tags,
+        ActivityContext parentContext = default) =>
+        new(
+            parentContext,
+            ActivityTraceId.CreateRandom(),
+            RequestBatcherTracing.BatchName,
+            ActivityKind.Consumer,
+            tags,
+            links);
+
+    private static KeyValuePair<string, object?>[] ValidBatchTags() =>
+    [
+        new("requestbatcher.batch.size", 1),
+        new("requestbatcher.request.type", "Int32"),
+    ];
 
     private static ActivityListener CreatePropagationCapture(ConcurrentQueue<Activity> batches)
     {

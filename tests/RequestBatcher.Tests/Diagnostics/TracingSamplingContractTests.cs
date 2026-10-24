@@ -127,6 +127,19 @@ public sealed class TracingSamplingContractTests
     }
 
     [Fact]
+    public void StartBatch_EmptyInput_RecordsZeroSubmissionsAndNoLinks()
+    {
+        using var capture = new SamplingCapture(_ => ActivitySamplingResult.AllDataAndRecorded);
+
+        using var batch = RequestBatcherTracing.StartBatch<int>("int", []);
+
+        Assert.NotNull(batch);
+        Assert.Empty(batch!.Links);
+        Assert.Equal(0, Assert.IsType<int>(batch.GetTagItem("requestbatcher.batch.size")));
+        Assert.Equal(0, Assert.IsType<int>(batch.GetTagItem("requestbatcher.batch.submission.count")));
+    }
+
+    [Fact]
     public void StartBatch_UntracedRequests_CountsSharedAndSeparateCompletions()
     {
         using var capture = new SamplingCapture(_ => ActivitySamplingResult.AllDataAndRecorded);
