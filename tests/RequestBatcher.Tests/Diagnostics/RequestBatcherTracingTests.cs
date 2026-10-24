@@ -75,6 +75,7 @@ public sealed class RequestBatcherTracingTests
         Assert.NotEqual(callA.TraceId, batch.TraceId);
         Assert.Equal(batch.SpanId, downstreamParent);
         Assert.Equal(2, batch.Links.Count());
+        Assert.Equal(2, batch.GetTagItem("requestbatcher.batch.submission.count"));
         Assert.Contains(batch.Links, link => link.Context == callA.Context);
         Assert.Contains(batch.Links, link => link.Context == callB.Context);
         Assert.Equal(batch.Context, Assert.Single(callA.Links).Context);
@@ -95,6 +96,7 @@ public sealed class RequestBatcherTracingTests
 
         var call = Assert.Single(capture.Calls);
         Assert.Equal(3, capture.Batches.Count());
+        Assert.All(capture.Batches, batch => Assert.Equal(1, batch.GetTagItem("requestbatcher.batch.submission.count")));
         Assert.All(capture.Batches, batch => Assert.Equal(call.Context, Assert.Single(batch.Links).Context));
         Assert.Equal(3, call.Links.Count());
         Assert.All(capture.Batches, batch => Assert.Contains(call.Links, link => link.Context == batch.Context));
@@ -137,6 +139,7 @@ public sealed class RequestBatcherTracingTests
         Assert.Empty(canceledCall.Links);
         Assert.All(capture.Batches, batch => Assert.DoesNotContain(batch.Links, link => link.Context == canceledCall.Context));
         var activeBatch = Assert.Single(capture.Batches, span => Equals(span.GetTagItem("requestbatcher.batch.size"), 2));
+        Assert.Equal(1, activeBatch.GetTagItem("requestbatcher.batch.submission.count"));
         Assert.Single(activeBatch.Links);
         var activeCall = Assert.Single(capture.Calls, call => call.Context == activeBatch.Links.Single().Context);
         Assert.Equal(activeBatch.Context, Assert.Single(activeCall.Links).Context);
@@ -217,8 +220,31 @@ public sealed class RequestBatcherTracingTests
         await provider.GetRequiredService<IRequestBatcher<int>>().ExecuteAsync(1);
         Assert.Same(parent, Activity.Current);
         Assert.Empty(capture.Calls);
-        Assert.Equal(parent.Context, Assert.Single(Assert.Single(capture.Batches).Links).Context);
+        Assert.Empty(Assert.Single(capture.Batches).Links);
         Assert.Empty(parent.Links);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_ListenerDropsCall_WithSampledCallerContext_LinksCallerContext()
+    {
+        using var capture = new TraceCapture(options => options.Name == RequestBatcherTracing.CallName
+            ? ActivitySamplingResult.None
+            : ActivitySamplingResult.AllDataAndRecorded);
+        using var parentListener = new ActivityListener
+        {
+            ShouldListenTo = source => source.Name == "RequestBatcher.Tests.Caller",
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
+        };
+        ActivitySource.AddActivityListener(parentListener);
+        var parentSource = new ActivitySource("RequestBatcher.Tests.Caller");
+        await using var provider = CreateProvider((_, _) => ValueTask.CompletedTask);
+        using var parent = parentSource.StartActivity("HTTP");
+        Assert.NotNull(parent);
+
+        await provider.GetRequiredService<IRequestBatcher<int>>().ExecuteAsync(1);
+
+        Assert.Empty(capture.Calls);
+        Assert.Equal(parent.Context, Assert.Single(Assert.Single(capture.Batches).Links).Context);
     }
 
     [Fact]

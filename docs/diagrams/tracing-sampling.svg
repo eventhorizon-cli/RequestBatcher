@@ -1,0 +1,71 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<svg width="1320" height="780" viewBox="0 0 1320 780" role="img" aria-labelledby="title desc" xmlns="http://www.w3.org/2000/svg">
+  <title id="title">RequestBatcher sampling and context flow</title>
+  <desc id="desc">The RequestBatcher.OpenTelemetry tracing extension is registered, including linked-batch sampling. Execute uses the application's SDK sampler and the caller HTTP or business span as its parent. Handle is an independent root. When at least one corresponding Execute span is sampled, Handle is sampled and links to every participating Execute context, including unsampled Execute spans; when all corresponding Execute spans are unsampled, Handle is dropped. A sampled Execute requesting data adds links only to the Handle spans processing its requests before it ends. Handler children still use the application's sampler; parent-based children follow Handle. HTTP propagates traceparent.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#475467" />
+    </marker>
+    <marker id="link-arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#3567a7" stroke-width="1.5" />
+    </marker>
+    <style>text { font-family: Arial, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #303b44; } .section { font-size: 21px; font-weight: 600; } .heading { font-size: 20px; font-weight: 600; } .body { font-size: 18px; } .note { font-size: 17px; fill: #596773; } .edge { font-size: 17px; fill: #3567a7; }</style>
+  </defs>
+  <rect width="1320" height="780" fill="#ffffff" />
+  <text x="30" y="34" class="heading" text-anchor="start">Sampling after registering the RequestBatcher.OpenTelemetry tracing extension</text>
+  <text x="30" y="64" class="note" text-anchor="start">Execute uses the application sampler; one sampled Execute samples Handle, while all unsampled Execute spans drop it.</text>
+  <text x="30" y="120" class="section" text-anchor="start">1  Caller trace</text>
+  <rect id="caller" x="30" y="150" width="250" height="120" rx="6" fill="#e9f6f1" stroke="#2f6f5e" stroke-width="1.5" />
+  <text x="155" y="189" class="heading" text-anchor="middle">Caller span</text>
+  <text x="155" y="217" class="body" text-anchor="middle">HTTP / business operation</text>
+  <text x="155" y="245" class="body" text-anchor="middle">Parent of Execute</text>
+  <rect id="execute" x="350" y="150" width="400" height="120" rx="6" fill="#eaf2ff" stroke="#3567a7" stroke-width="1.5" />
+  <text x="550" y="189" class="heading" text-anchor="middle">RequestBatcher.Execute</text>
+  <text x="550" y="217" class="body" text-anchor="middle">Parent: caller span (if present)</text>
+  <text x="550" y="245" class="body" text-anchor="middle">No caller span: root span</text>
+  <rect id="queued" x="850" y="150" width="440" height="120" rx="6" fill="#fff4d6" stroke="#8a6a1d" stroke-width="1.5" />
+  <text x="1070" y="189" class="heading" text-anchor="middle">Execute context saved with the request</text>
+  <text x="1070" y="217" class="body" text-anchor="middle">TraceId + SpanId + TraceFlags</text>
+  <text x="1070" y="245" class="body" text-anchor="middle">Used for Handle links to Execute</text>
+  <path id="caller-execute" d="M 280 210 H 350" fill="none" stroke="#475467" stroke-width="2" stroke-dasharray="none" marker-end="url(#arrow)" />
+  <path id="execute-queued" d="M 750 210 H 850" fill="none" stroke="#475467" stroke-width="2" stroke-dasharray="none" marker-end="url(#arrow)" />
+  <text x="315" y="193" class="edge" text-anchor="middle">child</text>
+  <text x="800" y="193" class="edge" text-anchor="middle">save</text>
+  <path id="batch-submission-links" d="M 550 405 V 350 H 1070 V 270" fill="none" stroke="#3567a7" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#link-arrow)" />
+  <text x="810" y="303" class="edge" text-anchor="middle">Handle links to all batch Execute contexts, including unsampled ones</text>
+  <text x="810" y="330" class="edge" text-anchor="middle">One sampled Execute: sample Handle; all unsampled: drop it</text>
+  <text x="30" y="378" class="section" text-anchor="start">2  RequestBatcher Handler trace</text>
+  <rect id="sampler" x="30" y="405" width="250" height="120" rx="6" fill="#edf1f5" stroke="#596773" stroke-width="1.5" />
+  <text x="155" y="444" class="heading" text-anchor="middle">Linked-batch policy</text>
+  <text x="155" y="472" class="body" text-anchor="middle">Execute sampled: batch on</text>
+  <text x="155" y="500" class="body" text-anchor="middle">All unsampled: batch off</text>
+  <rect id="batch" x="350" y="405" width="400" height="120" rx="6" fill="#edf1f5" stroke="#596773" stroke-width="1.5" />
+  <text x="550" y="444" class="heading" text-anchor="middle">RequestBatcher.Handle</text>
+  <text x="550" y="472" class="body" text-anchor="middle">No parent; independent root span</text>
+  <text x="550" y="500" class="body" text-anchor="middle">Decision uses Execute spans</text>
+  <rect id="downstream" x="850" y="405" width="440" height="120" rx="6" fill="#f4edfb" stroke="#75529b" stroke-width="1.5" />
+  <text x="1070" y="444" class="heading" text-anchor="middle">Handler DB / HTTP child spans</text>
+  <text x="1070" y="472" class="body" text-anchor="middle">Parent: Handle; application sampler</text>
+  <text x="1070" y="500" class="body" text-anchor="middle">Parent-based policy follows Handle</text>
+  <path id="root-batch" d="M 280 465 H 350" fill="none" stroke="#475467" stroke-width="2" stroke-dasharray="none" marker-end="url(#arrow)" />
+  <path id="batch-downstream" d="M 750 465 H 850" fill="none" stroke="#475467" stroke-width="2" stroke-dasharray="none" marker-end="url(#arrow)" />
+  <text x="315" y="448" class="edge" text-anchor="middle">policy</text>
+  <text x="800" y="448" class="edge" text-anchor="middle">child</text>
+  <text x="30" y="573" class="section" text-anchor="start">3  Execute decisions from the application's sampler</text>
+  <rect id="drop" x="30" y="595" width="400" height="135" rx="6" fill="#edf1f5" stroke="#596773" stroke-width="1.5" />
+  <text x="230" y="627" class="heading" text-anchor="middle">Drop</text>
+  <text x="230" y="655" class="body" text-anchor="middle">Propagation Activity may remain</text>
+  <text x="230" y="683" class="body" text-anchor="middle">No export; no links from Execute</text>
+  <text x="230" y="711" class="body" text-anchor="middle">to the handling Handle spans</text>
+  <rect id="record" x="460" y="595" width="400" height="135" rx="6" fill="#fff4d6" stroke="#8a6a1d" stroke-width="1.5" />
+  <text x="660" y="627" class="heading" text-anchor="middle">RecordOnly</text>
+  <text x="660" y="655" class="body" text-anchor="middle">Collect data; export depends on pipeline</text>
+  <text x="660" y="683" class="body" text-anchor="middle">No links from Execute</text>
+  <text x="660" y="711" class="body" text-anchor="middle">to the handling Handle spans</text>
+  <rect id="sample" x="890" y="595" width="400" height="135" rx="6" fill="#eaf2ff" stroke="#3567a7" stroke-width="1.5" />
+  <text x="1090" y="627" class="heading" text-anchor="middle">RecordAndSample</text>
+  <text x="1090" y="655" class="body" text-anchor="middle">Recorded + all data requested</text>
+  <text x="1090" y="683" class="body" text-anchor="middle">Add links from Execute</text>
+  <text x="1090" y="711" class="body" text-anchor="middle">to the handling Handle spans</text>
+  <text x="30" y="764" class="note" text-anchor="start">Links connect traces without parent edges. HTTP propagates the active context through traceparent.</text>
+</svg>

@@ -177,7 +177,7 @@ public sealed class NamedTracingTests
             Assert.Contains(sampled, item => item ==
                 (name is null ? "RequestBatcher.Execute" : $"RequestBatcher.Execute {name}", name));
             Assert.Contains(sampled, item => item ==
-                (name is null ? "RequestBatcher.HandleBatch" : $"RequestBatcher.HandleBatch {name}", name));
+                (name is null ? "RequestBatcher.Handle" : $"RequestBatcher.Handle {name}", name));
         }
 
         Assert.All(stopped.Where(span => span.GetTagItem("requestbatcher.name") is null),

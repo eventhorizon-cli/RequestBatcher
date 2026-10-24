@@ -1,6 +1,7 @@
 # RequestBatcher
 
-[![NuGet](https://img.shields.io/nuget/v/RequestBatcher.svg)](https://www.nuget.org/packages/RequestBatcher)
+[![RequestBatcher](https://img.shields.io/nuget/v/RequestBatcher.svg?label=RequestBatcher)](https://www.nuget.org/packages/RequestBatcher)
+[![RequestBatcher.OpenTelemetry](https://img.shields.io/nuget/v/RequestBatcher.OpenTelemetry.svg?label=RequestBatcher.OpenTelemetry)](https://www.nuget.org/packages/RequestBatcher.OpenTelemetry)
 [![Build](https://github.com/eventhorizon-cli/RequestBatcher/actions/workflows/dotnet-build.yml/badge.svg)](https://github.com/eventhorizon-cli/RequestBatcher/actions/workflows/dotnet-build.yml)
 [![Codecov](https://codecov.io/gh/eventhorizon-cli/RequestBatcher/graph/badge.svg)](https://codecov.io/gh/eventhorizon-cli/RequestBatcher)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -39,7 +40,7 @@ The illustration above shows how requests may be combined. This section explains
 
 RequestBatcher uses [BufferQueue](https://github.com/eventhorizon-cli/BufferQueue) to combine queued requests within a
 .NET process and pass them to an application handler. The current dependency is
-[BufferQueue 2.0.3](https://www.nuget.org/packages/BufferQueue/2.0.3); applications do not register or configure it
+[BufferQueue 2.1.0](https://www.nuget.org/packages/BufferQueue/2.1.0); applications do not register or configure it
 separately.
 
 This is **opportunistic batching**: writing a request to BufferQueue sends a push notification that wakes an idle
@@ -61,7 +62,7 @@ same partition during a burst.
 
 ![Opportunistic merging flow](docs/assets/request-batcher-opportunistic-merging.svg)
 
-The diagram shows normal consumption and omits cancellation and shutdown. [BufferQueue's consumer loop](https://github.com/eventhorizon-cli/BufferQueue/blob/90c6208f940592f797ab8cf78ad4af88d1163649/src/BufferQueue/BufferPullConsumer.cs#L59)
+The diagram shows normal consumption and omits cancellation and shutdown. [BufferQueue's consumer loop](https://github.com/eventhorizon-cli/BufferQueue/blob/c276547046223c1d62a13e0537b013622c775266/src/BufferQueue/BufferPullConsumer.cs)
 checks the notification version before waiting. If new data was signaled during the scan, it retries the pull to avoid a
 missed wake-up.
 
@@ -950,10 +951,17 @@ the container's normal creation rules.
 
 ### OpenTelemetry Integration
 
-RequestBatcher includes OpenTelemetry registration extensions without depending on the full OpenTelemetry SDK. Install
-the hosting and exporter packages used by your application:
+The core [`RequestBatcher`](https://www.nuget.org/packages/RequestBatcher) package uses built-in .NET `ActivitySource` and
+`Meter` APIs and has no OpenTelemetry package dependency. Install the optional
+[`RequestBatcher.OpenTelemetry`](https://www.nuget.org/packages/RequestBatcher.OpenTelemetry) package when you want its
+provider-builder registration extensions; it targets
+net8.0/net10.0, declares a minimum compatible `RequestBatcher` version, and requires OpenTelemetry 1.20.1 or later.
+The two packages are versioned independently.
+Install the hosting and exporter packages used by your application as well:
 
 ```bash
+dotnet add package RequestBatcher
+dotnet add package RequestBatcher.OpenTelemetry
 dotnet add package OpenTelemetry.Extensions.Hosting
 dotnet add package OpenTelemetry.Instrumentation.AspNetCore
 dotnet add package OpenTelemetry.Exporter.OpenTelemetryProtocol
@@ -976,26 +984,53 @@ builder.Services.AddOpenTelemetry()
         .AddOtlpExporter());
 ```
 
-`RequestBatcher.Execute` is an `Internal` span under the caller's current span. It measures the complete caller-visible
-call, including admission, capacity wait, queue residence, handler execution, and result completion. Each non-empty
-dispatched batch creates an independent `RequestBatcher.HandleBatch` `Consumer` root. The batch span links to the
-distinct `Execute` spans that contributed requests, while database or HTTP spans created by the handler are its children.
-Each recorded `Execute` span also links back to its batches before it ends, including when one submission spans several
-batches. These late links do not affect sampling of `Execute`; the application's parent span is not modified.
+Installing [`RequestBatcher.OpenTelemetry`](https://www.nuget.org/packages/RequestBatcher.OpenTelemetry) alone does not register tracing. Add `.AddRequestBatcherInstrumentation()` to the tracing
+provider to register the `RequestBatcher` source and decorate the application's sampler with linked-batch sampling.
+The extension always samples a `Handle` root when any creation-time `Handle-to-Execute` link context has the `Recorded`
+flag and returns `Drop` when every participating `Execute` context is unsampled; other Activities, including `Execute`
+and handler child spans, still use the application's sampler. It decorates the sampler selected by code or environment
+configuration, regardless of whether `SetSampler` appears before or after the extension.
+For direct source registration without this linked-batch policy, use `AddSource("RequestBatcher")` instead;
+the independent `Handle` root then follows the application's sampler, so a sampled `Execute` may still have an
+unsampled batch and downstream children, leaving its Handle trace incomplete. See the
+[integration package README](src/RequestBatcher.OpenTelemetry/README.md)
+for migration and linked-batch sampling details.
+
+When created, `RequestBatcher.Execute` is an `Internal` span under the caller's current span; its sampling decision is
+made by the application's sampler. It measures the complete caller-visible call, including admission, capacity wait,
+queue residence, handler execution, and result completion. With an active listener, each non-empty dispatched batch
+creates an independent `RequestBatcher.Handle` `Consumer` root. When at least one participating `Execute` context
+is sampled, the `Handle` span links to every distinct valid participating `Execute` context that entered processing,
+including unsampled contexts. Database or HTTP spans created by the handler are children of the batch and still use the
+application's sampler; ParentBased sampling follows the batch's flag, while other samplers may decide differently. An
+`Execute` span links only to `Handle` spans that actually handled its requests, and only when it is sampled and
+requests all Activity data, including when one submission spans several batches. If no Execute Activity was created, a
+valid caller context can provide that submission's context for batch correlation. These links are added late and do not
+affect sampling of `Execute`; the application's parent span is not modified.
 Both spans use the public request type's simple name for `requestbatcher.request.type` (for example, `Int32`),
 without namespaces or internal response wrappers. Span queries and samplers must match these short names.
 
-Sampling is controlled by the application's tracing provider. A 0% sampler can still create propagation Activities,
-so it does not have the same overhead as leaving the RequestBatcher source unregistered. Propagation-only submissions
-retain their context for batch sampling, without collecting reverse links. Fixed call metadata is reused;
-span duration and task completion semantics are unchanged. See the [20 ms sampling evaluation](docs/evaluations/tracing-io-overhead/README.md)
-for the workload and measured allocation limits.
+With direct `AddSource("RequestBatcher")` registration, sampling is controlled by the application's tracing provider for
+`Execute`, `Handle`, and handler children. A 0% sampler can still create propagation Activities,
+so it does not have the same overhead as leaving the RequestBatcher source unregistered. A dropped or propagation-only
+Execute retains a valid context that can join the `Handle-to-Execute` links when another Execute in the batch
+is sampled. RecordOnly requests all Activity data without the sampled flag and does not affect the `Handle` sampling
+decision. With direct source registration, an all-unsampled batch may still be recorded independently; the integration
+extension drops it when all participating Execute contexts are unsampled. A mixed batch retains every distinct valid context. Logs, task completion,
+cancellation, and handler execution are unchanged. See the [20 ms sampling evaluation](docs/evaluations/tracing-io-overhead/README.md) for the
+workload and measured allocation limits.
+The [sampling-aware link comparison](docs/evaluations/tracing-io-overhead/sampled-links.md) records the current
+low-sampling allocation savings and full-sampling cost; it does not establish a latency improvement.
 
 For a named registration, the public span names append the configured name after a space, such as
-`RequestBatcher.Execute pricing-queries` and `RequestBatcher.HandleBatch pricing-queries`. Both spans also carry
+`RequestBatcher.Execute pricing-queries` and `RequestBatcher.Handle pricing-queries`. Both spans also carry
 `requestbatcher.name`; unnamed registrations keep the base names and omit the tag. The name is the public DI
-registration name, never an internal queue key. Start with `Execute`, follow its span links to the related
-`HandleBatch` spans, then inspect their downstream children:
+registration name, never an internal queue key. Start with `Execute`, then follow available `Execute`-to-`Handle`
+links to the actual batches that handled its requests and inspect their downstream children:
+
+For compatibility, custom span-name queries should use `RequestBatcher.Handle` and append a named-registration suffix
+after a space, such as `RequestBatcher.Handle pricing-queries`. The `RequestBatcher` ActivitySource and Meter names
+are stable. Historical backend spans retain their previous names until backend retention removes them.
 
 ![RequestBatcher observability model](docs/diagrams/observability.svg)
 
@@ -1004,7 +1039,69 @@ they do not create a shared parent edge, shared trace ID, or ordering guarantee.
 HTTP request activities, logging scopes, baggage, or other caller `AsyncLocal` state. Tracing is best effort and pending requests are not recovered after a
 process failure.
 
-The matching `MeterProviderBuilder` extension registers the `RequestBatcher` meter. It records accepted requests,
+#### Sampling and Context Propagation
+
+The following flow assumes that the optional integration package is installed and
+`.AddRequestBatcherInstrumentation()` is registered on the tracing provider. Installing the package alone does not
+register tracing. The application-configured OpenTelemetry SDK still makes sampling decisions for each Activity from its
+parent context and creation-time tags or links.
+
+![RequestBatcher sampling and context flow](docs/diagrams/tracing-sampling.svg)
+
+`Execute` uses the caller's current HTTP or business Activity as its parent. Each `Handle` supplies no parent and is
+an independent Consumer root; it is the parent of the handler's database and HTTP child spans. If at least one
+participating `Execute` context is sampled, that `Handle` links to every distinct submission's `Execute` context.
+These links associate handling with submissions without creating parent edges. If all participating contexts are
+unsampled, the integration extension drops the independent `Handle` root. The SDK applies this policy to the
+`Handle-to-Execute` link contexts supplied when `Handle` starts.
+HTTP instrumentation propagates the batch trace downstream through `traceparent`.
+An `Execute`-to-`Handle` link is added at completion only when the `Execute` Activity is sampled and requests all
+data; it cannot affect the earlier `Execute` sampling decision. With the integration extension registered, a `Handle` root is
+sampled when any creation-time `Handle-to-Execute` link context is sampled and dropped otherwise; this link policy overrides the
+independent root decision that a `ParentBased` sampler would otherwise make.
+
+For the common `ParentBasedSampler` policy, a sampled parent produces a sampled child, an unsampled parent drops the child,
+and no parent delegates to the configured root sampler. For example, `ParentBasedSampler(new AlwaysOnSampler())` samples
+root Activities. A ratio root sampler only applies when there is no parent. With the integration extension registered, the
+`Handle` root is the explicit exception: its root decision comes from the creation-time `Handle-to-Execute`
+link contexts above,
+not from the `ParentBased` root sampler. Handler children then follow the batch's sampled flag under ParentBased.
+
+The observability sample explicitly uses `AlwaysOnSampler`. Separately, the tracing benchmark uses
+`ParentBasedSampler(new TraceIdRatioBasedSampler(ratio))` with direct source registration and no linked-batch policy
+to measure different sampling rates. These examples do not define the sampling diagram's application sampler.
+
+With the integration extension registered, a 0% ParentBased root ratio can still record `Execute` under a sampled caller parent;
+when that sampled submission enters a batch, the linked policy samples the independent `Handle` root.
+Dropped spans may retain propagation Activities and correlation/completion state;
+0% sampling is not the same as leaving the source unregistered. If a listener creates no Execute Activity,
+an available caller context can still be included in the `Handle` submission links when the batch has a sampled
+submission context.
+With no RequestBatcher listener, tracing is bypassed.
+
+When a batch Activity requests all data after sampling, it records `requestbatcher.batch.submission.count`, the number
+of distinct public `ExecuteAsync` submissions represented by requests that entered that handler invocation, not the
+number of spans. Multiple items from one explicit submission count once per batch; separate submissions count separately
+even under the same caller span or when no Execute Activity was created. Canceled queued items do not contribute. The
+attribute is computed after sampling and is a span attribute only, not a metric dimension.
+
+`MaxConcurrency` limits active handler batches, not outstanding Execute spans. For example, 1,024 individually submitted
+requests can each have an Execute Activity while only eight handler batches run. Activity lifetime covers each complete
+submission, so the concurrency setting does not provide a reusable pool of eight tracing objects.
+
+#### Metrics
+
+The matching `MeterProviderBuilder` extension registers the `RequestBatcher` meter. If only metrics are needed, choose
+either direct core registration or the optional package's metrics extension:
+
+```csharp
+builder.Services.AddOpenTelemetry()
+    .WithMetrics(metrics => metrics.AddMeter("RequestBatcher"));
+```
+
+Both options are supported: you can choose direct `AddMeter("RequestBatcher")` registration without installing the
+optional package, or install [`RequestBatcher.OpenTelemetry`](https://www.nuget.org/packages/RequestBatcher.OpenTelemetry)
+and use the metrics extension. The meter records accepted requests,
 processed requests and batches, batch size, and batch duration. Metrics use only request type and configured batcher
 name as dimensions. Request types use their short public name (for example, `Int32`), without namespaces or internal
 response wrappers; identically named types share a dimension, so use batcher names to distinguish pipelines when needed.
@@ -1042,6 +1139,8 @@ primitive `int` IDs with `decimal?` responses. Each lambda receives a keyed scop
 the delegate handler is singleton and registration has no lifetime argument. The original sample remains the
 handler-class version. The delegate sample has its own HTTP and database ports; see its
 [README](samples/RequestBatcher.Delegates/README.md) for startup and curl commands.
+
+Maintainers can publish packages independently using the [release workflow](docs/package-release-design.md).
 
 ## License
 

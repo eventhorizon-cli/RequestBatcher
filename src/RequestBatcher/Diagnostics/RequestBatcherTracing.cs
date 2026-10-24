@@ -7,7 +7,7 @@ internal static class RequestBatcherTracing
 {
     internal const string SourceName = "RequestBatcher";
     internal const string CallName = "RequestBatcher.Execute";
-    internal const string BatchName = "RequestBatcher.HandleBatch";
+    internal const string BatchName = "RequestBatcher.Handle";
     internal static readonly ActivitySource Source = new(SourceName);
 
     public static Task TraceCall<TState>(
@@ -132,20 +132,25 @@ internal static class RequestBatcherTracing
         }
 
         BatchTraceLinks? links = null;
-        foreach (var request in requests)
+        // A sampled Execute context enables links to every participating context, including unsampled ones.
+        // With no sampled context, omit the collector; the optional linked-batch sampler treats no links as Drop.
+        if (HasSampledSubmission(requests))
         {
-            if (request is not TracedPendingBatchRequest<TRequest> traced)
+            foreach (var request in requests)
             {
-                continue;
-            }
+                if (request is not TracedPendingBatchRequest<TRequest> traced)
+                {
+                    continue;
+                }
 
-            if (links is null)
-            {
-                links = new BatchTraceLinks(traced.TraceContext);
-            }
-            else
-            {
-                links.Add(traced.TraceContext);
+                if (links is null)
+                {
+                    links = new BatchTraceLinks(traced.TraceContext);
+                }
+                else
+                {
+                    links.Add(traced.TraceContext);
+                }
             }
         }
 
@@ -153,6 +158,9 @@ internal static class RequestBatcherTracing
         tags.Add("requestbatcher.batch.size", requests.Count);
 
         // Dispatch runs in an isolated context. Links describe the many-to-many relationship with calls.
+        // Listeners sample these creation-time inputs before allocating the Activity object. Still call StartActivity
+        // when no Execute is sampled: the SDK may retain an unsampled root Activity for propagation to Handler children.
+        // A non-null Activity therefore does not imply recording; collect additional data only when requested below.
         var activity = Source.StartActivity(
             GetBatchName(batcherName),
             ActivityKind.Consumer,
@@ -162,9 +170,56 @@ internal static class RequestBatcherTracing
         if (activity is not null)
         {
             links?.AddBatch(activity.Context);
+            if (activity.IsAllDataRequested)
+            {
+                activity.SetTag("requestbatcher.batch.submission.count", CountSubmissions(requests, links));
+            }
         }
 
         return activity;
+    }
+
+    private static bool HasSampledSubmission<TRequest>(IReadOnlyList<PendingBatchRequest<TRequest>> requests)
+    {
+        foreach (var request in requests)
+        {
+            if (request is TracedPendingBatchRequest<TRequest> traced &&
+                (traced.TraceContext.Context.TraceFlags & ActivityTraceFlags.Recorded) != 0)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static int CountSubmissions<TRequest>(
+        IReadOnlyList<PendingBatchRequest<TRequest>> requests,
+        BatchTraceLinks? links)
+    {
+        // A unique context for every item already proves that every submission is distinct.
+        if (links?.Count == requests.Count)
+        {
+            return requests.Count;
+        }
+
+        if (requests.Count == 0)
+        {
+            return 0;
+        }
+
+        var first = requests[0].Completion;
+        HashSet<Task>? additional = null;
+        for (var index = 1; index < requests.Count; index++)
+        {
+            var submission = requests[index].Completion;
+            if (!ReferenceEquals(submission, first))
+            {
+                (additional ??= []).Add(submission);
+            }
+        }
+
+        return 1 + (additional?.Count ?? 0);
     }
 
     public static void RecordFailure(Activity? activity, Exception exception)
@@ -201,7 +256,7 @@ internal static class RequestBatcherTracing
     {
         var context = activity?.Context ?? parent?.Context ?? default;
         return context.TraceId != default && context.SpanId != default
-            ? SubmissionTraceContext.Create(context, activity?.IsAllDataRequested == true)
+            ? SubmissionTraceContext.Create(context, activity is { Recorded: true, IsAllDataRequested: true })
             : null;
     }
 

@@ -80,20 +80,21 @@ curl --fail 'http://127.0.0.1:5082/prices?ids=1,2,3,64,100'
 Open the [RequestBatcher observability dashboard](http://127.0.0.1:3000/d/requestbatcher-observability/requestbatcher-observability)
 and sign in with `admin` / `admin` if prompted. The HTTP panels show request rate and duration; the RequestBatcher panels
 show submitted requests, batch size, and batch duration. The logs and trace panels show the two services' logs and Tempo
-trace families for `RequestBatcher.Execute` and `RequestBatcher.HandleBatch`.
+trace families for `RequestBatcher.Execute` and `RequestBatcher.Handle`.
 
 The visible trace starts with the Cart ASP.NET Core request span. Each Cart request creates one
 `RequestBatcher.Execute pricing-queries` span for its complete 2–10 ID sequence. The shared Cart batch handler receives up to 20
 product requests, mixes requests from concurrent Cart calls, deduplicates their IDs, and makes one HTTP call to Pricing for the group. Pricing's ASP.NET Core span contains the
 Npgsql database span created by Npgsql's official OpenTelemetry integration. The Cart batch spans are independent
-Consumer roots linked to their contributing caller traces and carry `requestbatcher.name=pricing-queries`. A single Cart trace
-has one `Execute` span, but an explicit 2–10 item submission can be split across multiple `HandleBatch` spans; a batch can
+Consumer roots. Each `Handle` span links to the contributing caller `Execute` contexts and carries
+`requestbatcher.name=pricing-queries`. A single Cart trace
+has one `Execute` span, but an explicit 2–10 item submission can be split across multiple `Handle` spans; a batch can
 also mix product requests from concurrent Cart traces. `requestbatcher.batch.size` records product requests in that batch.
 
 To follow one call into a batch, open the Cart trace, copy the `Execute` span's trace ID, and search Tempo with:
 
 ```text
-{ link:traceID = "CALL_TRACE_ID" && span:name =~ "RequestBatcher.HandleBatch.*" }
+{ link:traceID = "CALL_TRACE_ID" && span:name =~ "RequestBatcher[.]Handle( .*)?" }
 ```
 
 The pinned Tempo build stores this query field without leading zeroes. Remove leading `0` characters from a copied
@@ -101,17 +102,17 @@ trace ID before substituting it above. Select a time range that includes the ori
 20 submissions because RequestBatcher does not wait to fill `BatchSize`.
 
 Open the returned batch span to inspect the Cart-to-Pricing HTTP child and the Pricing database span. Activity links are
-causal references rather than shared parent edges, so they do not imply one shared trace tree. The `HandleBatch` span
-links to every contributing `Execute` span, and each `Execute` span links back to every `HandleBatch` span that handled
+causal references rather than shared parent edges, so they do not imply one shared trace tree. Each `Handle` span
+links to every contributing `Execute` span, and each `Execute` span links to every `Handle` span that handled
 its requests. See Grafana's [TraceQL link query documentation](https://grafana.com/docs/tempo/latest/traceql/construct-traceql-queries/)
 for the `link:traceID` and `link:spanID` selectors.
 
-For direct navigation, open a `HandleBatch` trace from the dashboard's `Handler execution · HandleBatch` table, click the
-`RequestBatcher.HandleBatch pricing-queries` span row, and expand `References` in the span details to see its `Execute`
-callers. Links are reciprocal: click an `Execute` span in the `Cart calls · Execute` table and expand `References` to see the
-batches that processed it. Grafana groups parent references and span links in this list: the `cart POST /cart/quote`
-entry is Execute's HTTP parent in the same trace, while handler links target independent `HandleBatch` traces.
-The parent entry is not an extra ActivityLink. To reverse-search
+For direct navigation, open a `Handle` trace from the dashboard's `Handler execution · Handle` table, click the
+`RequestBatcher.Handle pricing-queries` span row, and expand `References` in the span details to see its `Execute`
+callers. Click an `Execute` span in the `Cart calls · Execute` table and expand `References` to see the
+`Handle` spans that processed it. Grafana groups parent references and span links in this list: the `cart POST /cart/quote`
+entry is Execute's HTTP parent in the same trace, while handler links target independent `Handle` traces.
+The parent entry is not an extra ActivityLink. To find the `Execute` spans from
 from a batch, copy its trace and span IDs and query Tempo with:
 
 ```text

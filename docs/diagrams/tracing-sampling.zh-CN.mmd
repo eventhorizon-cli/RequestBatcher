@@ -1,0 +1,30 @@
+flowchart LR
+    %% 语义约定：已注册 RequestBatcher.OpenTelemetry tracing 扩展，其中包含提交关联采样。
+    %% Execute 和 Handler 子 span 使用应用配置的 SDK 采样器。
+    %% Execute 提供调用方当前父上下文（或空父上下文）和 tags。
+    %% 排队的 ActivityContext 成为 Handle 指向 Execute 的 link，Handle 仍是没有父 span 的独立根 span。
+    %% 本批次对应的 Execute span 中至少一个被采样时，Handle 采样并指向全部 Execute 上下文，包括未采样的 Execute；全部 Execute 未采样时，Handle 不采样。
+    %% Handler 子 span 以 Handle 为父 span；基于父 span 的采样策略跟随 Handle。HTTP 通过 traceparent 传播。
+    %% 底部结果适用于 Execute：Drop 仍可能保留传播 Activity；RecordOnly 请求数据；
+    %% RecordAndSample 还设置采样标志。Execute 指向 Handle 的 link 要求 Recorded 和 IsAllDataRequested 同时为 true。
+    %% Link 关联不同 Trace，不改变父子关系。
+    caller["调用方 span<br/>HTTP / 业务操作<br/>Execute 的父 span"] -->|父→子| execute["RequestBatcher.Execute<br/>父 span：调用方 HTTP / 业务 span<br/>没有调用方 span 时：独立根 span"]
+    execute -->|保存上下文| queued["随请求保存的 Execute 上下文<br/>TraceId + SpanId + TraceFlags<br/>用于 Handle 指向 Execute 的 link"]
+    sampler["提交关联采样策略<br/>Execute 已采样：批次采样<br/>全未采样：批次丢弃"] -->|配置| batch["RequestBatcher.Handle<br/>没有父 span；独立根 span<br/>根据 Execute 的采样结果决定"]
+    batch -. "Handle 指向本批次全部 Execute 上下文，包括未采样的 Execute；至少一个 Execute 已采样时采样 Handle，否则不采样" .-> queued
+    batch -->|父→子| downstream["Handler 数据库 / HTTP 子 span<br/>父 span：Handle；使用应用采样器<br/>基于父 span 的采样策略跟随 Handle"]
+    subgraph outcomes[应用采样器对 Execute 的采样结果]
+        drop["Drop<br/>仍可能创建传播用 Activity<br/>不导出；不添加从 Execute<br/>指向对应 Handle 的 link"]
+        record["RecordOnly<br/>收集数据；导出取决于处理链路<br/>不添加从 Execute<br/>指向对应 Handle 的 link"]
+        sample["RecordAndSample<br/>Recorded + 请求全部数据<br/>结束前添加从 Execute<br/>指向对应 Handle 的 link"]
+    end
+    classDef client fill:#e9f6f1,stroke:#2f6f5e,color:#173f35
+    classDef gateway fill:#eaf2ff,stroke:#3567a7,color:#1d3b66
+    classDef core fill:#edf1f5,stroke:#596773,color:#303b44
+    classDef storage fill:#fff4d6,stroke:#8a6a1d,color:#4d3b0e
+    classDef handler fill:#f4edfb,stroke:#75529b,color:#422d59
+    class caller client
+    class execute,sample gateway
+    class sampler,batch,drop core
+    class queued,record storage
+    class downstream handler

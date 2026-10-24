@@ -8,6 +8,7 @@ Find reports by question; versions, workloads, and limitations are documented in
 - [partition-key-submissions](partition-key-submissions/README.md): compares explicit batch submission with per-item submission followed by `Task.WhenAll` (in-process).
 - [delay-overhead](delay-overhead/README.md): compares direct calls, direct batching, bounded batching, and RequestBatcher processing cost (simulated I/O).
 - [bufferqueue-2.0.3](bufferqueue-2.0.3/README.md): measures how partition count, direct dispatch, and controlled `Task.Run` affect batch processing (in-process).
+- [bufferqueue-2.1.0](bufferqueue-2.1.0/README.md): compares BufferQueue 2.0.3 and 2.1.0 with matched RequestBatcher source and the 20 ms tracing sampling matrix.
 
 ## Scheduling and External I/O
 
@@ -31,7 +32,7 @@ Find reports by question; versions, workloads, and limitations are documented in
 
 ## Observability
 
-RequestBatcher exposes optional `RequestBatcher.Execute` and `RequestBatcher.HandleBatch` spans through the
+RequestBatcher exposes optional `RequestBatcher.Execute` and `RequestBatcher.Handle` spans through the
 `RequestBatcher` adapter. The reports indexed here describe their recorded workloads and do not claim
 to have run with the new tracing instrumentation. Read the [observability design](../observability-design.md) for
 correlation and configuration guidance.
@@ -52,6 +53,8 @@ The [pending completion evaluation](tracing-io-overhead/completion-optimization.
 and callback completion bridges and explains the applicability of BufferQueue's reusable ValueTask source.
 The [shared tracing completion evaluation](tracing-io-overhead/shared-completion.md) compares the ordinary admission
 path before and after reusing the request's completion source, with a fresh 0.2.4 baseline and all sampling rates.
+The [sampling-aware links evaluation](tracing-io-overhead/sampled-links.md) measures the subsequent low-sampling
+allocation savings, submission-count cost, and fresh non-tracing 0.2.4 comparison with the same 20 ms workload.
 
 The [metrics I/O evaluation](metrics-io-overhead/README.md) isolates SDK aggregation and periodic collection overhead
 with tracing disabled, using the same 1,024-request waves and simulated 20 ms calls.

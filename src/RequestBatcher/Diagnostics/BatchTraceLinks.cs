@@ -15,6 +15,8 @@ internal sealed class BatchTraceLinks : IEnumerable<ActivityLink>
         _firstKey = GetKey(firstSubmission.Context);
     }
 
+    internal int Count => 1 + (_additionalSubmissions?.Count ?? 0);
+
     internal void Add(SubmissionTraceContext submission)
     {
         var key = GetKey(submission.Context);

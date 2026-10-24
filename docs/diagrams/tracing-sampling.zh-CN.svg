@@ -1,0 +1,71 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<svg width="1320" height="780" viewBox="0 0 1320 780" role="img" aria-labelledby="title desc" xmlns="http://www.w3.org/2000/svg">
+  <title id="title">RequestBatcher 采样与上下文传递流程</title>
+  <desc id="desc">已注册 RequestBatcher.OpenTelemetry tracing 扩展，其中包含提交关联采样。Execute 使用应用的 SDK 采样器，调用方 HTTP 或业务 span 是它的父 span。Handle 是独立根 span；本批次对应的 Execute span 中只要有一个被采样，Handle 就采样并通过 link 指向本批次全部 Execute 上下文，包括未采样的 Execute；如果这些 Execute span 全部未采样，Handle 就丢弃。已采样且请求数据的 Execute 只在结束前添加指向处理其请求的 Handle 的 link。Handler 子 span 仍使用应用采样器；基于父 span 的策略跟随 Handle。HTTP 通过 traceparent 传播。</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#475467" />
+    </marker>
+    <marker id="link-arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M 1 1 L 9 5 L 1 9" fill="none" stroke="#3567a7" stroke-width="1.5" />
+    </marker>
+    <style>text { font-family: Arial, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #303b44; } .section { font-size: 21px; font-weight: 600; } .heading { font-size: 20px; font-weight: 600; } .body { font-size: 18px; } .note { font-size: 17px; fill: #596773; } .edge { font-size: 17px; fill: #3567a7; }</style>
+  </defs>
+  <rect width="1320" height="780" fill="#ffffff" />
+  <text x="30" y="34" class="heading" text-anchor="start">注册 RequestBatcher.OpenTelemetry tracing 扩展后的采样流程</text>
+  <text x="30" y="64" class="note" text-anchor="start">Execute 遵循应用采样器；一个 Execute 采样就采样 Handle，全部未采样则丢弃 Handle。</text>
+  <text x="30" y="120" class="section" text-anchor="start">1  调用方链路</text>
+  <rect id="caller" x="30" y="150" width="250" height="120" rx="6" fill="#e9f6f1" stroke="#2f6f5e" stroke-width="1.5" />
+  <text x="155" y="189" class="heading" text-anchor="middle">调用方 span</text>
+  <text x="155" y="217" class="body" text-anchor="middle">HTTP / 业务操作</text>
+  <text x="155" y="245" class="body" text-anchor="middle">Execute 的父 span</text>
+  <rect id="execute" x="350" y="150" width="400" height="120" rx="6" fill="#eaf2ff" stroke="#3567a7" stroke-width="1.5" />
+  <text x="550" y="189" class="heading" text-anchor="middle">RequestBatcher.Execute</text>
+  <text x="550" y="217" class="body" text-anchor="middle">父 span：调用方 HTTP / 业务 span</text>
+  <text x="550" y="245" class="body" text-anchor="middle">没有调用方 span 时：独立根 span</text>
+  <rect id="queued" x="850" y="150" width="440" height="120" rx="6" fill="#fff4d6" stroke="#8a6a1d" stroke-width="1.5" />
+  <text x="1070" y="189" class="heading" text-anchor="middle">随请求保存的 Execute 上下文</text>
+  <text x="1070" y="217" class="body" text-anchor="middle">TraceId + SpanId + TraceFlags</text>
+  <text x="1070" y="245" class="body" text-anchor="middle">用于 Handle 指向 Execute 的 link</text>
+  <path id="caller-execute" d="M 280 210 H 350" fill="none" stroke="#475467" stroke-width="2" stroke-dasharray="none" marker-end="url(#arrow)" />
+  <path id="execute-queued" d="M 750 210 H 850" fill="none" stroke="#475467" stroke-width="2" stroke-dasharray="none" marker-end="url(#arrow)" />
+  <text x="315" y="193" class="edge" text-anchor="middle">父→子</text>
+  <text x="800" y="193" class="edge" text-anchor="middle">保存上下文</text>
+  <path id="batch-submission-links" d="M 550 405 V 350 H 1070 V 270" fill="none" stroke="#3567a7" stroke-width="2" stroke-dasharray="7 5" marker-end="url(#link-arrow)" />
+  <text x="810" y="303" class="edge" text-anchor="middle">Handle link 到本批次全部 Execute，包括未采样的 Execute</text>
+  <text x="810" y="330" class="edge" text-anchor="middle">一个 Execute 采样：采样 Handle；全部未采样：丢弃</text>
+  <text x="30" y="378" class="section" text-anchor="start">2  RequestBatcher Handler 处理链路</text>
+  <rect id="sampler" x="30" y="405" width="250" height="120" rx="6" fill="#edf1f5" stroke="#596773" stroke-width="1.5" />
+  <text x="155" y="444" class="heading" text-anchor="middle">提交关联采样策略</text>
+  <text x="155" y="472" class="body" text-anchor="middle">Execute 已采样：批次采样</text>
+  <text x="155" y="500" class="body" text-anchor="middle">全未采样：批次丢弃</text>
+  <rect id="batch" x="350" y="405" width="400" height="120" rx="6" fill="#edf1f5" stroke="#596773" stroke-width="1.5" />
+  <text x="550" y="444" class="heading" text-anchor="middle">RequestBatcher.Handle</text>
+  <text x="550" y="472" class="body" text-anchor="middle">没有父 span；独立根 span</text>
+  <text x="550" y="500" class="body" text-anchor="middle">根据 Execute 的采样结果决定</text>
+  <rect id="downstream" x="850" y="405" width="440" height="120" rx="6" fill="#f4edfb" stroke="#75529b" stroke-width="1.5" />
+  <text x="1070" y="444" class="heading" text-anchor="middle">Handler 数据库 / HTTP 子 span</text>
+  <text x="1070" y="472" class="body" text-anchor="middle">父 span：Handle；使用应用采样器</text>
+  <text x="1070" y="500" class="body" text-anchor="middle">基于父 span 的采样策略跟随 Handle</text>
+  <path id="root-batch" d="M 280 465 H 350" fill="none" stroke="#475467" stroke-width="2" stroke-dasharray="none" marker-end="url(#arrow)" />
+  <path id="batch-downstream" d="M 750 465 H 850" fill="none" stroke="#475467" stroke-width="2" stroke-dasharray="none" marker-end="url(#arrow)" />
+  <text x="315" y="448" class="edge" text-anchor="middle">配置</text>
+  <text x="800" y="448" class="edge" text-anchor="middle">父→子</text>
+  <text x="30" y="573" class="section" text-anchor="start">3  应用采样器对 Execute 的采样结果</text>
+  <rect id="drop" x="30" y="595" width="400" height="135" rx="6" fill="#edf1f5" stroke="#596773" stroke-width="1.5" />
+  <text x="230" y="627" class="heading" text-anchor="middle">Drop</text>
+  <text x="230" y="655" class="body" text-anchor="middle">仍可能创建传播用 Activity</text>
+  <text x="230" y="683" class="body" text-anchor="middle">不导出；不添加从 Execute</text>
+  <text x="230" y="711" class="body" text-anchor="middle">指向对应 Handle 的 link</text>
+  <rect id="record" x="460" y="595" width="400" height="135" rx="6" fill="#fff4d6" stroke="#8a6a1d" stroke-width="1.5" />
+  <text x="660" y="627" class="heading" text-anchor="middle">RecordOnly</text>
+  <text x="660" y="655" class="body" text-anchor="middle">收集数据；导出取决于处理链路</text>
+  <text x="660" y="683" class="body" text-anchor="middle">不添加从 Execute</text>
+  <text x="660" y="711" class="body" text-anchor="middle">指向对应 Handle 的 link</text>
+  <rect id="sample" x="890" y="595" width="400" height="135" rx="6" fill="#eaf2ff" stroke="#3567a7" stroke-width="1.5" />
+  <text x="1090" y="627" class="heading" text-anchor="middle">RecordAndSample</text>
+  <text x="1090" y="655" class="body" text-anchor="middle">Recorded + 请求全部数据</text>
+  <text x="1090" y="683" class="body" text-anchor="middle">结束前添加从 Execute</text>
+  <text x="1090" y="711" class="body" text-anchor="middle">指向对应 Handle 的 link</text>
+  <text x="30" y="764" class="note" text-anchor="start">Link 关联不同 Trace，不改变父子关系；HTTP 通过 traceparent 传播当前上下文。</text>
+</svg>

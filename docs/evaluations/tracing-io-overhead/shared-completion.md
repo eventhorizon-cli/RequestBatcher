@@ -6,11 +6,13 @@ This evaluation compares the published RequestBatcher 0.2.4 package, which has n
 matched source snapshots before and after sharing request completion with tracing. The before snapshot was taken
 from `main` at `11c36c2591143052a1b8d664816fa775f8a8f220` with the pending short telemetry-type-name changes already
 applied. Both source snapshots therefore use the same span attributes. Public Task APIs, handler concurrency,
-batch formation, cancellation, response semantics, and link relationships are unchanged.
+batch formation, cancellation, response semantics, and the relationships represented by HandleBatch-to-Execute and
+Execute-to-HandleBatch links are unchanged.
 
 Observed request, typed-response, and aggregate completion sources use their existing caller-visible Task. They
 prepare the outcome and notify Diagnostics before publishing it. Diagnostics captures the submission execution
-context, collects reverse links, stops the Execute Activity, and then releases that same completion source. A small
+context, collects Execute-to-HandleBatch links to the batches that processed the submission, stops the Execute Activity,
+and then releases that same completion source. A small
 publication gate handles completion racing with the synchronous submission boundary. Ordinary completion objects
 have no additional fields when tracing is disabled, and no completion source is pooled.
 
@@ -73,8 +75,9 @@ The legacy comparison uses the same run and workload:
 
 With tracing disabled, both time intervals overlap the legacy package; measured allocation differs by approximately
 1.3% for singles and 0.9% for groups. Within the optimized version, tracing still allocates about 3.9 times the disabled
-amount at 0% sampling and 4.5 times at 100% for single submissions. Activities, propagation context, tags, and batch links
-remain. Reducing sampling therefore does not make instrumentation allocation proportional to the recording rate.
+amount at 0% sampling and 4.5 times at 100% for single submissions. Activities, propagation context, tags, and
+the HandleBatch-to-Execute and Execute-to-HandleBatch links remain. Reducing sampling therefore does not make
+instrumentation allocation proportional to the recording rate.
 The slight allocation inversion between 0% and 1% does not establish an advantage for 1% sampling.
 
 All 22 cases and 44 process launches completed: 3,036 validated waves and 3,108,864 requests. Each wave verified every
@@ -134,7 +137,8 @@ aggregate exceptions. The complete Release solution builds without warnings, and
 
 Three in-process integration stress cases use the real SDK, including 32 waves of 512 requests at each of 0% and
 100% sampling, with capacity limited to 64. They verify exactly-once processing, actual batch membership in both
-directions of span links, cancellation, failure, and shutdown. Unit and integration coverage were collected separately.
+HandleBatch-to-Execute and Execute-to-HandleBatch links, cancellation, failure, and shutdown. Unit and integration
+coverage were collected separately.
 These tests do not start Docker or run the container-backed sample integration cases.
 
 The [comparison runner](../../../scripts/CompareTracingIoOverhead.cs) retains both source snapshots, validates the

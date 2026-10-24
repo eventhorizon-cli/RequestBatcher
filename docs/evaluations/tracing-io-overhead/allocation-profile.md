@@ -53,18 +53,19 @@ attribution, not exact object sizes, object counts, or isolated incremental cost
 The disabled profile is dominated by core pending requests, tasks, queue nodes, and completion continuations.
 Tracing adds several independent allocation sources; the whole increase cannot be attributed to links or deduplication.
 Caching input metadata avoids recreating the input collection, but does not eliminate Activity's own tag storage or
-enumeration. Forward links also still get copied into Activity storage in the 0% run.
+enumeration. HandleBatch-to-Execute links also still get copied into Activity storage in the 0% run.
 
 The 100% profile adds a substantial `ActivityContext[]` component (about 153 estimated bytes per request), with stacks
 through `SubmissionTraceContext.AddBatch`, and more link nodes through `SubmissionTraceContext.Complete` /
-`Activity.AddLink`. These are consistent with the recorded path collecting reverse links in addition to forward links.
+`Activity.AddLink`. These are consistent with the recorded path collecting Execute-to-HandleBatch links in addition to
+HandleBatch-to-Execute links.
 
 ## Optimization implications
 
 No pooling was introduced. The profile supports investigating avoidable list/hash-set growth and repeated tag copying
 before adding pools. Reducing creation-time tags changes what samplers can inspect, so moving tags until after sampling
-must not silently change the current contract. Reverse links implement Execute-to-handler navigation and are not
-discardable metadata under that contract.
+must not silently change the current contract. Execute-to-HandleBatch links connect each submission to the HandleBatch
+span that processed it and are not discardable metadata under that contract.
 
 The completion bridge is another measurable source, but a replacement must preserve all original task faults,
 cancellation tokens, and stopping the span before returning completion. Activities and Tasks are not resettable objects

@@ -6,7 +6,7 @@ namespace RequestBatcher.Observability.IntegrationTests;
 internal sealed class TempoClient
 {
     private const string ApiPath = "api/datasources/proxy/uid/requestbatcher-tempo/api";
-    private const string BatchName = "RequestBatcher.HandleBatch pricing-queries";
+    private const string BatchName = "RequestBatcher.Handle pricing-queries";
     private readonly HttpClient _client;
 
     public TempoClient(HttpClient client) => _client = client ?? throw new ArgumentNullException(nameof(client));

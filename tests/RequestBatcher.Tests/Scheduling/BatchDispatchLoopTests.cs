@@ -200,7 +200,7 @@ public sealed class BatchDispatchLoopTests
     }
 
     private static Mock<IBufferPullConsumer<PendingBatchRequest<int>>> CreateConsumer(
-        Func<CancellationToken, IAsyncEnumerable<IEnumerable<PendingBatchRequest<int>>>> consume)
+        Func<CancellationToken, IAsyncEnumerable<IReadOnlyList<PendingBatchRequest<int>>>> consume)
     {
         var consumer = new Mock<IBufferPullConsumer<PendingBatchRequest<int>>>(MockBehavior.Strict);
         consumer
@@ -209,7 +209,7 @@ public sealed class BatchDispatchLoopTests
         return consumer;
     }
 
-    private static async IAsyncEnumerable<IEnumerable<PendingBatchRequest<int>>> YieldTwoBatches(
+    private static async IAsyncEnumerable<IReadOnlyList<PendingBatchRequest<int>>> YieldTwoBatches(
         PendingBatchRequest<int>[] firstBatch,
         PendingBatchRequest<int>[] secondBatch,
         TaskCompletionSource secondBatchPullRequested,
@@ -223,7 +223,7 @@ public sealed class BatchDispatchLoopTests
 
     private static ConsumerSequence CreateEmptySequence()
     {
-        var enumerator = new Mock<IAsyncEnumerator<IEnumerable<PendingBatchRequest<int>>>>(MockBehavior.Strict);
+        var enumerator = new Mock<IAsyncEnumerator<IReadOnlyList<PendingBatchRequest<int>>>>(MockBehavior.Strict);
         enumerator
             .Setup(candidate => candidate.MoveNextAsync())
             .Returns(new ValueTask<bool>(false));
@@ -237,7 +237,7 @@ public sealed class BatchDispatchLoopTests
     private static ConsumerSequence CreateSingleItemSequence(PendingBatchRequest<int> request)
     {
         var moveNextCount = 0;
-        var enumerator = new Mock<IAsyncEnumerator<IEnumerable<PendingBatchRequest<int>>>>(MockBehavior.Strict);
+        var enumerator = new Mock<IAsyncEnumerator<IReadOnlyList<PendingBatchRequest<int>>>>(MockBehavior.Strict);
         enumerator
             .SetupGet(candidate => candidate.Current)
             .Returns([request]);
@@ -252,16 +252,16 @@ public sealed class BatchDispatchLoopTests
     }
 
     private static ConsumerSequence CreateSequence(
-        Mock<IAsyncEnumerator<IEnumerable<PendingBatchRequest<int>>>> enumerator)
+        Mock<IAsyncEnumerator<IReadOnlyList<PendingBatchRequest<int>>>> enumerator)
     {
-        var sequence = new Mock<IAsyncEnumerable<IEnumerable<PendingBatchRequest<int>>>>(MockBehavior.Strict);
+        var sequence = new Mock<IAsyncEnumerable<IReadOnlyList<PendingBatchRequest<int>>>>(MockBehavior.Strict);
         sequence
             .Setup(candidate => candidate.GetAsyncEnumerator(It.IsAny<CancellationToken>()))
             .Returns(enumerator.Object);
         return new ConsumerSequence(sequence, enumerator);
     }
 
-    private static async IAsyncEnumerable<IEnumerable<PendingBatchRequest<int>>> YieldThreeBatches(
+    private static async IAsyncEnumerable<IReadOnlyList<PendingBatchRequest<int>>> YieldThreeBatches(
         PendingBatchRequest<int>[] firstBatch,
         PendingBatchRequest<int>[] secondBatch,
         PendingBatchRequest<int>[] thirdBatch,
@@ -279,11 +279,11 @@ public sealed class BatchDispatchLoopTests
         new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private sealed class ConsumerSequence(
-        Mock<IAsyncEnumerable<IEnumerable<PendingBatchRequest<int>>>> sequence,
-        Mock<IAsyncEnumerator<IEnumerable<PendingBatchRequest<int>>>> enumerator)
+        Mock<IAsyncEnumerable<IReadOnlyList<PendingBatchRequest<int>>>> sequence,
+        Mock<IAsyncEnumerator<IReadOnlyList<PendingBatchRequest<int>>>> enumerator)
     {
-        public Mock<IAsyncEnumerable<IEnumerable<PendingBatchRequest<int>>>> Sequence { get; } = sequence;
+        public Mock<IAsyncEnumerable<IReadOnlyList<PendingBatchRequest<int>>>> Sequence { get; } = sequence;
 
-        public Mock<IAsyncEnumerator<IEnumerable<PendingBatchRequest<int>>>> Enumerator { get; } = enumerator;
+        public Mock<IAsyncEnumerator<IReadOnlyList<PendingBatchRequest<int>>>> Enumerator { get; } = enumerator;
     }
 }

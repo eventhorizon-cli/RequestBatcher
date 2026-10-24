@@ -91,7 +91,7 @@ items passed to one handler invocation. It is not multiplied by `H`.
 
 ## Queue Dependency Contract
 
-The pipeline uses BufferQueue 2.0.3 with its memory storage. The single pull
+The pipeline uses BufferQueue 2.1.0 with its memory storage. The single pull
 consumer scans assigned partitions in a ring and resumes after the partition
 that supplied the last batch. Notifications wake the consumer without giving
 the notifying partition priority. This balances pull opportunities between
@@ -119,6 +119,17 @@ tests continue to verify that equal-key batches can execute concurrently. The
 complete unit-test project, Release solution build, formatting verification, and
 package creation validate the dependency upgrade.
 
+The pull API returns `IReadOnlyList<T>` batches with a count and indexed access.
+Returned batches remain valid after later pulls and commits, so dispatch passes
+them directly to request selection without enumerating or materializing another
+collection. RequestBatcher's public handler signatures remain unchanged, and
+handler-facing request arrays remain independent of pending-request state.
+Tests cover batch lifetime across overlapping executions, cancellation filtering,
+consumer failures, capacity handoff, routing, and shutdown on both target frameworks.
+The [tracing I/O evaluation](evaluations/bufferqueue-2.1.0/README.md) compares matched source snapshots with only this
+dependency upgrade and its API adaptation changed, retaining the same 20 ms
+workload and sampling matrix, reporting timing and managed allocation separately.
+
 ## BatchDispatchLoop
 
 `BatchDispatchLoop` is the queue-facing scheduling loop. Its implementation
@@ -127,9 +138,7 @@ uses a semaphore with `H` permits and an in-flight completion tracker.
 1. Wait for one execution permit.
 2. Advance the BufferQueue async enumerator once. The consumer has
    `AutoCommit = true`, so this succeeds only after queue progress has advanced.
-3. Hand BufferQueue's memory-topic `IReadOnlyList` snapshot directly to an
-   execution task. An arbitrary enumerable is materialized only as a defensive
-   fallback before that handoff.
+3. Hand BufferQueue's `IReadOnlyList` snapshot directly to an execution task.
 4. Invoke the handler-batch async method on the dispatch call path. Return to
    step 1 when it completes or reaches its first incomplete asynchronous wait.
 5. The execution task completes each request from the handler outcome, removes
@@ -268,7 +277,7 @@ This adds one scheduling boundary per long-lived task, not per batch. Batch
 dispatch, handler scope ownership, admission, cancellation, and draining retain
 their existing contracts. Public APIs and target frameworks are unchanged. The
 optional tracing contract is defined in [Observability](observability-design.md):
-each dispatched batch may create an independent `RequestBatcher.HandleBatch`
+each dispatched batch may create an independent `RequestBatcher.Handle`
 Consumer span with links to the submission spans that contributed requests.
 
 Deterministic regressions cover initialization under an Activity and AsyncLocal,

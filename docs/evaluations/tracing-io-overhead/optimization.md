@@ -1,8 +1,9 @@
 # Tracing allocation optimization
 
 This comparison measures the published 0.3.2 package against the optimized source snapshot using the same
-[20 ms workload and SDK sampling matrix](README.md). It retains complete forward links at batch sampling,
-reverse links for Activities requesting all data, original span lifetimes, and the existing completion bridge.
+[20 ms workload and SDK sampling matrix](README.md). It retains complete HandleBatch-to-Execute links from every
+participating submission at batch sampling, Execute-to-HandleBatch links for Activities requesting all data, original
+span lifetimes, and the existing completion bridge.
 
 ## Implementation boundary
 
@@ -11,13 +12,15 @@ adapters hold immutable metadata and call the tracing helper. No sampling flags 
 to queue admission, backpressure, or request completion contracts.
 
 - Call names and immutable creation-time tags are cached per coordinator/adapter.
-- Propagation-only submission state does not allocate a reverse-link lock or collection.
-- Dispatch only retains reverse-link recipients that request all Activity data. Forward links still include
-  propagation-only contexts so an independently sampled batch can link to them.
+- Propagation-only submission state does not allocate synchronization or collection state for Execute-to-HandleBatch
+  links.
+- Dispatch only retains Execute submissions that request all Activity data for Execute-to-HandleBatch links.
+  HandleBatch-to-Execute links still include propagation-only contexts so an independently sampled batch can link to them.
 - Repeated items from one submission do not allocate a deduplication hash set; the set is created only when
   a second distinct context appears. General multi-context deduplication is unchanged.
 
-Record-only Activities still collect reverse links: the decision uses IsAllDataRequested rather than Recorded.
+Record-only Activities still collect Execute-to-HandleBatch links: the decision uses IsAllDataRequested rather than
+Recorded.
 The completion bridge remains in Diagnostics to preserve aggregate exception objects, faulted cancellation,
 cancellation tokens, and ending the span before completing the returned task.
 
@@ -47,7 +50,7 @@ accompany variations in batch formation; no per-submission disabled tracing work
 is outside the measured operation. There is a small fixed metadata cost when a coordinator/adapter is constructed.
 
 The remaining allocation is substantial: optimized 0% singles still allocate about 4.7x the disabled path.
-Propagation Activities, forward-link construction, submission context, and the completion bridge remain necessary
+Propagation Activities, HandleBatch-to-Execute link construction, submission context, and the completion bridge remain necessary
 for the current contract. Lower sampling does not bypass them. This run changes several allocation sources together;
 it does not isolate the cost of link operations from Activity and completion costs.
 
@@ -76,8 +79,9 @@ Validation output records batch occupancy and actual sampling ratios for both im
 There is no exporter, real network/database call, ambient caller span, or concurrent local build/test during timing.
 Fixed scenario order, timer scheduling, partially filled batches, and BenchmarkDotNet outlier handling limit small
 time comparisons. These results describe finite waves, not steady-state GC pressure, peak memory, or individual
-request P95/P99. Additional unit tests verify propagation-only lifetimes, mixed sampled/unsampled forward links,
-record-only reverse links, duplicate contexts, and immutable sampler-visible tags.
+request P95/P99. Additional unit tests verify propagation-only lifetimes, mixed sampled/unsampled
+HandleBatch-to-Execute links, record-only Execute-to-HandleBatch links, duplicate contexts, and immutable
+sampler-visible tags.
 
 Raw evidence: [0.3.2 CSV](package-optimization.csv), [optimized CSV](optimized.csv), and
 [validation output](validation-optimized.txt). Validation lists the ten package cases followed by ten source cases,

@@ -9,7 +9,7 @@ This evaluation isolates the compact submission context and shared batch-link co
 Propagation-only submissions carry only their ActivityContext. Recorded submissions keep the first handler context
 inline, allocating a list only when additional batches process the same submission. One batch-link collector keeps
 its first submission inline and uses a dictionary for additional distinct contexts; the same references supply
-forward links and reverse-link delivery. The collector supports repeated enumeration by samplers.
+HandleBatch-to-Execute links and Execute-to-HandleBatch link delivery. The collector supports repeated enumeration by samplers.
 No object pool, public API change, sampling change, or completion callback was added to queue logic.
 The completion bridge remains unchanged after the separate [pending Task/ValueTask evaluation](completion-optimization.md).
 

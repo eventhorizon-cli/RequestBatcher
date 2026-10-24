@@ -71,7 +71,7 @@ curl --request POST http://localhost:5081/prices/query \
 ## 可观测性
 
 在应用的 OpenTelemetry provider 中调用 `WithTracing(tracing => tracing.AddRequestBatcherInstrumentation())`。
-`RequestBatcher.Execute` 记录调用方完整等待，`RequestBatcher.HandleBatch` 是独立的 Consumer span，通过 link 关联参与调用。
+`RequestBatcher.Execute` 记录调用方完整等待，`RequestBatcher.Handle` 是独立的 Consumer span，通过 link 关联参与调用。
 更多说明见[可观测性设计](../../docs/observability-design.md)。
 
 如需对 Compose 可观测性示例执行端到端验证，请查看[集成测试说明](../../tests/it/README.zh-CN.md)

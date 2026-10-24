@@ -12,6 +12,8 @@ The [pending completion evaluation](completion-optimization.md) separately compa
 bridges with every source still pending at registration.
 The [shared completion comparison](shared-completion.md) measures the subsequent removal of tracing-only completion
 sources on the ordinary admission path, including a fresh 0.2.4 baseline and the complete sampling matrix.
+The [sampling-aware links comparison](sampled-links.md) measures the next reduction from skipping all-unsampled
+HandleBatch-to-Execute links, including the submission-count attribute cost and a fresh non-tracing 0.2.4 baseline.
 
 ## Workload and sampling contract
 
@@ -27,7 +29,7 @@ that completed sampled spans match the sampling decisions, including all-drop an
 The 1% and 10% cases must observe both sampled and dropped spans.
 
 There is no ambient caller Activity: Execute and independent HandleBatch roots are sampled separately.
-Links do not force matching sampling decisions. In an application with parent traces, parent-based decisions
+HandleBatch-to-Execute and Execute-to-HandleBatch links do not force matching sampling decisions. In an application with parent traces, parent-based decisions
 can produce different effective rates. A 0% SDK sampler is distinct from removing the provider: it preserves
 propagation context and still exercises instrumentation.
 
@@ -67,8 +69,9 @@ Allocations are more sensitive. Reducing sampling from 100% to 1% lowers single-
 proportional to the percentage of traces recorded.
 
 The measured [0.3.2 tracing implementation](https://github.com/eventhorizon-cli/RequestBatcher/blob/v0.3.2/src/RequestBatcher/Diagnostics/RequestBatcherTracing.cs) creates
-submission context and completion wrappers whenever a propagation Activity exists, and collects links for handler
-batches before the sampling decision. Sampled Execute spans additionally collect reverse links. This explains
+submission context and completion wrappers whenever a propagation Activity exists, and collects
+HandleBatch-to-Execute links from every participating submission before the sampling decision. Sampled Execute spans
+additionally collect Execute-to-HandleBatch links to the batches that processed their requests. This explains
 why much of the allocation remains at 0%. Explicit submission amortizes Execute tracing across 32 items.
 The tiny 0%/1% allocation inversion for singles is not evidence that sampling saves more at 1%: batch formation
 varies across launches.

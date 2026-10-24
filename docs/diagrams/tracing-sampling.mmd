@@ -1,0 +1,30 @@
+flowchart LR
+    %% Semantic contract: the RequestBatcher.OpenTelemetry tracing extension is registered, including linked-batch sampling.
+    %% Execute and Handler child spans use the application's SDK sampler.
+    %% Execute supplies the current caller parent (or no parent) and tags.
+    %% Queued ActivityContext becomes Handle-to-Execute links with no parent for an independent Handle root.
+    %% If at least one corresponding Execute span is sampled, Handle is sampled and links to every participating Execute context, including unsampled ones; if all corresponding Execute spans are unsampled, it drops.
+    %% Handler child spans use Handle as parent; parent-based policies follow its sampled flag. HTTP propagates traceparent.
+    %% Apply the bottom outcomes to Execute: Drop may retain propagation; RecordOnly requests data;
+    %% RecordAndSample additionally sets the sampled flag. Execute-to-Handle links require Recorded and IsAllDataRequested.
+    %% Links connect separate traces without creating parent edges.
+    caller["Caller span<br/>HTTP / business operation<br/>Parent of Execute"] -->|child| execute["RequestBatcher.Execute<br/>Parent: caller span (if present)<br/>No caller span: root span"]
+    execute -->|save| queued["Execute context saved with the request<br/>TraceId + SpanId + TraceFlags<br/>Used for Handle links to Execute"]
+    sampler["Linked-batch policy<br/>Execute sampled: batch on<br/>All unsampled: batch off"] -->|policy| batch["RequestBatcher.Handle<br/>No parent; independent root span<br/>Decision uses Execute spans"]
+    batch -. "Handle links to all participating Execute contexts, including unsampled ones; at least one sampled Execute: sample Handle, otherwise drop it" .-> queued
+    batch -->|child| downstream["Handler DB / HTTP child spans<br/>Parent: Handle; application sampler<br/>Parent-based policy follows Handle"]
+    subgraph outcomes[Execute decisions from the application's sampler]
+        drop["Drop<br/>Propagation Activity may remain<br/>No export; no links from Execute<br/>to the handling Handle spans"]
+        record["RecordOnly<br/>Collect data; export depends on pipeline<br/>No links from Execute<br/>to the handling Handle spans"]
+        sample["RecordAndSample<br/>Recorded + all data requested<br/>Add links from Execute<br/>to the handling Handle spans"]
+    end
+    classDef client fill:#e9f6f1,stroke:#2f6f5e,color:#173f35
+    classDef gateway fill:#eaf2ff,stroke:#3567a7,color:#1d3b66
+    classDef core fill:#edf1f5,stroke:#596773,color:#303b44
+    classDef storage fill:#fff4d6,stroke:#8a6a1d,color:#4d3b0e
+    classDef handler fill:#f4edfb,stroke:#75529b,color:#422d59
+    class caller client
+    class execute,sample gateway
+    class sampler,batch,drop core
+    class queued,record storage
+    class downstream handler

@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="620" viewBox="0 0 1280 620" role="img" aria-labelledby="title desc">
   <title id="title">RequestBatcher 在服务 A 与服务 B 之间的追踪流程</title>
-  <desc id="desc">服务 A 包含调用方的 Execute span，以及通过双向链接关联的独立 HandleBatch 消费者根 span。Execute 结束前添加链接。批次处理器创建 HTTP 子 span 调用服务 B，下游服务端与数据库 span 延续该追踪。</desc>
+  <desc id="desc">服务 A 包含调用方的 Execute span，以及独立的 Handle 消费者根 span。本批次对应的 Execute span 中只要有一个被采样，Handle 就通过 link 指向本批次全部 Execute 上下文，包括未采样的 Execute；如果这些 Execute span 全部未采样，Handle 就不采样。已采样且请求数据的 Execute 只在结束前添加指向处理其请求的 Handle 的 link，两者不形成父子关系。批次处理器创建 HTTP 子 span 调用服务 B，下游服务端与数据库 span 延续 Handle 处理链路。</desc>
   <defs>
     <marker id="solid-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
       <path d="M 0 0 L 10 5 L 0 10 z" fill="#596773"/>
@@ -35,7 +35,7 @@
   <text x="374" y="264" class="small">调用方感知的耗时</text>
 
   <rect x="350" y="350" width="280" height="110" rx="8" fill="#edf1f5" stroke="#596773" stroke-width="2"/>
-  <text x="374" y="386" class="node-title" fill="#303b44">RequestBatcher.HandleBatch</text>
+  <text x="374" y="386" class="node-title" fill="#303b44">RequestBatcher.Handle</text>
   <text x="374" y="415" class="node-text">消费者根 span</text>
   <text x="374" y="439" class="small">一个批次关联多次提交</text>
 
@@ -67,12 +67,13 @@
   <path d="M 1058 350 L 1058 285" fill="none" stroke="#596773" stroke-width="2" marker-end="url(#solid-arrow)"/>
 
   <path d="M 630 350 C 735 320, 735 140, 630 230" fill="none" stroke="#3567a7" stroke-width="2" stroke-dasharray="8 6" marker-start="url(#link-arrow)" marker-end="url(#link-arrow)"/>
-  <rect x="650" y="145" width="155" height="42" rx="4" fill="#ffffff"/>
-  <text x="665" y="163" class="edge-label">span 双向链接</text>
-  <text x="665" y="180" class="small">因果关联；无共同父 span</text>
+  <rect x="645" y="137" width="185" height="62" rx="4" fill="#ffffff"/>
+  <text x="654" y="154" class="edge-label">Execute → Handle</text>
+  <text x="654" y="173" class="edge-label">Handle → Execute</text>
+  <text x="654" y="192" class="small">link 关联，不是父子关系</text>
 
   <line x1="55" y1="595" x2="101" y2="595" stroke="#596773" stroke-width="2" marker-end="url(#solid-arrow)"/>
   <text x="115" y="600" class="small">父子关系或网络调用</text>
   <line x1="395" y1="595" x2="441" y2="595" stroke="#3567a7" stroke-width="2" stroke-dasharray="8 6" marker-end="url(#link-arrow)"/>
-  <text x="455" y="600" class="small">因果链接；不共享追踪树，不保证顺序</text>
+  <text x="455" y="600" class="small">link 表示因果关联，不改变父子关系，不保证执行顺序</text>
 </svg>

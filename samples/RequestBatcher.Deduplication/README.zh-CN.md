@@ -64,7 +64,7 @@ curl --request POST http://localhost:5080/prices/query \
 
 应用可以使用 OpenTelemetry Hosting 和 Exporter，并在 `WithTracing` 中调用
 `AddRequestBatcherInstrumentation()`。`RequestBatcher.Execute` 记录调用方完整等待时间；每个实际批次的
-`RequestBatcher.HandleBatch` 是独立的 Consumer span，通过 ActivityLink 关联进入该批次的调用。详见
+`RequestBatcher.Handle` 是独立的 Consumer span，通过 ActivityLink 关联进入该批次的调用。详见
 [可观测性设计](../../docs/observability-design.md) 和[关联图](../../docs/diagrams/observability.svg)。
 
 如需对 Compose 可观测性示例执行端到端验证，请查看[集成测试说明](../../tests/it/README.zh-CN.md)

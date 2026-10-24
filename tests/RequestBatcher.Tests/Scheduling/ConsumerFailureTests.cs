@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using BufferQueue;
@@ -56,7 +57,7 @@ public sealed class ConsumerFailureTests
     }
 
     [Fact]
-    public async Task DisposeAsync_ConsumerEnumerationFails_ReportsFailureOnRepeatedCalls()
+    public async Task DisposeAsync_ConsumerBatchListFails_ReportsFailureOnRepeatedCalls()
     {
         var expected = new TestConsumerException();
         var submitted = new TaskCompletionSource<PendingBatchRequest<int>>(
@@ -100,19 +101,35 @@ public sealed class ConsumerFailureTests
         bufferQueue.VerifyAll();
     }
 
-    private static async IAsyncEnumerable<IEnumerable<T>> ConsumeAndFailAsync<T>(
+    private static async IAsyncEnumerable<IReadOnlyList<T>> ConsumeAndFailAsync<T>(
         Task<T> submitted,
         Exception exception,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         var request = await submitted.WaitAsync(cancellationToken);
-        yield return EnumerateAndFail(request, exception);
+        yield return new FailingReadOnlyList<T>(request, exception);
     }
 
-    private static IEnumerable<T> EnumerateAndFail<T>(T request, Exception exception)
+    private sealed class FailingReadOnlyList<T>(T request, Exception exception) : IReadOnlyList<T>
     {
-        yield return request;
-        throw exception;
+        public int Count => 2;
+
+        public T this[int index] => index switch
+        {
+            0 => request,
+            1 => throw exception,
+            _ => throw new ArgumentOutOfRangeException(nameof(index))
+        };
+
+        public IEnumerator<T> GetEnumerator()
+        {
+            for (var index = 0; index < Count; index++)
+            {
+                yield return this[index];
+            }
+        }
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
     }
 
     private sealed class TestProducer(
@@ -159,7 +176,7 @@ public sealed class ConsumerFailureTests
 
         public string GroupName => RequestBatchCoordinator<int>.ConsumerGroupName;
 
-        public IAsyncEnumerable<IEnumerable<PendingBatchRequest<int>>> ConsumeAsync(
+        public IAsyncEnumerable<IReadOnlyList<PendingBatchRequest<int>>> ConsumeAsync(
             CancellationToken cancellationToken = default) =>
             ConsumeAndFailAsync(submitted, exception, cancellationToken);
 

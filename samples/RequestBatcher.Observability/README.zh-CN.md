@@ -63,27 +63,27 @@ curl --fail --request POST http://127.0.0.1:5081/cart/quote \
 
 在 Grafana Explore 中选择 Tempo，时间范围使用最近 5 分钟或 15 分钟。一次请求的 trace 从 Cart ASP.NET Core span 开始，
 每个 Cart 请求只创建一个 `RequestBatcher.Execute pricing-queries` span，并通过原生批量 API 提交完整的 2–10 个商品 ID。共享的
-Cart batch handler 最多接收 20 个商品请求，可以混合多个并发 Cart 调用，合并并去重商品 ID 后只调用一次 Pricing。批次会通过
-ActivityLink 关联参与其中的 caller trace，并包含 Cart 到 Pricing 的 HTTP client 子 span。Pricing 的 HTTP server span 下会看到
+Cart batch handler 最多接收 20 个商品请求，可以混合多个并发 Cart 调用，合并并去重商品 ID 后只调用一次 Pricing。每个
+`Handle` span 会通过 ActivityLink 指向参与其中的 caller `Execute`，并包含 Cart 到 Pricing 的 HTTP client 子 span。Pricing 的 HTTP server span 下会看到
 Npgsql 官方 instrumentation 创建的 PostgreSQL span。`requestbatcher.batch.size` 记录批次中的商品请求数。
 
 要从某个调用追踪到批次，在 Cart trace 中复制 `Execute` span 的 trace ID，然后在 Tempo TraceQL 中查询：
 
 ```text
-{ link:traceID = "CALL_TRACE_ID" && span:name =~ "RequestBatcher.HandleBatch.*" }
+{ link:traceID = "CALL_TRACE_ID" && span:name =~ "RequestBatcher[.]Handle( .*)?" }
 ```
 
 选择包含原始调用的时间范围。批次可能少于 20 份提交，因为 RequestBatcher 不会等待填满 `BatchSize`。ActivityLink 是因果关联，
-不是共享父子关系，因此它们不会组成一棵共享的 trace 树。`HandleBatch` span 会 link 到所有参与其中的
-`Execute` span；每个 `Execute` span 也会 link 回处理其请求的所有 `HandleBatch` span。可以参考 Grafana 的
+不是共享父子关系，因此它们不会组成一棵共享的 trace 树。每个 `Handle` span 会 link 到所有参与其中的
+`Execute` span；每个 `Execute` span 也会 link 到处理其请求的所有 `Handle` span。可以参考 Grafana 的
 [TraceQL link 查询文档](https://grafana.com/docs/tempo/latest/traceql/construct-traceql-queries/)了解
 `link:traceID` 和 `link:spanID` 选择器。
 
-直接导航时，从 dashboard 的 `Handler execution · HandleBatch` 表格打开一条 `HandleBatch` trace，点击
-`RequestBatcher.HandleBatch pricing-queries` span 行，在 span 详情中展开 `References`，即可看到参与该批次的多个
-`Execute` 调用方上下文。Links 是双向的：从 `Cart calls · Execute` 表格点击 `Execute` span 并展开 `References`，也可以直接看到处理该调用的批次。
+直接导航时，从 dashboard 的 `Handler execution · Handle` 表格打开一条 `Handle` trace，点击
+`RequestBatcher.Handle pricing-queries` span 行，在 span 详情中展开 `References`，即可看到参与该批次的多个
+`Execute` 调用方上下文。从 `Cart calls · Execute` 表格点击 `Execute` span 并展开 `References`，可以看到处理该调用的 `Handle`。
 Grafana 会在这个列表中同时展示 parent 和 span link：`cart POST /cart/quote` 是 Execute 在同一条 trace 中的 HTTP parent，
-handler link 则指向独立的 `HandleBatch` trace。这里的 parent 条目并不是额外添加的 ActivityLink。需要从批次反向搜索调用方时，
+handler link 则指向独立的 `Handle` trace。这里的 parent 条目并不是额外添加的 ActivityLink。需要从批次查找其 `Execute` 时，
 复制批次的 trace ID 和 span ID，然后在 Tempo 中查询：
 
 ```text

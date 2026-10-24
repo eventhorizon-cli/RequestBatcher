@@ -72,11 +72,13 @@ jobs:
           fail_ci_if_error: true
 
       - name: Pack
-        run: >-
-          dotnet pack src/RequestBatcher/RequestBatcher.csproj
-          --configuration Release
-          --no-build
-          --no-restore
+        run: |
+          for project in RequestBatcher RequestBatcher.OpenTelemetry; do
+            dotnet pack "src/$project/$project.csproj" \
+              --configuration Release \
+              --no-build \
+              --no-restore
+          done
 
   observability:
     name: Trace and metrics integration

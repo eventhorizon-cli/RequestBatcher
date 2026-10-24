@@ -15,6 +15,6 @@ public static class RequestBatcherMeterProviderBuilderExtensions
     {
         ArgumentNullException.ThrowIfNull(builder);
 
-        return builder.AddMeter(RequestBatcher.Diagnostics.RequestBatcherMetrics.MeterName);
+        return builder.AddMeter("RequestBatcher");
     }
 }

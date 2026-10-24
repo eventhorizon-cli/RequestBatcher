@@ -11,12 +11,12 @@ namespace RequestBatcher.Tests.Diagnostics;
 public sealed class OpenTelemetryInstrumentationTests
 {
     [Fact]
-    public async Task AddRequestBatcherInstrumentation_RealSdk_ExportsCallAndLinkedBatch()
+    public async Task AddSource_RealSdk_ExportsCallAndLinkedBatch()
     {
         var processor = new CaptureProcessor();
         var sampler = new LinkSampler();
         var builder = Sdk.CreateTracerProviderBuilder();
-        Assert.Same(builder, builder.AddRequestBatcherInstrumentation());
+        builder.AddSource(RequestBatcherTracing.SourceName);
         using var tracing = builder.SetSampler(sampler).AddProcessor(processor).Build();
         var services = new ServiceCollection();
         services.AddRequestBatcher<int, Handler>(ServiceLifetime.Singleton);

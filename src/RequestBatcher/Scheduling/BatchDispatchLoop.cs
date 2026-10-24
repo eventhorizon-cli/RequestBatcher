@@ -73,8 +73,7 @@ internal sealed class BatchDispatchLoop<TRequest> : IDisposable
                         return;
                     }
 
-                    var pendingRequests = GetPendingRequests(enumerator.Current);
-                    StartExecution(pendingRequests, cancellationToken);
+                    StartExecution(enumerator.Current, cancellationToken);
                     executionStarted = true;
                 }
                 finally
@@ -149,10 +148,6 @@ internal sealed class BatchDispatchLoop<TRequest> : IDisposable
     }
 
     private Exception? GetExecutionFailure() => Volatile.Read(ref _executionFailure);
-
-    private static IReadOnlyList<PendingBatchRequest<TRequest>> GetPendingRequests(
-        IEnumerable<PendingBatchRequest<TRequest>> bufferedRequests) =>
-        bufferedRequests as IReadOnlyList<PendingBatchRequest<TRequest>> ?? bufferedRequests.ToArray();
 
     private void TrackExecution()
     {
