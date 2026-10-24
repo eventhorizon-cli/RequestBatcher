@@ -120,7 +120,7 @@ jobs:
       - name: Resolve NuGet download endpoint
         id: registry
         run: |
-          address=$(curl --fail --silent --show-error "$NUGET_SOURCE" | \
+          address=$(curl --fail --silent --show-error --location "$NUGET_SOURCE" | \
             jq --exit-status --raw-output '.resources[] | select(."@type" == "PackageBaseAddress/3.0.0") | ."@id"')
           echo "base_address=$address" >> "$GITHUB_OUTPUT"
 
@@ -158,7 +158,7 @@ jobs:
           CORE_VERSION: ${{ steps.package.outputs.core_version }}
           PACKAGE_BASE: ${{ steps.registry.outputs.base_address }}
         run: |
-          curl --fail --silent --show-error --head \
+          curl --fail --silent --show-error --location --output /dev/null \
             --retry 30 --retry-all-errors --retry-delay 10 --retry-max-time 600 --max-time 20 \
             "${PACKAGE_BASE%/}/requestbatcher/$CORE_VERSION/requestbatcher.$CORE_VERSION.nupkg" >/dev/null
 
@@ -179,7 +179,7 @@ jobs:
           PACKAGE_BASE: ${{ steps.registry.outputs.base_address }}
         run: |
           id="${PACKAGE_ID,,}"
-          curl --fail --silent --show-error --head \
+          curl --fail --silent --show-error --location --output /dev/null \
             --retry 30 --retry-all-errors --retry-delay 10 --retry-max-time 600 --max-time 20 \
             "${PACKAGE_BASE%/}/$id/$VERSION/$id.$VERSION.nupkg" >/dev/null
 
