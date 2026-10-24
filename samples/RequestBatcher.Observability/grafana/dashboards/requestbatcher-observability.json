@@ -46,7 +46,7 @@
       ],
       "title": "Cart calls · Execute",
       "type": "table",
-      "description": "Caller-visible duration, including queue waiting. Select RequestBatcher.Execute pricing-queries and expand References. The HTTP parent belongs to the same trace; handler links point to independent HandleBatch traces. One call may link to several batches."
+      "description": "Caller-visible duration, including queue waiting. Select RequestBatcher.Execute pricing-queries and expand References. The HTTP parent belongs to the same trace; handler links point to independent Handle traces. One call may link to several batches."
     },
     {
       "datasource": {
@@ -80,16 +80,16 @@
             "uid": "requestbatcher-tempo"
           },
           "limit": 20,
-          "query": "{ resource.service.name = \"cart\" && name =~ \"RequestBatcher.HandleBatch.*\" }",
+          "query": "{ resource.service.name = \"cart\" && name =~ \"RequestBatcher[.]Handle( .*)?\" }",
           "queryType": "traceql",
           "refId": "A",
           "spanLimit": 10,
           "tableType": "traces"
         }
       ],
-      "title": "Handler execution · HandleBatch",
+      "title": "Handler execution · Handle",
       "type": "table",
-      "description": "Handler execution traces contain cart → pricing → database spans. Select RequestBatcher.HandleBatch pricing-queries and expand References to navigate to the contributing Execute calls. One batch may combine several calls."
+      "description": "Handler execution traces contain cart → pricing → database spans. Select RequestBatcher.Handle pricing-queries and expand References to navigate to the contributing Execute calls. One batch may combine several calls."
     },
     {
       "datasource": {

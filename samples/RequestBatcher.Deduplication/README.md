@@ -127,7 +127,7 @@ RequestBatcher is in-process, so pending requests are not recovered after a proc
 
 For OpenTelemetry in this Web API, install `RequestBatcher` with your OpenTelemetry hosting and exporter
 packages, then call `AddRequestBatcherInstrumentation()` from `WithTracing`. `RequestBatcher.Execute` covers the
-caller's full wait; each `RequestBatcher.HandleBatch` span is an independent Consumer trace linked to the calls that
+caller's full wait; each `RequestBatcher.Handle` span is an independent Consumer trace linked to the calls that
 entered that batch. See the [observability guide](../../docs/observability-design.md) and
 [correlation diagram](../../docs/diagrams/observability.svg).
 

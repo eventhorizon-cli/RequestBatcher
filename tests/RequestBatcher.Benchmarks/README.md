@@ -70,7 +70,7 @@ Reproduction requires the instrumented source described by the [arrival-scheduli
 
 ## Observability
 
-The `RequestBatcher` package exposes `AddRequestBatcherInstrumentation()` for application
+The optional `RequestBatcher.OpenTelemetry` package exposes `AddRequestBatcherInstrumentation()` for application
 tracing. Historical benchmark results in this index are not tracing measurements and should not be read as results with
 the new instrumentation enabled. See the [observability design](../../docs/observability-design.md) for span lifetime,
 links, sampling, and performance boundaries.
@@ -78,7 +78,7 @@ links, sampling, and performance boundaries.
 | Source / filter class | Comparison |
 | --- | --- |
 | [ObservabilityOverheadBenchmarks](InMemory/ObservabilityOverheadBenchmarks.cs) | Disabled, metrics-only, and tracing-plus-metrics OpenTelemetry providers around 256 named async pricing requests with a 20 ms handler delay. |
-| [TracingIoOverheadBenchmarks](InMemory/TracingIoOverheadBenchmarks.cs) | Published versions and source snapshots, with tracing disabled or SDK sampling at 0%, 1%, 10%, and 100%, for single and explicit submissions with 20 ms simulated downstream calls. See the [comparison runner and original report](../../docs/evaluations/tracing-io-overhead/README.md) and the [shared completion results](../../docs/evaluations/tracing-io-overhead/shared-completion.md). |
+| [TracingIoOverheadBenchmarks](InMemory/TracingIoOverheadBenchmarks.cs) | Published versions and source snapshots, with tracing disabled or SDK sampling at 0%, 1%, 10%, and 100%, for single and explicit submissions with 20 ms simulated downstream calls. See the [comparison runner and original report](../../docs/evaluations/tracing-io-overhead/README.md), [shared completion results](../../docs/evaluations/tracing-io-overhead/shared-completion.md), [BufferQueue 2.1.0 comparison](../../docs/evaluations/bufferqueue-2.1.0/README.md), and [sampling-aware links](../../docs/evaluations/tracing-io-overhead/sampled-links.md). |
 | [MetricsIoOverheadBenchmarks](InMemory/MetricsIoOverheadBenchmarks.cs) | Metrics disabled, SDK aggregation only, and periodic collection every 1,000 ms or 100 ms, with tracing disabled and 20 ms simulated downstream calls. See the [metrics evaluation](../../docs/evaluations/metrics-io-overhead/README.md). |
 
 The corresponding [observability overhead evaluation](../../docs/evaluations/observability-overhead/README.md) records the

@@ -8,7 +8,7 @@ flowchart LR
     cart -->|batched HTTP| pricing
     pricing -->|SQL| postgres
 
-    flow["N caller traces -> HandleBatch links -> Pricing HTTP span -> Npgsql database span"]
+    flow["N caller traces -> Handle links -> Pricing HTTP span -> Npgsql database span"]
 
     classDef clientStyle fill:#e8f3ea,stroke:#2f7d4a,stroke-width:2px,color:#173042
     classDef apiStyle fill:#e8f0fb,stroke:#2f68b2,stroke-width:2px,color:#173042

@@ -1,6 +1,7 @@
 # RequestBatcher
 
-[![NuGet](https://img.shields.io/nuget/v/RequestBatcher.svg)](https://www.nuget.org/packages/RequestBatcher)
+[![RequestBatcher](https://img.shields.io/nuget/v/RequestBatcher.svg?label=RequestBatcher)](https://www.nuget.org/packages/RequestBatcher)
+[![RequestBatcher.OpenTelemetry](https://img.shields.io/nuget/v/RequestBatcher.OpenTelemetry.svg?label=RequestBatcher.OpenTelemetry)](https://www.nuget.org/packages/RequestBatcher.OpenTelemetry)
 [![Build](https://github.com/eventhorizon-cli/RequestBatcher/actions/workflows/dotnet-build.yml/badge.svg)](https://github.com/eventhorizon-cli/RequestBatcher/actions/workflows/dotnet-build.yml)
 [![Codecov](https://codecov.io/gh/eventhorizon-cli/RequestBatcher/graph/badge.svg)](https://codecov.io/gh/eventhorizon-cli/RequestBatcher)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -36,7 +37,7 @@ RequestBatcher 会合并已经排队的请求，限制 Handler 批次并发数�
 上面的示意图展示了请求可能如何合并。本节说明这种批次是如何形成的。
 
 RequestBatcher 基于 [BufferQueue](https://github.com/eventhorizon-cli/BufferQueue)，将 .NET 进程内已经排队的并发请求
-合并为批次，交给应用的 Handler 处理。当前依赖 [BufferQueue 2.0.3](https://www.nuget.org/packages/BufferQueue/2.0.3)，
+合并为批次，交给应用的 Handler 处理。当前依赖 [BufferQueue 2.1.0](https://www.nuget.org/packages/BufferQueue/2.1.0)，
 应用无需单独注册或配置它。
 
 这种批次处理可以理解为**机会式攒批（opportunistic batching）**：请求写入 BufferQueue 后会发出 push 通知，唤醒空闲的消费流程。
@@ -55,7 +56,7 @@ RequestBatcher 基于 [BufferQueue](https://github.com/eventhorizon-cli/BufferQu
 
 ![机会式合并流程图](docs/assets/request-batcher-opportunistic-merging.zh-CN.svg)
 
-图中展示正常消费流程，省略了取消与停止分支。[BufferQueue 的消费循环](https://github.com/eventhorizon-cli/BufferQueue/blob/90c6208f940592f797ab8cf78ad4af88d1163649/src/BufferQueue/BufferPullConsumer.cs#L59)
+图中展示正常消费流程，省略了取消与停止分支。[BufferQueue 的消费循环](https://github.com/eventhorizon-cli/BufferQueue/blob/c276547046223c1d62a13e0537b013622c775266/src/BufferQueue/BufferPullConsumer.cs)
 会在进入等待前检查通知版本；如果这期间有新数据通知到达，就重新尝试拉取，避免漏掉唤醒。
 
 请求仅保存在进程内，进程故障后无法恢复尚未完成的请求。
@@ -876,9 +877,13 @@ Handler 会在分发调用链上执行，直到完成或遇到尚未完成的异
 
 ### OpenTelemetry 集成
 
-RequestBatcher 核心包内置 OpenTelemetry 注册扩展，但不依赖完整 SDK。安装应用使用的 Hosting 和 Exporter：
+核心 [`RequestBatcher`](https://www.nuget.org/packages/RequestBatcher) 包只使用 .NET 内置的 `ActivitySource` 和 `Meter` API，不依赖 OpenTelemetry 包。
+需要 Provider Builder 注册扩展时，可以安装可选的 [`RequestBatcher.OpenTelemetry`](https://www.nuget.org/packages/RequestBatcher.OpenTelemetry) 包；它支持 net8.0/net10.0，声明兼容的
+`RequestBatcher` 最低依赖版本，并要求 OpenTelemetry 1.20.1 或更高版本。两个包独立维护版本号。应用还需要安装所使用的 Hosting 和 Exporter：
 
 ```bash
+dotnet add package RequestBatcher
+dotnet add package RequestBatcher.OpenTelemetry
 dotnet add package OpenTelemetry.Extensions.Hosting
 dotnet add package OpenTelemetry.Instrumentation.AspNetCore
 dotnet add package OpenTelemetry.Exporter.OpenTelemetryProtocol
@@ -901,26 +906,99 @@ builder.Services.AddOpenTelemetry()
         .AddOtlpExporter());
 ```
 
+仅安装 [`RequestBatcher.OpenTelemetry`](https://www.nuget.org/packages/RequestBatcher.OpenTelemetry) 包不会自动注册 tracing。将 `.AddRequestBatcherInstrumentation()` 加入 tracing provider 后，它会注册
+`RequestBatcher` source，并在应用 sampler 外包装 linked-batch 采样策略。只要创建时的
+`Handle-to-Execute` link context 中有一个带 `Recorded` 标志，就采样 `Handle` 根 span；如果所有参与的 `Execute`
+都未采样，则返回 `Drop`。其他 Activity（包括 `Execute` 和 Handler 子 span）仍使用应用 sampler。
+该扩展的采样规则不受 `SetSampler` 先后顺序影响。若要直接注册 source、完全沿用应用
+采样器且不启用此策略，请使用 `AddSource("RequestBatcher")`；此时独立的 `Handle` 根 span 也由应用 sampler 决定，
+即使 `Execute` 已采样，Handle 批次及其下游子 span 仍可能未采样。ActivitySource 名称为 `RequestBatcher`。
+迁移和采样规则见
+[RequestBatcher.OpenTelemetry README](src/RequestBatcher.OpenTelemetry/README.md)。
+
 `RequestBatcher.Execute` 是调用方当前 span 下的 `Internal` span，覆盖调用方可见的完整过程，包括准入、容量等待、队列停留、
-Handler 执行和结果完成。每个实际分发的非空批次都会创建独立的 `RequestBatcher.HandleBatch` `Consumer` 根 span，并通过
-link 关联真正贡献请求的 `Execute` span；Handler 创建的数据库或 HTTP span 是该批次 span 的子 span。
-被记录的 `Execute` span 结束前也会补上指向所有相关批次的 link，一次提交跨多个批次时仍可逐一跳转。
-回链不参与 `Execute` 创建时的采样决策；库不会修改应用的 HTTP/业务父 span。
+Handler 执行和结果完成。有监听器时，每个实际分发的非空批次都会尝试创建独立的 `RequestBatcher.Handle` `Consumer` 根 span。
+应用的 sampler 决定 `Execute` 是否采样。启用上述策略后，本批次对应的 `Execute` span 中只要有一个被采样，就采样 `Handle` 根 span，并让
+`Handle` 通过 link 指向本批次全部 `Execute` span，包括未采样的 `Execute`；如果这些 `Execute` span 全部未采样，则不采样
+`Handle` 根 span。Handler 创建的数据库或 HTTP 子 span 仍由应用 sampler 决定；只有 ParentBased sampler
+才会让它们跟随 `Handle` 的采样结果。只有标记为已采样且请求全部 Activity 数据的 `Execute` span，才会添加指向处理其请求的
+`Handle` span 的 link；一次提交跨多个批次时仍可逐一跳转。这个 `Execute` -> `Handle` link 不会改变 `Execute` 的采样决定，
+库也不会修改应用的 HTTP/业务父 span。
 两种 span 的 `requestbatcher.request.type` 都使用公开请求类型的短名（例如 `Int32`），不包含命名空间或内部响应包装类型。
 按请求类型过滤的查询和采样规则也应使用短名。
 
-采样由应用的 tracing provider 控制。0% 采样仍可能创建用于传播上下文的 Activity，因此开销不等于完全不注册
-RequestBatcher source。仅传播上下文的提交会保留供批次采样使用的上下文，但不收集反向链接。固定调用元数据会复用，
-span 时长和任务完成语义保持不变。工作负载和分配开销见 [20 ms 采样评估](docs/evaluations/tracing-io-overhead/README.md)。
+直接使用 `AddSource("RequestBatcher")` 注册时，采样由应用的 tracing provider 控制。0% 采样仍可能创建用于传播上下文的 Activity，因此开销不等于完全不注册
+RequestBatcher source。被丢弃或仅用于传播的提交会保留有效上下文；同批次有其他 `Execute` span 已采样时，`Handle` 仍能通过 link 指向这个已保留的上下文，
+但该 `Execute` 不添加指向 `Handle` 的 link。RecordOnly 会请求全部 Activity 数据但没有 sampled 标志，`Execute` 同样不添加
+指向 `Handle` 的 link。直接注册 source 时，即使本批次对应的 `Execute` span 全部未采样，
+`Handle` 仍可能被应用采样器独立采样；集成扩展则会在所有参与的 Execute 都未采样时丢弃批次。混合批次保留指向所有不同有效提交上下文的 link。日志、任务完成、
+取消和 Handler 执行保持不变。固定调用元数据会复用，span 时长和任务完成语义保持不变。工作负载和分配开销见
+[20 ms 采样评估](docs/evaluations/tracing-io-overhead/README.md)。
+[采样相关 link 优化对比](docs/evaluations/tracing-io-overhead/sampled-links.md) 记录了当前低采样率下的分配收益和全采样的额外成本，
+没有证明耗时改善。
 
 命名注册会在 span 基础名后追加一个空格和公开名称，例如 `RequestBatcher.Execute pricing-queries` 和
-`RequestBatcher.HandleBatch pricing-queries`，同时写入 `requestbatcher.name`。未命名注册保留基础名称并省略此 tag。
+`RequestBatcher.Handle pricing-queries`，同时写入 `requestbatcher.name`。未命名注册保留基础名称并省略此 tag。
+
+为保持兼容，自定义 span 名称查询应使用 `RequestBatcher.Handle`，具名注册在名称后追加空格和后缀，例如
+`RequestBatcher.Handle pricing-queries`。`RequestBatcher` ActivitySource 和 Meter 名称保持稳定；后端中历史写入的
+span 会继续使用旧名称，直到后端保留期清理。
 Link 表示跨队列的因果关系，不代表共享父 span、Trace ID 或执行顺序。Handler 不会继承调用方的执行上下文，需要的请求 scope、baggage
 和其他 `AsyncLocal` 状态应显式传递。
 
 ![RequestBatcher 可观测性模型](docs/diagrams/observability.zh-CN.svg)
 
-对应的 `MeterProviderBuilder` 扩展会注册 `RequestBatcher` meter，记录已接收请求、已处理请求、已处理批次数、批次大小和批次
+#### 采样与上下文传递
+
+下图假设已安装可选集成包，并在 tracing provider 中注册 `.AddRequestBatcherInstrumentation()`。仅安装包不会自动注册 tracing。
+
+![RequestBatcher 采样与上下文传递流程](docs/diagrams/tracing-sampling.zh-CN.svg)
+
+调用方当前的 HTTP / 业务 span 是 `Execute` 的父 span；没有调用方 span 时，`Execute` 自身就是根 span。
+`Handle` 没有父 span，是 RequestBatcher Handler 处理链路的根 span；Handler 内数据库 / HTTP 操作产生的 span 则以 `Handle` 为父 span。
+HTTP 插桩通过 `traceparent` 将 Handler 所在的批次上下文传播到下游。
+
+应用的 sampler 决定 `Execute` 是否采样。集成包通过 `Handle` 指向本批次 `Execute` 的 links 读取这些上下文的采样标志：
+只要有一个 `Execute` 被采样，就采样 `Handle`；所有 `Execute` 都未采样时，则不采样 `Handle`。
+混合批次中，`Handle` 通过 link 指向本批次全部有效的 `Execute` 上下文，包括未采样的 `Execute`。
+只有标记为已采样且请求全部 Activity 数据的 `Execute`，才会添加指向处理其请求的 `Handle` span 的 link。
+`RecordOnly` 的 `Execute` 虽然请求全部 Activity 数据，但没有 sampled 标志，因此不添加指向 `Handle` 的 link；这些完成时添加的 link
+不会影响已经做出的采样决定。Handler 的数据库和 HTTP 子 span 仍由应用 sampler 决定；只有 ParentBased sampler 才会让它们跟随 `Handle`。
+
+`ParentBasedSampler` 的意思是：**有父 span 时跟随父级，没有父 span 时交给指定的根采样器**。
+例如 `ParentBasedSampler(new AlwaysOnSampler())` 表示父级已采样就采样、父级未采样就不采样、没有父级则采样。
+将内部的根采样器换成比例采样器，比例就只在没有父级时生效；根比例为 0% 也不会覆盖已经被采样的父级。
+`ParentBasedSampler` 不会自动沿 link 继承决定；注册集成扩展时，`Handle` 根 span 改由上述 `Execute` 采样结果决定，
+其 Handler 子 span 再按 ParentBased 的父级 sampled 标志处理。
+
+项目可观测性示例显式使用 `AlwaysOnSampler`；tracing benchmark 则直接注册 source，使用
+`ParentBasedSampler(new TraceIdRatioBasedSampler(ratio))` 比较不同采样率，没有启用提交关联采样策略。
+图中的应用采样器不绑定这些示例配置。
+
+未采样的 span 仍可能保留传播用 Activity、关联上下文和完成通知状态，0% 采样不等于完全不注册 source。
+如果已注册的监听器未创建 Execute Activity，已有的调用方上下文在同批次存在其他已采样上下文时，仍能使 `Handle` 添加指向该上下文的 link；没有有效上下文则 `Handle` 不添加提交 link。
+完全没有 RequestBatcher 监听器时会跳过 tracing，`Handle` 也不会添加指向调用方上下文的 link。
+
+批次 Activity 在采样后请求全部数据时，会记录 `requestbatcher.batch.submission.count`，表示进入该次 Handler 调用的不同公开提交数，不是 span 数量。
+一次显式多条提交在每个批次中只计一次；同一父 span 下的不同 Execute 调用分别计数；排队期间取消的请求不计入。
+没有创建 Execute Activity 的提交也会计入。该属性在采样后计算；它只是 span 属性，不是新的 metric 维度。
+
+`MaxConcurrency` 限制的是正在执行的 Handler 批次数量，不是尚未完成的 Execute span 数量。
+例如，1,024 次单条提交可以各自持有 Execute Activity，同时只有八个 Handler 批次执行。
+Activity 的生命周期覆盖整次提交，因此不能按这个并发上限把 tracing 对象当作八个槽位循环复用。
+
+#### Metrics
+
+对应的 `MeterProviderBuilder` 扩展会注册 `RequestBatcher` meter。如果只需要 metrics，可以选择不安装集成包，直接使用
+`AddMeter("RequestBatcher")`；也可以安装 [`RequestBatcher.OpenTelemetry`](https://www.nuget.org/packages/RequestBatcher.OpenTelemetry)
+后使用 metrics 注册扩展。两种方式都支持：
+
+```csharp
+builder.Services.AddOpenTelemetry()
+    .WithMetrics(metrics => metrics.AddMeter("RequestBatcher"));
+```
+
+Meter 会记录已接收请求、已处理请求、已处理批次数、批次大小和批次
 耗时。Metrics 只使用请求类型和配置的 batcher name 作为维度，不记录请求内容、租户值或 Partition Key；只有 meter provider 监听
 该 meter 时才会输出数据。Tracing 和内存中的待处理请求都是尽力而为，进程故障后不会恢复请求。
 
@@ -933,8 +1011,8 @@ Link 表示跨队列的因果关系，不代表共享父 span、Trace ID 或执�
 ## 示例应用
 
 [持续读取可观测性示例](samples/RequestBatcher.Observability/README.md)通过 Docker Compose 启动 Cart、Pricing 两个 Web API、C# 流量生成器、
-PostgreSQL 和 Grafana OTel LGTM。生成器并发提交含 2 到 10 条商品的购物车报价，展示调用总耗时、独立批次的 ActivityLink
-以及下游数据库 span。
+PostgreSQL 和 Grafana OTel LGTM。生成器并发提交含 2 到 10 条商品的购物车报价，展示调用总耗时、`Handle` 指向本批次 `Execute` 的 link、
+`Execute` 指向处理它的 `Handle` 的 link，以及下游数据库 span。
 
 [PostgreSQL Web API 示例](samples/RequestBatcher.Deduplication)包含三个价格操作：
 
@@ -953,6 +1031,8 @@ PostgreSQL 和 Grafana OTel LGTM。生成器并发提交含 2 到 10 条商品�
 `int` ID、返回 `decimal?`；委托从每个批次的 scope 注入 keyed scoped `PriceStore`，注册时不指定 Handler 生命周期。
 原示例继续展示 Handler 类的写法。委托版使用独立的 HTTP 和数据库端口，启动及 curl 步骤见其
 [README](samples/RequestBatcher.Delegates/README.md)。
+
+维护者可按[发布流程](docs/package-release-design.md)独立发布两个包。
 
 ## 许可证
 

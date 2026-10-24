@@ -24,7 +24,7 @@ public unkeyed one-partition policy rather than a hidden partition override.
 `IoServer.cs` runs Kestrel in a separate process, bound to a temporary loopback port.
 Each HTTP/1.1 request waits asynchronously for its configured service delay and echoes
 the number of logical items handled. `IoProgram.cs` uses a reused `HttpClient`, a warmed
-connection pool, and the real RequestBatcher coordinator and BufferQueue 2.0.3. It sends
+connection pool, and the real RequestBatcher coordinator and its configured BufferQueue dependency. It sends
 one HTTP request per handler batch and validates every response, each item's single
 handler visit, and the server's total call and item counts. No database is involved.
 The runner terminates the HTTP server on completion or failure.
@@ -113,4 +113,4 @@ list, and the actual counts and iteration count used.
 
 The HTTP probe's timing hooks are separate from the built-in RequestBatcher instrumentation; reported
 historical results do not claim to include those spans. See the [observability design](../../docs/observability-design.md)
-for the `Execute` call span and linked `HandleBatch` Consumer span.
+for the `Execute` call span and linked `Handle` Consumer span.

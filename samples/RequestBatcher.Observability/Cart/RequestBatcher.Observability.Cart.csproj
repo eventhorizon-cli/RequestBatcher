@@ -11,5 +11,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="../../../src/RequestBatcher/RequestBatcher.csproj" />
+    <ProjectReference Include="../../../src/RequestBatcher.OpenTelemetry/RequestBatcher.OpenTelemetry.csproj" />
   </ItemGroup>
 </Project>

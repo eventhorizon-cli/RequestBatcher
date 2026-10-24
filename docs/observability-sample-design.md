@@ -45,7 +45,7 @@ runs one parameterized PostgreSQL SELECT. Missing product responses are explicit
 seeds IDs 1–100 once. The generator logs request duration and outcomes but does not export its own spans.
 
 `RequestBatcher.Execute pricing-queries` stays in the Cart HTTP trace and measures caller-visible submission duration.
-Independent `RequestBatcher.HandleBatch pricing-queries` Consumer roots link to the distinct Cart `Execute` spans that
+Independent `RequestBatcher.Handle pricing-queries` Consumer roots link to the distinct Cart `Execute` spans that
 contributed product requests and contain the Cart-to-Pricing HTTP child span. One Cart `Execute` span may link to multiple
 batch roots when its 2–10 product requests are split, while a batch can mix requests from concurrent caller traces. Npgsql
 creates the database span under Pricing's HTTP span. Both
@@ -60,7 +60,7 @@ Dashboard trace panels appear first, distinguish caller waiting from batch execu
 span links. Metrics and logs follow them.
 Grafana's span details label these navigable entries `References` and include both
 parent references and span links. An Execute's HTTP parent shares its trace ID;
-its handler links point to independent HandleBatch traces. Panel descriptions and
+its handler links point to independent Handle traces. Panel descriptions and
 sample instructions explain this distinction.
 Always-on sampling and a 256-link limit keep the demonstration
 visible; these are not production sampling recommendations. Grafana provisions Tempo, Prometheus, and Loki and
@@ -75,5 +75,6 @@ cannot recover pending requests after process failure.
 Build and format both projects and run the full existing library test project. Validate Compose and provisioning.
 Run the stack and verify healthy services, valid 2–10 item carts, quote totals, invalid cart rejection, and
 missing-product handling. Observe successful continuous quotes. Query Tempo to prove Cart-to-Pricing propagation,
-Execute-to-batch links, and Npgsql children of batch spans. Check HTTP metrics and log ingestion. Leave the environment
-running for review; do not merge or publish yet. Run performance benchmarks separately from the sample workload.
+Execute-to-batch links, and Npgsql children of batch spans. Check HTTP metrics and log ingestion. Keep validation bounded
+and stop the environment immediately after collecting evidence, including on failure. Run performance benchmarks separately
+from the sample workload.

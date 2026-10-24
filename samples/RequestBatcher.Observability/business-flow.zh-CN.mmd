@@ -8,7 +8,7 @@ flowchart LR
     cart -->|批量 HTTP| pricing
     pricing -->|SQL| postgres
 
-    flow["N 条调用方追踪 -> HandleBatch 链接 -> Pricing HTTP span -> Npgsql 数据库 span"]
+    flow["N 条调用方追踪 -> Handle 链接 -> Pricing HTTP span -> Npgsql 数据库 span"]
 
     classDef clientStyle fill:#e8f3ea,stroke:#2f7d4a,stroke-width:2px,color:#173042
     classDef apiStyle fill:#e8f0fb,stroke:#2f68b2,stroke-width:2px,color:#173042

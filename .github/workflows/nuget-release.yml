@@ -3,13 +3,14 @@ name: NuGet Release
 on:
   push:
     tags:
-      - "v*"
+      - "core-v*"
+      - "otel-v*"
 
 permissions:
   contents: write
 
 concurrency:
-  group: request-batcher-release
+  group: request-batcher-release-${{ startsWith(github.ref_name, 'otel-v') && 'otel' || 'core' }}
   cancel-in-progress: false
 
 env:
@@ -21,26 +22,11 @@ env:
 
 jobs:
   publish:
-    name: Build and publish package
+    name: Publish ${{ github.ref_name }}
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
 
     steps:
-      - name: Resolve stable package version
-        id: version
-        env:
-          TAG_NAME: ${{ github.ref_name }}
-        shell: bash
-        run: |
-          stable_tag_pattern='^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
-
-          if [[ ! "$TAG_NAME" =~ $stable_tag_pattern ]]; then
-            echo "::error title=Invalid release tag::Expected v<major>.<minor>.<patch> without a prerelease suffix; received '$TAG_NAME'."
-            exit 1
-          fi
-
-          echo "value=${TAG_NAME#v}" >> "$GITHUB_OUTPUT"
-
       - name: Checkout release
         uses: actions/checkout@v7
         with:
@@ -63,6 +49,61 @@ jobs:
         with:
           global-json-file: global.json
 
+      - name: Resolve package release
+        id: package
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          semver_pattern='^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$'
+          case "$TAG_NAME" in
+            core-v*)
+              package_id=RequestBatcher
+              version="${TAG_NAME#core-v}"
+              ;;
+            otel-v*)
+              package_id=RequestBatcher.OpenTelemetry
+              version="${TAG_NAME#otel-v}"
+              ;;
+            *)
+              echo "::error::Expected core-vX.Y.Z or otel-vX.Y.Z."
+              exit 1
+              ;;
+          esac
+          if [[ ! "$version" =~ $semver_pattern ]]; then
+            echo "::error::Expected a stable major.minor.patch version; received '$TAG_NAME'."
+            exit 1
+          fi
+
+          core_version="$version"
+          if [[ "$package_id" == "RequestBatcher.OpenTelemetry" ]]; then
+            core_tag=''
+            while IFS= read -r candidate; do
+              if [[ "${candidate#core-v}" =~ $semver_pattern ]]; then
+                core_tag="$candidate"
+                break
+              fi
+            done < <(git tag --merged HEAD --list 'core-v*' --sort=-version:refname)
+            if [[ -z "$core_tag" ]]; then
+              echo "::error::Publish a core-vX.Y.Z tag before publishing otel."
+              exit 1
+            fi
+            core_version="${core_tag#core-v}"
+            if ! git diff --quiet "$core_tag" HEAD -- \
+              ':(glob)src/RequestBatcher/**/*.cs' src/RequestBatcher/RequestBatcher.csproj \
+              ':(glob)src/RequestBatcher.Analyzers/**/*.cs' src/RequestBatcher.Analyzers/RequestBatcher.Analyzers.csproj \
+              Directory.Build.props; then
+              echo "::error::Core production sources differ from $core_tag; release core first."
+              exit 1
+            fi
+            echo "RequestBatcherOpenTelemetryVersion=$version" >> "$GITHUB_ENV"
+          fi
+          echo "RequestBatcherVersion=$core_version" >> "$GITHUB_ENV"
+          echo "package_id=$package_id" >> "$GITHUB_OUTPUT"
+          echo "project=src/$package_id/$package_id.csproj" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "core_version=$core_version" >> "$GITHUB_OUTPUT"
+
       - name: Validate NuGet credentials
         env:
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
@@ -76,64 +117,81 @@ jobs:
       - name: Restore
         run: dotnet restore "$SOLUTION"
 
+      - name: Resolve NuGet download endpoint
+        id: registry
+        run: |
+          address=$(curl --fail --silent --show-error --location "$NUGET_SOURCE" | \
+            jq --exit-status --raw-output '.resources[] | select(."@type" == "PackageBaseAddress/3.0.0") | ."@id"')
+          echo "base_address=$address" >> "$GITHUB_OUTPUT"
+
       - name: Verify formatting
         run: dotnet format RequestBatcher.slnx --no-restore --verify-no-changes --verbosity diagnostic
 
       - name: Build
-        env:
-          VERSION: ${{ steps.version.outputs.value }}
         run: >-
           dotnet build "$SOLUTION"
           --configuration Release
           --no-restore
-          -p:Version="$VERSION"
           -p:ContinuousIntegrationBuild=true
 
       - name: Test
-        env:
-          VERSION: ${{ steps.version.outputs.value }}
         run: >-
           dotnet test tests/RequestBatcher.Tests/RequestBatcher.Tests.csproj
           --configuration Release
           --no-build
           --no-restore
-          -p:Version="$VERSION"
 
-      - name: Pack
+      - name: Pack selected package
         env:
-          VERSION: ${{ steps.version.outputs.value }}
-        run: |
-          dotnet pack src/RequestBatcher/RequestBatcher.csproj \
-            --configuration Release \
-            --no-build \
-            --no-restore \
-            --output artifacts \
-            -p:Version="$VERSION" \
-            -p:ContinuousIntegrationBuild=true
+          PROJECT: ${{ steps.package.outputs.project }}
+        run: >-
+          dotnet pack "$PROJECT"
+          --configuration Release
+          --no-build
+          --no-restore
+          --output artifacts
+          -p:ContinuousIntegrationBuild=true
 
-      - name: Publish packages to NuGet
+      - name: Verify minimum core dependency is published
+        if: steps.package.outputs.package_id == 'RequestBatcher.OpenTelemetry'
+        env:
+          CORE_VERSION: ${{ steps.package.outputs.core_version }}
+          PACKAGE_BASE: ${{ steps.registry.outputs.base_address }}
+        run: |
+          curl --fail --silent --show-error --location --output /dev/null \
+            --retry 30 --retry-all-errors --retry-delay 10 --retry-max-time 600 --max-time 20 \
+            "${PACKAGE_BASE%/}/requestbatcher/$CORE_VERSION/requestbatcher.$CORE_VERSION.nupkg" >/dev/null
+
+      - name: Publish selected package to NuGet
         env:
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
-          VERSION: ${{ steps.version.outputs.value }}
+          PACKAGE_ID: ${{ steps.package.outputs.package_id }}
+          VERSION: ${{ steps.package.outputs.version }}
         run: |
-          packages=(
-            "artifacts/RequestBatcher.$VERSION.nupkg"
-          )
-          for package in "${packages[@]}"; do
-            test -f "$package"
-          done
-          for package in "${packages[@]}"; do
-            dotnet nuget push "$package" --api-key "$NUGET_API_KEY" --source "$NUGET_SOURCE" --skip-duplicate
-          done
+          package="artifacts/$PACKAGE_ID.$VERSION.nupkg"
+          test -f "$package"
+          dotnet nuget push "$package" --api-key "$NUGET_API_KEY" --source "$NUGET_SOURCE" --skip-duplicate
+
+      - name: Verify package is available on NuGet
+        env:
+          PACKAGE_ID: ${{ steps.package.outputs.package_id }}
+          VERSION: ${{ steps.package.outputs.version }}
+          PACKAGE_BASE: ${{ steps.registry.outputs.base_address }}
+        run: |
+          id="${PACKAGE_ID,,}"
+          curl --fail --silent --show-error --location --output /dev/null \
+            --retry 30 --retry-all-errors --retry-delay 10 --retry-max-time 600 --max-time 20 \
+            "${PACKAGE_BASE%/}/$id/$VERSION/$id.$VERSION.nupkg" >/dev/null
 
       - name: Create GitHub Release with packages and symbols
         env:
           GH_TOKEN: ${{ github.token }}
-          VERSION: ${{ steps.version.outputs.value }}
+          PACKAGE_ID: ${{ steps.package.outputs.package_id }}
+          VERSION: ${{ steps.package.outputs.version }}
         run: |
           assets=(
-            "artifacts/RequestBatcher.$VERSION.nupkg"
-            "artifacts/RequestBatcher.$VERSION.snupkg"
+            "artifacts/$PACKAGE_ID.$VERSION.nupkg"
+            "artifacts/$PACKAGE_ID.$VERSION.snupkg"
           )
           for asset in "${assets[@]}"; do
             test -f "$asset"
@@ -142,8 +200,12 @@ jobs:
             gh release create "$GITHUB_REF_NAME" \
               --draft \
               --verify-tag \
-              --title "RequestBatcher $VERSION" \
+              --title "$PACKAGE_ID $VERSION" \
               --generate-notes
           fi
           gh release upload "$GITHUB_REF_NAME" "${assets[@]}" --clobber
-          gh release edit "$GITHUB_REF_NAME" --draft=false
+          latest=false
+          if [[ "$PACKAGE_ID" == "RequestBatcher" ]]; then
+            latest=true
+          fi
+          gh release edit "$GITHUB_REF_NAME" --draft=false --latest="$latest"

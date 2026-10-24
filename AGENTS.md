@@ -12,6 +12,10 @@ You are an AI coding assistant for this repository.
   `dotnet run --file path/to/script.cs -- ...` using the repository SDK. Do not introduce Python scripts or require
   a separate scripting runtime. Name these files with descriptive PascalCase names, such as `EvaluateScheduling.cs`.
   Keep script dependencies minimal and document their arguments and validation.
+- Find script entry points and usage guidance in the [script index](scripts/README.md). Update the index when adding,
+  renaming, or changing script entry points.
+- Keep simple GitHub Actions release-tag parsing and package selection inline in the workflow YAML; do not add a
+  standalone script solely for those steps.
 
 ## Architecture
 
@@ -113,6 +117,7 @@ dotnet format RequestBatcher.slnx --no-restore
 dotnet build RequestBatcher.slnx --configuration Release --no-restore
 dotnet test tests/RequestBatcher.Tests/RequestBatcher.Tests.csproj --configuration Release --no-build --no-restore
 dotnet pack src/RequestBatcher/RequestBatcher.csproj --configuration Release --no-build --no-restore
+dotnet pack src/RequestBatcher.OpenTelemetry/RequestBatcher.OpenTelemetry.csproj --configuration Release --no-build --no-restore
 docker compose -f samples/RequestBatcher.Deduplication/compose.yaml up -d
 dotnet run --project samples/RequestBatcher.Deduplication/RequestBatcher.Deduplication.csproj --no-build --no-restore
 ```

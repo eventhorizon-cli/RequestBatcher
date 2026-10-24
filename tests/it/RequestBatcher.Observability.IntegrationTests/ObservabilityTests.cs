@@ -13,7 +13,7 @@ namespace RequestBatcher.Observability.IntegrationTests;
 public sealed class ObservabilityTests(ITestOutputHelper output, ObservabilityFixture fixture) : IClassFixture<ObservabilityFixture>
 {
     private const string ExecuteName = "RequestBatcher.Execute pricing-queries";
-    private const string BatchName = "RequestBatcher.HandleBatch pricing-queries";
+    private const string BatchName = "RequestBatcher.Handle pricing-queries";
     private static readonly TimeSpan _telemetryTimeout = TimeSpan.FromSeconds(120);
 
     [LiveFact]
@@ -88,7 +88,7 @@ public sealed class ObservabilityTests(ITestOutputHelper output, ObservabilityFi
                         $"actual {string.Join(',', execute.Links.Select(context => $"{context.TraceId}/{context.SpanId}"))}.");
                     Assert.All(execute.Links, link => Assert.Contains(link, batchContexts));
                     Assert.True(roots.Any(root => root.Links.Contains(executeContext)),
-                        $"No HandleBatch link to Execute {execute.TraceId}/{execute.SpanId}. " +
+                        $"No Handle link to Execute {execute.TraceId}/{execute.SpanId}. " +
                         $"Searched {start:O} to {end:O}; found batches: {string.Join(',', batchIds)}.");
                 }
 

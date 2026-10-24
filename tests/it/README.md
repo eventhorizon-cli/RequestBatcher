@@ -22,7 +22,7 @@ REQUESTBATCHER_RUN_INTEGRATION_TESTS=1 dotnet test \
   --logger 'console;verbosity=detailed'
 ```
 
-The coverage settings include only the `RequestBatcher` production assembly; sample and test assemblies are excluded.
+The coverage settings include the `RequestBatcher` and `RequestBatcher.OpenTelemetry` production assemblies; sample and test assemblies are excluded.
 This collects coverage from the in-process stress tests. Code executing inside the sample containers is not instrumented
 by the test host's collector; the live test verifies exported behavior separately. CI uploads this report with the
 `integration` flag and unit-test reports with the `unit` flag.
@@ -31,6 +31,15 @@ The same project also contains in-process tests that use the public API and the 
 the environment switch: `ExecuteAsync_ConcurrentWavesAtEachSamplingRate_ProcessesExactlyOnceAndLinksActualBatches`
 checks 32 waves of 512 requests (16,384 requests per sampling mode) at 0% and 100% sampling, with mixed single and
 16-request submissions, an asynchronous 1 ms handler delay, bounded pending capacity, and per-wave telemetry cleanup.
+These baseline waves register `AddRequestBatcherInstrumentation()` so the linked-batch policy is exercised with the
+application's sampler configuration.
+`ExecuteAsync_Instrumentation_MixedSamplingLinksAllParticipatingContexts` checks that a mixed batch links to all participating
+Execute contexts, including unsampled contexts, with the application's sampler configuration preserved; Handle export
+is asserted from whether the actual batch contains a sampled Execute context.
+`ExecuteAsync_Instrumentation_SamplesBatchWithZeroRootRatio` registers the parameterless
+`AddRequestBatcherInstrumentation()` extension and checks that a sampled Execute causes its Handler batch to be sampled
+even with a 0% root ratio. Deterministic unit tests cover dropping a batch when all Execute spans are unsampled through
+the extension and preserving application sampling with direct source registration.
 `DisposeAsync_QueuedCancellationAndHandlerFailure_DrainsAcceptedWorkAndRejectsLateSubmissions` checks cancellation,
 draining, failures, and late admission. Run the project without `REQUESTBATCHER_RUN_INTEGRATION_TESTS` to execute these
 tests without starting the live fixture.
@@ -45,16 +54,17 @@ product items, including a duplicate. It verifies:
 
 - Response order, quantities, seeded prices, duplicate fan-out, and totals.
 - Exactly one `RequestBatcher.Execute pricing-queries` span per Cart request, under its HTTP server span.
-- Independent `RequestBatcher.HandleBatch pricing-queries` roots with unique Links to the caller Execute spans,
-  matching reverse links from Execute, coverage of every test caller, and a batch combining multiple callers.
+- Independent `RequestBatcher.Handle pricing-queries` roots with unique links from each batch to its caller
+  `Execute` spans, matching links from each `Execute` span to the `Handle` spans that handled its requests,
+  coverage of every test caller, and a batch combining multiple callers.
 - Batch sizes of 1–20 **product items**. A Cart submission can span multiple batches; a batch need not be full.
 - Cart HTTP client → Pricing HTTP server → Npgsql query parent relationships, successful HTTP status, and no Pricing batcher.
 - New contexts in a subsequent burst, guarding against an earlier caller contaminating later traces.
 - All five RequestBatcher instruments exported with the short request type `Int32`, with increasing counters and histogram counts/sums.
 
 The sample uses `service.name=cart` and `service.name=pricing` for new telemetry. The dashboard's `Cart calls · Execute`
-and `Handler execution · HandleBatch` tables expose the reciprocal span Links, so a caller can be followed to its batches
-and a batch can be followed back to its callers. Data written before this naming change keeps the old service names until
+and `Handler execution · Handle` tables expose both directions explicitly: a `Handle` row links to its caller
+`Execute` spans, and an `Execute` row links to the `Handle` spans that handled its requests. Data written before this naming change keeps the old service names until
 backend retention removes it.
 
 Trace and metric assertions poll for up to 120 seconds per phase because OTLP export, Tempo indexing, and Prometheus

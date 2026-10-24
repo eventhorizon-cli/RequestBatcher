@@ -171,7 +171,7 @@ to the HTTP request; the sample does not add automatic retries.
 
 The sample can use the `RequestBatcher` package with the application's OpenTelemetry hosting
 and exporter packages. Register it with `WithTracing(tracing => tracing.AddRequestBatcherInstrumentation())`.
-`RequestBatcher.Execute` measures the full caller wait, while `RequestBatcher.HandleBatch` is an independent Consumer
+`RequestBatcher.Execute` measures the full caller wait, while `RequestBatcher.Handle` is an independent Consumer
 span linked to contributing calls. See the [observability guide](../../docs/observability-design.md).
 
 For optional end-to-end validation of the Compose observability sample, see the [integration test guide](../../tests/it/README.md)

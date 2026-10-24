@@ -98,13 +98,15 @@ public sealed class SamplingContextTests
         {
             var recorded = StartPendingSubmission("recorded");
             var propagated = StartPendingSubmission("propagated");
+            var recordedCompletion = new BatchSubmissionCompletion(3, default);
+            var propagatedCompletion = new BatchSubmissionCompletion(2, default);
             var requests = new PendingBatchRequest<int>[]
             {
-                NewRequest(recorded.TraceContext),
-                NewRequest(recorded.TraceContext),
-                NewRequest(propagated.TraceContext),
-                NewRequest(recorded.TraceContext),
-                NewRequest(propagated.TraceContext),
+                NewRequest(recorded.TraceContext, recordedCompletion),
+                NewRequest(recorded.TraceContext, recordedCompletion),
+                NewRequest(propagated.TraceContext, propagatedCompletion),
+                NewRequest(recorded.TraceContext, recordedCompletion),
+                NewRequest(propagated.TraceContext, propagatedCompletion),
             };
 
             var batch = RequestBatcherTracing.StartBatch("int", requests);
@@ -112,10 +114,15 @@ public sealed class SamplingContextTests
             using (batch)
             {
                 var samplerLinks = Assert.Single(batchSamplerLinks);
-                Assert.Equal(2, samplerLinks.Length);
-                Assert.Contains(samplerLinks, link => link.Context == recorded.Context);
-                Assert.Contains(samplerLinks, link => link.Context == propagated.Context);
-                Assert.Equal(2, batch!.Links.Count());
+                var expectedForwardLinks = dataSampling == ActivitySamplingResult.AllDataAndRecorded ? 2 : 0;
+                Assert.Equal(expectedForwardLinks, samplerLinks.Length);
+                if (expectedForwardLinks != 0)
+                {
+                    Assert.Contains(samplerLinks, link => link.Context == recorded.Context);
+                    Assert.Contains(samplerLinks, link => link.Context == propagated.Context);
+                }
+
+                Assert.Equal(expectedForwardLinks, batch!.Links.Count());
             }
 
             recorded.Completion.SetResult();
@@ -130,7 +137,15 @@ public sealed class SamplingContextTests
                 capture.Stopped,
                 span => span.OperationName == RequestBatcherTracing.CallName &&
                     Equals(span.GetTagItem("requestbatcher.request.type"), "propagated"));
-            Assert.Equal(batch!.Context, Assert.Single(recordedSpan.Links).Context);
+            if (dataSampling == ActivitySamplingResult.AllDataAndRecorded)
+            {
+                Assert.Equal(batch!.Context, Assert.Single(recordedSpan.Links).Context);
+            }
+            else
+            {
+                Assert.Empty(recordedSpan.Links);
+            }
+
             Assert.Empty(propagatedSpan.Links);
         }
         finally
@@ -185,8 +200,10 @@ public sealed class SamplingContextTests
         });
     }
 
-    private static PendingBatchRequest<int> NewRequest(SubmissionTraceContext traceContext) =>
-        new TracedPendingBatchRequest<int>(0, default, static _ => { }, null, traceContext);
+    private static PendingBatchRequest<int> NewRequest(
+        SubmissionTraceContext traceContext,
+        IRequestCompletion? completion = null) =>
+        new TracedPendingBatchRequest<int>(0, default, static _ => { }, completion, traceContext);
 
     private static PendingSubmission StartPendingSubmission(string requestType)
     {

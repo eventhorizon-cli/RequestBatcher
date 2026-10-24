@@ -5,4 +5,10 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
   </PropertyGroup>
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'RequestBatcher' and '$(RequestBatcherVersion)' != ''">
+    <Version>$(RequestBatcherVersion)</Version>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(MSBuildProjectName)' == 'RequestBatcher.OpenTelemetry' and '$(RequestBatcherOpenTelemetryVersion)' != ''">
+    <Version>$(RequestBatcherOpenTelemetryVersion)</Version>
+  </PropertyGroup>
 </Project>

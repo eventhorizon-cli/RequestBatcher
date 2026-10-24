@@ -15,7 +15,7 @@ public sealed class TracingStressTests(ITestOutputHelper output)
 {
     private static readonly TimeSpan _testTimeout = TimeSpan.FromSeconds(60);
     private const string ExecuteOperation = "RequestBatcher.Execute";
-    private const string BatchOperation = "RequestBatcher.HandleBatch";
+    private const string BatchOperation = "RequestBatcher.Handle";
 
     [Theory]
     [InlineData(false)]
@@ -62,6 +62,183 @@ public sealed class TracingStressTests(ITestOutputHelper output)
                 capture.Clear();
                 observations.Clear();
             }
+        }
+        finally
+        {
+            try
+            {
+                await ((IAsyncDisposable)batcher).DisposeAsync().AsTask().WaitAsync(_testTimeout);
+            }
+            finally
+            {
+                await provider.DisposeAsync().AsTask().WaitAsync(_testTimeout);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_Instrumentation_MixedSamplingLinksAllParticipatingContexts()
+    {
+        using var timeout = new CancellationTokenSource(_testTimeout);
+        using var capture = new SpanCapture();
+        using var tracing = Sdk.CreateTracerProviderBuilder()
+            .AddRequestBatcherInstrumentation()
+            .SetSampler(new ParentBasedSampler(new AlwaysOnSampler()))
+            .AddProcessor(capture)
+            .Build();
+        var executeActivities = new ConcurrentBag<ExecuteObservation>();
+        using var propagationListener = new ActivityListener
+        {
+            ShouldListenTo = static source => source.Name == "RequestBatcher",
+            Sample = (ref ActivityCreationOptions<ActivityContext> options) =>
+                options.Name == ExecuteOperation
+                    ? ActivitySamplingResult.PropagationData
+                    : ActivitySamplingResult.None,
+            ActivityStarted = activity =>
+            {
+                if (activity.OperationName == ExecuteOperation)
+                {
+                    executeActivities.Add(new ExecuteObservation(activity.Context, activity.ParentSpanId));
+                }
+            },
+        };
+        ActivitySource.AddActivityListener(propagationListener);
+        var services = new ServiceCollection();
+        services.AddRequestBatcher<int, MixedSamplingHandler>(ServiceLifetime.Singleton, options =>
+        {
+            options.BatchSize = 64;
+            options.MaxConcurrency = 1;
+            options.MaxPendingRequests = 128;
+            options.FullMode = RequestBatchFullMode.Wait;
+        });
+
+        var provider = services.BuildServiceProvider();
+        var handler = Assert.IsType<MixedSamplingHandler>(provider.GetRequiredService<IRequestBatchHandler<int>>());
+        var batcher = provider.GetRequiredService<IRequestBatcher<int>>();
+        var submissions = Enumerable.Range(0, 32)
+            .Select(request => new MixedSubmission(request, request % 2 == 0))
+            .ToArray();
+        var allSubmitted = NewSource();
+        var submitted = 0;
+
+        try
+        {
+            async Task SubmitAsync(MixedSubmission submission)
+            {
+                using var parent = CreateCallerActivity(submission.Sampled, submission.Request);
+                submission.ParentContext = parent.Context;
+                var task = batcher.ExecuteAsync(submission.Request);
+                if (Interlocked.Increment(ref submitted) == submissions.Length)
+                {
+                    allSubmitted.TrySetResult();
+                }
+
+                await task.WaitAsync(timeout.Token);
+            }
+
+            var first = SubmitAsync(submissions[0]);
+            await handler.Started.Task.WaitAsync(timeout.Token);
+            var queued = submissions.Skip(1).Select(SubmitAsync).ToArray();
+            await allSubmitted.Task.WaitAsync(timeout.Token);
+            handler.Release.TrySetResult();
+            await Task.WhenAll(queued.Append(first)).WaitAsync(timeout.Token);
+
+            var executeByParent = executeActivities
+                .GroupBy(activity => activity.ParentSpanId)
+                .ToDictionary(group => group.Key, group => Assert.Single(group).Context);
+            Assert.Equal(submissions.Length, executeByParent.Count);
+            var executeSpans = capture.Spans
+                .Where(span => span.OperationName == ExecuteOperation)
+                .ToArray();
+            var recordedExecuteContexts = executeByParent.Values
+                .Where(context => context.TraceFlags.HasFlag(ActivityTraceFlags.Recorded))
+                .ToHashSet();
+            Assert.True(recordedExecuteContexts.SetEquals(executeSpans.Select(span => span.Context)));
+            Assert.DoesNotContain(executeSpans, span =>
+                !span.Context.TraceFlags.HasFlag(ActivityTraceFlags.Recorded));
+
+            var batchSpans = capture.Spans
+                .Where(span => span.OperationName == BatchOperation)
+                .ToArray();
+            Assert.NotEmpty(batchSpans);
+            var executeByRequest = submissions.ToDictionary(
+                submission => submission.Request,
+                submission => executeByParent[submission.ParentContext.SpanId]);
+            var mixedBatchFound = false;
+            foreach (var batchRequests in handler.Batches)
+            {
+                var batchContext = Assert.Single(handler.BatchContexts, context => context.Requests == batchRequests).Context;
+                var hasSampledParticipant = batchRequests.Any(request =>
+                    executeByRequest[request].TraceFlags.HasFlag(ActivityTraceFlags.Recorded));
+                Assert.Equal(hasSampledParticipant, batchContext.TraceFlags.HasFlag(ActivityTraceFlags.Recorded));
+                if (!hasSampledParticipant)
+                {
+                    Assert.DoesNotContain(batchSpans, span => span.Context == batchContext);
+                    continue;
+                }
+
+                var batchSpan = Assert.Single(batchSpans, span => span.Context == batchContext);
+                var expectedLinks = batchRequests.Select(request => executeByRequest[request]).ToHashSet();
+                Assert.True(expectedLinks.SetEquals(batchSpan.Links.Select(link => link.Context)));
+                Assert.Equal(batchRequests.Distinct().Count(), batchSpan.SubmissionCount);
+
+                var hasUnsampledParticipant = batchRequests.Any(request =>
+                    !executeByRequest[request].TraceFlags.HasFlag(ActivityTraceFlags.Recorded));
+                if (hasSampledParticipant && hasUnsampledParticipant)
+                {
+                    mixedBatchFound = true;
+                    Assert.Contains(batchSpan.Links, link =>
+                        batchRequests.Any(request => executeByRequest[request] == link.Context &&
+                            executeByRequest[request].TraceFlags.HasFlag(ActivityTraceFlags.Recorded)));
+                    Assert.Contains(batchSpan.Links, link =>
+                        batchRequests.Any(request => executeByRequest[request] == link.Context &&
+                            !executeByRequest[request].TraceFlags.HasFlag(ActivityTraceFlags.Recorded)));
+                }
+            }
+
+            Assert.Equal(handler.BatchContexts.Count(context => context.Context.TraceFlags.HasFlag(ActivityTraceFlags.Recorded)),
+                batchSpans.Length);
+            Assert.True(mixedBatchFound, "Expected the SDK sampler to observe a batch with sampled and unsampled submissions.");
+        }
+        finally
+        {
+            handler.Release.TrySetResult();
+            using var cleanupTimeout = new CancellationTokenSource(_testTimeout);
+            try
+            {
+                await ((IAsyncDisposable)batcher).DisposeAsync().AsTask().WaitAsync(cleanupTimeout.Token);
+            }
+            finally
+            {
+                await provider.DisposeAsync().AsTask().WaitAsync(_testTimeout);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_Instrumentation_SamplesBatchWithZeroRootRatio()
+    {
+        using var timeout = new CancellationTokenSource(_testTimeout);
+        using var capture = new SpanCapture();
+        using var tracing = Sdk.CreateTracerProviderBuilder()
+            .AddRequestBatcherInstrumentation()
+            .SetSampler(new ParentBasedSampler(new TraceIdRatioBasedSampler(0)))
+            .AddProcessor(capture)
+            .Build();
+        var observations = new HandlerObservations();
+        var provider = CreateProvider(observations, batchSize: 8, maxConcurrency: 1, maxPending: 8);
+        var batcher = provider.GetRequiredService<IRequestBatcher<int>>();
+
+        try
+        {
+            using var parent = CreateCallerActivity(sampled: true, request: 0);
+            await batcher.ExecuteAsync(1).WaitAsync(timeout.Token);
+
+            var call = Assert.Single(capture.Spans, span => span.OperationName == ExecuteOperation);
+            var batch = Assert.Single(capture.Spans, span => span.OperationName == BatchOperation);
+            Assert.Equal(parent.SpanId, call.ParentSpanId);
+            Assert.Contains(batch.Links, link => link.Context == call.Context);
+            Assert.True(batch.Context.TraceFlags.HasFlag(ActivityTraceFlags.Recorded));
         }
         finally
         {
@@ -249,12 +426,54 @@ public sealed class TracingStressTests(ITestOutputHelper output)
         }
     }
 
+    private static Activity CreateCallerActivity(bool sampled, int request)
+    {
+        var activity = new Activity($"caller-{request}")
+            .SetIdFormat(ActivityIdFormat.W3C)
+            .SetParentId(
+                ActivityTraceId.CreateRandom(),
+                ActivitySpanId.CreateRandom(),
+                sampled ? ActivityTraceFlags.Recorded : ActivityTraceFlags.None);
+        return activity.Start();
+    }
+
     private sealed class Submission(int wave, int index, int[] requests)
     {
         public int Wave { get; } = wave;
         public int Index { get; } = index;
         public int[] Requests { get; } = requests;
         public ActivityContext ParentContext { get; set; }
+    }
+
+    private sealed class MixedSubmission(int request, bool sampled)
+    {
+        public int Request { get; } = request;
+        public bool Sampled { get; } = sampled;
+        public ActivityContext ParentContext { get; set; }
+    }
+
+    private sealed record ExecuteObservation(ActivityContext Context, ActivitySpanId ParentSpanId);
+
+    private sealed class MixedSamplingHandler : IRequestBatchHandler<int>
+    {
+        public TaskCompletionSource Started { get; } = NewSource();
+        public TaskCompletionSource Release { get; } = NewSource();
+        public ConcurrentBag<int[]> Batches { get; } = [];
+        public ConcurrentBag<BatchObservation> BatchContexts { get; } = [];
+
+        public async ValueTask HandleAsync(
+            IReadOnlyList<int> requests,
+            CancellationToken cancellationToken = default)
+        {
+            var copy = requests.ToArray();
+            Batches.Add(copy);
+            BatchContexts.Add(new BatchObservation(copy, Activity.Current?.Context ?? default));
+            if (requests.Contains(0))
+            {
+                Started.TrySetResult();
+                await Release.Task.WaitAsync(cancellationToken);
+            }
+        }
     }
 
     private sealed class HandlerObservations
@@ -326,7 +545,8 @@ public sealed class TracingStressTests(ITestOutputHelper output)
                     data.ParentSpanId,
                     data.Links.ToArray(),
                     data.Status,
-                    data.GetTagItem("requestbatcher.canceled") is true));
+                    data.GetTagItem("requestbatcher.canceled") is true,
+                    data.GetTagItem("requestbatcher.batch.submission.count") is int count ? count : null));
             }
         }
 
@@ -339,7 +559,8 @@ public sealed class TracingStressTests(ITestOutputHelper output)
         ActivitySpanId ParentSpanId,
         ActivityLink[] Links,
         ActivityStatusCode Status,
-        bool Canceled);
+        bool Canceled,
+        int? SubmissionCount);
 
     private static TaskCompletionSource NewSource() =>
         new(TaskCreationOptions.RunContinuationsAsynchronously);
