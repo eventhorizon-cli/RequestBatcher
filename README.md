@@ -378,7 +378,8 @@ including duplicates and missing requests.
 The keyed selector overload is recommended for unordered backend results; the ordered overload must receive the aligned
 sequence, never raw backend rows. The explicit-group overload returns responses in input order even when RequestBatcher
 splits the requests across handler batches or queue partitions.
-The caller's `Task<TResponse>` completes only after the handler succeeds and its item's response has been set.
+The caller's `Task<TResponse>` succeeds only after the handler succeeds, its item's response has been set, and
+the handler scope has been disposed successfully.
 
 ## Explicit Group Submission
 
@@ -418,7 +419,7 @@ invocation.
 | Failure | A handler failure fails every request in that handler batch. | Some items may succeed before another handler batch fails. The group `Task` faults, but successful work is not rolled back. |
 | Cancellation | Cancellation removes the request only before dispatch. | The same token applies to every item; undispatched items can be canceled while dispatched items continue to their actual outcome. |
 
-## Named Batchers and Primitive Requests
+## Named RequestBatcher Instances and Primitive Requests
 
 A request can be a primitive ID. Use the `batcherName` overload when several operations accept the same request type:
 for example, `"price"` and `"stock"` can each register an independent `int` pipeline. Each name has its own handler,
@@ -426,7 +427,6 @@ options, queue capacity, and concurrency limit. Named and unnamed registrations 
 
 ```csharp
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Options;
 using RequestBatcher;
 
 services.AddRequestBatcher<int, decimal?, PriceByIdHandler>(
@@ -441,7 +441,6 @@ services.AddRequestBatcher<int, decimal?, PriceByIdHandler>(
 
 var batcher = serviceProvider.GetRequiredKeyedService<IRequestBatcher<int, decimal?>>("price");
 var prices = await batcher.ExecuteAsync(new[] { 101, 102, 101 });
-var options = serviceProvider.GetRequiredService<IOptionsMonitor<RequestBatchOptions<int>>>().Get("price");
 ```
 
 The handler below uses the `IPriceStore` contract from the request/response example. Register its implementation
@@ -509,8 +508,8 @@ and [Controller Action injection](https://learn.microsoft.com/en-us/aspnet/core/
 
 The request-only overload also accepts `batcherName`. Names are case-sensitive and must not be null, empty, or
 whitespace; a request type and name identify one pipeline, regardless of response type. Use the original overload
-for the unnamed default. Configuration is captured at registration; named options expose that configuration and
-do not provide runtime queue reconfiguration. `UsePartitionKey` routes requests within the selected batcher and
+for the unnamed default. Configure each batcher through its registration callback; settings are fixed at registration
+and cannot be changed at runtime. `UsePartitionKey` routes requests within the selected batcher and
 does not select a batcher or serialize its handler batches.
 
 The [named versus unnamed benchmark](docs/evaluations/named-batching/README.md) keeps request/response types,
@@ -600,7 +599,7 @@ to avoid delegate collisions or accidental binding. Omit `batcherName` to use th
 and name can use only one registration mode: delegate registrations require the handler on every submission, while
 typed-handler registrations use the original overloads.
 
-The first valid call binds one delegate to that pipeline. Repeated calls with an equal delegate reuse it; a
+The pipeline binds one handler delegate. Repeated calls with an equal delegate reuse it; a
 different delegate fails before enqueueing. Different handler targets represent different handlers even when their
 bodies look identical, so use different batcher names for different operations. Concurrent first calls bind atomically.
 Services are supplied per dispatched batch, not captured from the caller's scope.
@@ -644,8 +643,10 @@ The [typed-handler sample](samples/RequestBatcher.Deduplication) provides the or
 
 ### Completion and Failure
 
-- A successful handler call completes every caller represented in that handler batch.
-- If the handler throws a non-cancellation exception, those callers receive the original exception.
+- A successful handler call marks every request in that handler batch as successful. An explicit submission's task
+  waits for all its requests, including those assigned to other handler batches.
+- If the handler throws a non-cancellation exception, every request in that handler batch fails with the original
+  exception.
 - Response tasks represent a handler `OperationCanceledException` as cancellation. A single response preserves its
   cancellation token and throws `TaskCanceledException` when awaited; the original cancellation exception instance,
   message, and derived type are not preserved.
@@ -940,24 +941,14 @@ or synchronously blocking work before that point can delay other batches even wh
 
 ## Observability
 
-### Execution Context and Tracing
-
-Background dispatch and consumer monitoring run without inheriting the initializing caller's execution context.
-Handlers do not inherit HTTP request activities (`Activity.Current`), logging scopes, or other `AsyncLocal` values
-from initialization or submission. The caller's context is preserved after resolution and after awaiting completion.
-Pass required application data, such as tenant identifiers, explicitly in requests. Activities created inside a
-handler flow normally across its awaits. Singleton constructors must not capture request-specific state; they follow
-the container's normal creation rules.
-
 ### OpenTelemetry Integration
 
-The core [`RequestBatcher`](https://www.nuget.org/packages/RequestBatcher) package uses built-in .NET `ActivitySource` and
-`Meter` APIs and has no OpenTelemetry package dependency. Install the optional
-[`RequestBatcher.OpenTelemetry`](https://www.nuget.org/packages/RequestBatcher.OpenTelemetry) package when you want its
-provider-builder registration extensions; it targets
-net8.0/net10.0, declares a minimum compatible `RequestBatcher` version, and requires OpenTelemetry 1.20.1 or later.
-The two packages are versioned independently.
-Install the hosting and exporter packages used by your application as well:
+The core [`RequestBatcher`](https://www.nuget.org/packages/RequestBatcher) package exposes the `RequestBatcher`
+ActivitySource and Meter through built-in .NET APIs, without an OpenTelemetry dependency. Install the optional
+[`RequestBatcher.OpenTelemetry`](https://www.nuget.org/packages/RequestBatcher.OpenTelemetry) package for registration
+extensions and coordinated sampling of submissions and Handler batches. The two packages are versioned independently.
+
+Install the integration and the hosting/instrumentation/exporter packages used by your application:
 
 ```bash
 dotnet add package RequestBatcher
@@ -967,7 +958,7 @@ dotnet add package OpenTelemetry.Instrumentation.AspNetCore
 dotnet add package OpenTelemetry.Exporter.OpenTelemetryProtocol
 ```
 
-Register tracing and metrics with the providers already used by the Web API:
+Register tracing and metrics with your application's existing providers:
 
 ```csharp
 using Microsoft.Extensions.DependencyInjection;
@@ -984,136 +975,87 @@ builder.Services.AddOpenTelemetry()
         .AddOtlpExporter());
 ```
 
-Installing [`RequestBatcher.OpenTelemetry`](https://www.nuget.org/packages/RequestBatcher.OpenTelemetry) alone does not register tracing. Add `.AddRequestBatcherInstrumentation()` to the tracing
-provider to register the `RequestBatcher` source and decorate the application's sampler with linked-batch sampling.
-The extension always samples a `Handle` root when any creation-time `Handle-to-Execute` link context has the `Recorded`
-flag and returns `Drop` when every participating `Execute` context is unsampled; other Activities, including `Execute`
-and handler child spans, still use the application's sampler. It decorates the sampler selected by code or environment
-configuration, regardless of whether `SetSampler` appears before or after the extension.
-For direct source registration without this linked-batch policy, use `AddSource("RequestBatcher")` instead;
-the independent `Handle` root then follows the application's sampler, so a sampled `Execute` may still have an
-unsampled batch and downstream children, leaving its Handle trace incomplete. See the
-[integration package README](src/RequestBatcher.OpenTelemetry/README.md)
-for migration and linked-batch sampling details.
+Installing the package alone does not enable collection; register the extension on each provider you use.
 
-When created, `RequestBatcher.Execute` is an `Internal` span under the caller's current span; its sampling decision is
-made by the application's sampler. It measures the complete caller-visible call, including admission, capacity wait,
-queue residence, handler execution, and result completion. With an active listener, each non-empty dispatched batch
-creates an independent `RequestBatcher.Handle` `Consumer` root. When at least one participating `Execute` context
-is sampled, the `Handle` span links to every distinct valid participating `Execute` context that entered processing,
-including unsampled contexts. Database or HTTP spans created by the handler are children of the batch and still use the
-application's sampler; ParentBased sampling follows the batch's flag, while other samplers may decide differently. An
-`Execute` span links only to `Handle` spans that actually handled its requests, and only when it is sampled and
-requests all Activity data, including when one submission spans several batches. If no Execute Activity was created, a
-valid caller context can provide that submission's context for batch correlation. These links are added late and do not
-affect sampling of `Execute`; the application's parent span is not modified.
-Both spans use the public request type's simple name for `requestbatcher.request.type` (for example, `Int32`),
-without namespaces or internal response wrappers. Span queries and samplers must match these short names.
+### Tracing
 
-With direct `AddSource("RequestBatcher")` registration, sampling is controlled by the application's tracing provider for
-`Execute`, `Handle`, and handler children. A 0% sampler can still create propagation Activities,
-so it does not have the same overhead as leaving the RequestBatcher source unregistered. A dropped or propagation-only
-Execute retains a valid context that can join the `Handle-to-Execute` links when another Execute in the batch
-is sampled. RecordOnly requests all Activity data without the sampled flag and does not affect the `Handle` sampling
-decision. With direct source registration, an all-unsampled batch may still be recorded independently; the integration
-extension drops it when all participating Execute contexts are unsampled. A mixed batch retains every distinct valid context. Logs, task completion,
-cancellation, and handler execution are unchanged. See the [20 ms sampling evaluation](docs/evaluations/tracing-io-overhead/README.md) for the
-workload and measured allocation limits.
-The [sampling-aware link comparison](docs/evaluations/tracing-io-overhead/sampled-links.md) records the current
-low-sampling allocation savings and full-sampling cost; it does not establish a latency improvement.
+| Span | What to inspect |
+| --- | --- |
+| `RequestBatcher.Execute` | One `ExecuteAsync` submission, under the caller's current span when present; otherwise a root span. Duration includes capacity waiting, queueing, Handler processing, and result completion. |
+| `RequestBatcher.Handle` | One Handler batch, as an independent trace root. Its children show instrumented database and HTTP calls made by the Handler. |
 
-For a named registration, the public span names append the configured name after a space, such as
-`RequestBatcher.Execute pricing-queries` and `RequestBatcher.Handle pricing-queries`. Both spans also carry
-`requestbatcher.name`; unnamed registrations keep the base names and omit the tag. The name is the public DI
-registration name, never an internal queue key. Start with `Execute`, then follow available `Execute`-to-`Handle`
-links to the actual batches that handled its requests and inspect their downstream children:
+Start with `Execute` and follow its links to the `Handle` spans that processed its requests. A submission can span
+several Handler batches, and one Handler batch can combine requests from several submissions. Links let you navigate
+between these traces; they do not make the spans parent and child or guarantee execution order.
 
-For compatibility, custom span-name queries should use `RequestBatcher.Handle` and append a named-registration suffix
-after a space, such as `RequestBatcher.Handle pricing-queries`. The `RequestBatcher` ActivitySource and Meter names
-are stable. Historical backend spans retain their previous names until backend retention removes them.
+Named instances append the registered name, for example `RequestBatcher.Execute pricing-queries` and
+`RequestBatcher.Handle pricing-queries`. Use these attributes when filtering or inspecting spans:
+
+- `requestbatcher.name`: the configured batcher name, when present.
+- `requestbatcher.request.type`: the public request type's short name, such as `Int32`, without its namespace.
+- `requestbatcher.batch.size`: the number of requests in a Handler batch.
+- `requestbatcher.batch.submission.count`: how many distinct `ExecuteAsync` submissions contributed to that batch.
+  Several items from one submission count once within each batch.
+
+Handlers do not inherit the caller's HTTP span, logging scope, baggage, or other `AsyncLocal` values. Pass required
+business data explicitly in requests. Activities created inside a Handler follow its batch span normally.
 
 ![RequestBatcher observability model](docs/diagrams/observability.svg)
 
-Span contexts and shared link-collection state provide correlation across the in-process queue. Links express causality;
-they do not create a shared parent edge, shared trace ID, or ordering guarantee. Handler execution does not inherit
-HTTP request activities, logging scopes, baggage, or other caller `AsyncLocal` state. Tracing is best effort and pending requests are not recovered after a
-process failure.
+#### Sampling
 
-#### Sampling and Context Propagation
+With the tracing extension registered, the application's sampler decides whether to sample each `Execute` span.
+The integration determines `Handle` sampling from the `Execute` spans whose requests entered that Handler batch:
 
-The following flow assumes that the optional integration package is installed and
-`.AddRequestBatcherInstrumentation()` is registered on the tracing provider. Installing the package alone does not
-register tracing. The application-configured OpenTelemetry SDK still makes sampling decisions for each Activity from its
-parent context and creation-time tags or links.
+| Execute spans represented in the batch | Handle sampling |
+| --- | --- |
+| At least one is sampled | Sample the Handler batch. |
+| All are unsampled | Do not sample the Handler batch. |
 
-![RequestBatcher sampling and context flow](docs/diagrams/tracing-sampling.svg)
+Handler database and HTTP child spans still use the application's sampler. With `ParentBasedSampler`, children
+follow their parent's sampling decision; spans without a parent use its configured root sampler.
+For example, `ParentBasedSampler(new AlwaysOnSampler())` samples roots and follows the parent for child spans.
+The integration uses the table above for the independent `Handle` root.
 
-`Execute` uses the caller's current HTTP or business Activity as its parent. Each `Handle` supplies no parent and is
-an independent Consumer root; it is the parent of the handler's database and HTTP child spans. If at least one
-participating `Execute` context is sampled, that `Handle` links to every distinct submission's `Execute` context.
-These links associate handling with submissions without creating parent edges. If all participating contexts are
-unsampled, the integration extension drops the independent `Handle` root. The SDK applies this policy to the
-`Handle-to-Execute` link contexts supplied when `Handle` starts.
-HTTP instrumentation propagates the batch trace downstream through `traceparent`.
-An `Execute`-to-`Handle` link is added at completion only when the `Execute` Activity is sampled and requests all
-data; it cannot affect the earlier `Execute` sampling decision. With the integration extension registered, a `Handle` root is
-sampled when any creation-time `Handle-to-Execute` link context is sampled and dropped otherwise; this link policy overrides the
-independent root decision that a `ParentBased` sampler would otherwise make.
+You can choose direct `AddSource("RequestBatcher")` registration without the integration package. In that case, the
+application's sampler decides `Handle` sampling independently, so a sampled `Execute` may lack its corresponding
+recorded Handler trace. Sampling and exporter/link limits can also leave trace associations incomplete; configure the
+SDK's span link limit if large batches require more links. A 0% sampling rate does not completely disable instrumentation.
 
-For the common `ParentBasedSampler` policy, a sampled parent produces a sampled child, an unsampled parent drops the child,
-and no parent delegates to the configured root sampler. For example, `ParentBasedSampler(new AlwaysOnSampler())` samples
-root Activities. A ratio root sampler only applies when there is no parent. With the integration extension registered, the
-`Handle` root is the explicit exception: its root decision comes from the creation-time `Handle-to-Execute`
-link contexts above,
-not from the `ParentBased` root sampler. Handler children then follow the batch's sampled flag under ParentBased.
+The [observability design](docs/observability-design.md)
+contains the detailed sampling flow, context/link implementation, and performance evaluations.
 
-The observability sample explicitly uses `AlwaysOnSampler`. Separately, the tracing benchmark uses
-`ParentBasedSampler(new TraceIdRatioBasedSampler(ratio))` with direct source registration and no linked-batch policy
-to measure different sampling rates. These examples do not define the sampling diagram's application sampler.
+### Metrics
 
-With the integration extension registered, a 0% ParentBased root ratio can still record `Execute` under a sampled caller parent;
-when that sampled submission enters a batch, the linked policy samples the independent `Handle` root.
-Dropped spans may retain propagation Activities and correlation/completion state;
-0% sampling is not the same as leaving the source unregistered. If a listener creates no Execute Activity,
-an available caller context can still be included in the `Handle` submission links when the batch has a sampled
-submission context.
-With no RequestBatcher listener, tracing is bypassed.
-
-When a batch Activity requests all data after sampling, it records `requestbatcher.batch.submission.count`, the number
-of distinct public `ExecuteAsync` submissions represented by requests that entered that handler invocation, not the
-number of spans. Multiple items from one explicit submission count once per batch; separate submissions count separately
-even under the same caller span or when no Execute Activity was created. Canceled queued items do not contribute. The
-attribute is computed after sampling and is a span attribute only, not a metric dimension.
-
-`MaxConcurrency` limits active handler batches, not outstanding Execute spans. For example, 1,024 individually submitted
-requests can each have an Execute Activity while only eight handler batches run. Activity lifetime covers each complete
-submission, so the concurrency setting does not provide a reusable pool of eight tracing objects.
-
-#### Metrics
-
-The matching `MeterProviderBuilder` extension registers the `RequestBatcher` meter. If only metrics are needed, choose
-either direct core registration or the optional package's metrics extension:
+For metrics alone, you can choose direct Meter registration without installing the integration package:
 
 ```csharp
 builder.Services.AddOpenTelemetry()
     .WithMetrics(metrics => metrics.AddMeter("RequestBatcher"));
 ```
 
-Both options are supported: you can choose direct `AddMeter("RequestBatcher")` registration without installing the
-optional package, or install [`RequestBatcher.OpenTelemetry`](https://www.nuget.org/packages/RequestBatcher.OpenTelemetry)
-and use the metrics extension. The meter records accepted requests,
-processed requests and batches, batch size, and batch duration. Metrics use only request type and configured batcher
-name as dimensions. Request types use their short public name (for example, `Int32`), without namespaces or internal
-response wrappers; identically named types share a dimension, so use batcher names to distinguish pipelines when needed.
-Request payloads, tenant values, and partition keys are not recorded. Instruments emit values only
-when a listener subscribes to the corresponding instrument in the `RequestBatcher` meter.
+Alternatively, install [`RequestBatcher.OpenTelemetry`](https://www.nuget.org/packages/RequestBatcher.OpenTelemetry) and
+use the metrics `AddRequestBatcherInstrumentation()` extension shown above.
 
-Instrument names already include `requestbatcher.`, for example `requestbatcher.batches.processed`. With the sample's
-Prometheus exporter this becomes `requestbatcher_batches_processed_total`. Do not add another `requestbatcher` exporter
-namespace/prefix, which would produce `requestbatcher_requestbatcher_*`. Queries filtering the request-type label must
-use short names.
+| Instrument | Type | Unit | Meaning |
+| --- | --- | --- | --- |
+| `requestbatcher.requests.submitted` | `Counter<long>` | `{request}` | Accepted requests. |
+| `requestbatcher.requests.processed` | `Counter<long>` | `{request}` | Requests processed by a Handler, including failed attempts. |
+| `requestbatcher.batches.processed` | `Counter<long>` | `{batch}` | Handler batches processed. |
+| `requestbatcher.batch.size` | `Histogram<long>` | `{request}` | Requests per Handler batch. |
+| `requestbatcher.batch.duration` | `Histogram<double>` | `ms` | Handler batch duration in milliseconds, including handler scope disposal. |
 
-With a custom `System.Diagnostics.Metrics.MeterListener`, select the meter and explicitly subscribe to its instruments:
+Counters accumulate counts. Histograms record distributions; the `ms` duration unit means milliseconds.
+
+Dimensions contain only the short request type (`requestbatcher.request.type`) and optional batcher name
+(`requestbatcher.name`). Types with the same short name share a dimension; use batcher names to distinguish pipelines.
+Request payloads, tenant values, and partition keys are not recorded.
+
+Instrument names already contain `requestbatcher.`. The sample's Prometheus exporter produces names such as
+`requestbatcher_batches_processed_total`; leave an additional `requestbatcher` exporter namespace/prefix unset to
+avoid `requestbatcher_requestbatcher_*`.
+
+With a custom `System.Diagnostics.Metrics.MeterListener`, explicitly subscribe to each instrument you want:
 
 ```csharp
 listener.InstrumentPublished = (instrument, meterListener) =>
@@ -1125,17 +1067,13 @@ listener.InstrumentPublished = (instrument, meterListener) =>
 };
 ```
 
-- `InstrumentPublished` discovers instruments; receiving that callback or registering measurement callbacks alone does
-  not subscribe to measurements. Call `EnableMeasurementEvents` once for each desired instrument per listener, rather
-  than for each measurement. `Instrument.Enabled` becomes true while at least one listener subscribes; RequestBatcher
-  uses it to skip unobserved metric work. You can also filter `instrument.Name` to select individual metrics.
-- Register measurement callbacks for both `long` (counts and batch size) and `double` (batch duration), and call `Start()`
-  before submitting work. Keep the listener alive through batcher shutdown, and dispose it afterward.
-  Earlier measurements are not replayed when a listener subscribes.
-- Callbacks execute synchronously on the recording thread and may run concurrently. Keep production callbacks
-  lightweight and thread-safe, prevent callback exceptions from escaping, and avoid blocking I/O.
-  Copy any tags needed after the callback returns because the tag span cannot
-  be retained. A custom listener must provide its own aggregation and export.
+- Discovery and measurement callbacks alone do not subscribe. Call `EnableMeasurementEvents` once per desired
+  instrument per listener; filter `instrument.Name` if needed.
+- Register `long` callbacks for counts and batch size and a `double` callback for duration. Call `Start()` before
+  submitting work and keep the listener alive until the batcher has shut down. Earlier measurements are not replayed.
+- Callbacks run synchronously and may run concurrently. Keep them lightweight and thread-safe, avoid blocking I/O,
+  and prevent exceptions from escaping. Copy any tags needed after the callback returns. Custom listeners provide
+  their own aggregation and export.
 
 ## Sample Application
 

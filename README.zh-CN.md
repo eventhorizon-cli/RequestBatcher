@@ -30,7 +30,7 @@ RequestBatcher 会合并已经排队的请求，限制 Handler 批次并发数�
 **去重由 Handler 在当前批次内完成。** 两个 Handler 批次分别查询 `[101, 103]` 和 `[102, 104]`，再按
 `ProductId` 为各自批次中的请求回填结果：本例共查询 4 个商品，6 个请求各自得到结果。
 
-这只是可能的分批结果。实际批次受入队时机、`BatchSize` 和调度影响，相同 key 不保证一次收齐。
+这只是可能的分批结果。实际批次受入队时机、`BatchSize` 和调度影响，相同 Key 不保证一次收齐。
 
 ## 请求如何合并：机会式合并
 
@@ -40,8 +40,8 @@ RequestBatcher 基于 [BufferQueue](https://github.com/eventhorizon-cli/BufferQu
 合并为批次，交给应用的 Handler 处理。当前依赖 [BufferQueue 2.1.0](https://www.nuget.org/packages/BufferQueue/2.1.0)，
 应用无需单独注册或配置它。
 
-这种批次处理可以理解为**机会式攒批（opportunistic batching）**：请求写入 BufferQueue 后会发出 push 通知，唤醒空闲的消费流程。
-消费流程先占用一个执行名额，再通过 pull API 从一个 Partition 拉取最多 `BatchSize` 条请求（默认 128 条），随后分发这一批。
+这种批次处理可以理解为**机会式攒批（Opportunistic Batching）**：请求写入 BufferQueue 后会发出通知，唤醒空闲的消费流程。
+消费流程先占用一个执行名额，再通过拉取 API 从一个 Partition 拉取最多 `BatchSize` 条请求（默认 128 条），随后分发这一批。
 如果当前不足一批，就直接取出已有请求，不额外等待凑满。
 
 调用方通过 DI 获取 `IRequestBatcher<TRequest>` 或 `IRequestBatcher<TRequest, TResponse>`，提交请求并等待各自的结果。
@@ -49,7 +49,7 @@ RequestBatcher 基于 [BufferQueue](https://github.com/eventhorizon-cli/BufferQu
 调度循环分发一个批次后会继续运行。只要还有空闲名额，就可以继续拉取和分发下一批，无需等待刚分发的批次完成。
 每一批独占一个执行名额，处理结束后归还。
 
-**只有所有分配的 Partition 都没有数据时，才等待下一次 push 通知。**
+**只有所有分配的 Partition 都没有数据时，才等待下一次通知。**
 
 这个过程不依赖定时轮询，也没有固定的收集窗口。有空闲名额时，等待主要来自唤醒和调度；名额占满时，请求仍需排队。
 `BatchSize` 只限制每批的最大数量：低流量时一批可能只有一个请求，突发流量时则可能合并同一 Partition 中的多个请求。
@@ -348,18 +348,18 @@ Handler 返回前，必须为每个请求设置一次返回值，不能遗漏或
 Handler 调用中的每个不同商品 ID 查询一次存储层。`Distinct` 也支持匿名组合键、值元组和自定义相等比较器。存储层未
 返回的商品 ID 会映射为 `null`。
 
-**去重只发生在当前 Handler 批次内**：它不会合并不同处理批次或不同队列 Partition 中的条目。selector 重载会先按 key
-为后端无序结果建立字典，再为每个条目的原始 request 计算一次结果，因此重复条目会得到相同返回值。
+**去重只发生在当前 Handler 批次内**：它不会合并不同处理批次或不同队列 Partition 中的条目。Selector 重载会先按 Key
+为后端无序结果建立字典，再为每个条目的原始请求计算一次结果，因此重复条目会得到相同返回值。
 
-所有返回值计算成功后才会统一赋值；factory 抛出异常不会留下部分赋值。引用类型结果会被共享，不会复制。
+所有返回值计算成功后才会统一赋值；结果工厂抛出异常不会留下部分赋值。引用类型结果会被共享，不会复制。
 
-如果不需要去重，移除 `Distinct()` 并保留相同的 response factory 即可。还可以逐个调用
+如果不需要去重，移除 `Distinct()` 并保留相同的结果工厂即可。还可以逐个调用
 `entry.SetResponse(response)`，或先生成严格按原始输入顺序排列、包含重复和缺失请求位置的结果，再调用
 `entries.SetResponses(responses)`。
 
-面向 key 的 selector 重载适合后端无序结果；有序重载不能直接接收后端原始行。显式批量重载即使将请求拆到多个
+面向 Key 的 Selector 重载适合后端无序结果；有序重载不能直接接收后端原始行。显式批量重载即使将请求拆到多个
 处理批次或队列 Partition，仍会按输入顺序返回结果。
-只有 Handler 成功完成且对应请求的返回值已设置，调用方的 `Task<TResponse>` 才会成功完成。
+只有 Handler 成功完成、对应请求的返回值已设置，且 Handler 作用域成功释放后，调用方的 `Task<TResponse>` 才会成功完成。
 
 ## 显式批量提交
 
@@ -381,14 +381,14 @@ Partition 路由拆成多个处理批次。
 > 强制放入同一 Partition。未配置 Partition Key，或每项请求计算出相同的 Partition Key 时，整组请求才会落在同一个
 > Partition。`MaxConcurrency = 1` 只限制 Handler 并发数，不会合并带有不同 Key 的 Partition。
 
-## 单次提交与显式批量提交
+## 单条提交与显式批量提交
 
 本文中的**提交**是指调用方执行一次 `ExecuteAsync`；**处理批次**是指一次 `HandleAsync` 收到的
 `IReadOnlyList<TRequest>` 或 `IReadOnlyList<RequestBatchEntry<TRequest, TResponse>>`。
 
 **提交和处理批次不是同一个边界。**
 
-| 行为 | 单次提交 | 显式批量提交 |
+| 行为 | 单条提交 | 显式批量提交 |
 | --- | --- | --- |
 | 输入 | 直接提交传入的 `TRequest`。 | 枚举一次序列并创建快照；空序列立即完成。 |
 | 容量 | 占用一个请求的排队空间。 | `Wait` 等待队列有足够空间后入队，超过容量上限的请求组会按输入顺序分段入队；`Fail` 在无法立即容纳整组请求时拒绝整组。 |
@@ -398,14 +398,13 @@ Partition 路由拆成多个处理批次。
 | 失败 | 这次 Handler 调用失败时，该处理批次中的所有请求都会失败。 | 部分请求可能已经成功，其他处理批次仍可能失败；整组 `Task` 会失败，但不会回滚已经成功的操作。 |
 | 取消 | 只能取消尚未交给 Handler 的请求。 | 同一个 `CancellationToken` 用于整组中的每个请求；尚未分发的请求可以取消，已分发的请求继续返回实际结果。 |
 
-## 命名批处理与基础类型请求
+## Named RequestBatcher 与基础类型请求
 
 请求可以直接使用商品 ID。多种操作使用相同请求类型时，通过 `batcherName` 重载区分，例如 `"price"` 和
 `"stock"` 都可以使用 `int`，各自拥有独立的 Handler、配置、队列容量和并发限制。命名注册可以与原有默认注册共存。
 
 ```csharp
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Options;
 using RequestBatcher;
 
 services.AddRequestBatcher<int, decimal?, PriceByIdHandler>(
@@ -420,7 +419,6 @@ services.AddRequestBatcher<int, decimal?, PriceByIdHandler>(
 
 var batcher = serviceProvider.GetRequiredKeyedService<IRequestBatcher<int, decimal?>>("price");
 var prices = await batcher.ExecuteAsync(new[] { 101, 102, 101 });
-var options = serviceProvider.GetRequiredService<IOptionsMonitor<RequestBatchOptions<int>>>().Get("price");
 ```
 
 下面的 Handler 复用带返回值示例中的 `IPriceStore`，其实现仍需要在应用容器中注册：
@@ -442,7 +440,7 @@ public sealed class PriceByIdHandler(IPriceStore store) : IRequestBatchHandler<i
 
 结果按输入顺序返回，重复 ID 各自保留一个结果，未找到的商品返回 `null`。输入列表仍可能被拆成多个 Handler 批次。
 构造函数注入或 ASP.NET Core Controller Action 参数注入时，都可以在 Batcher 参数上标注
-`[FromKeyedServices("price")]`。参见 [.NET 依赖注入中的 keyed services](https://learn.microsoft.com/en-us/dotnet/core/extensions/dependency-injection/overview#keyed-services)
+`[FromKeyedServices("price")]`。参见 [.NET 依赖注入中的 Keyed services](https://learn.microsoft.com/en-us/dotnet/core/extensions/dependency-injection/overview#keyed-services)
 和 [使用 `FromKeyedServices` 注入 Action 参数](https://learn.microsoft.com/en-us/aspnet/core/mvc/controllers/dependency-injection?view=aspnetcore-8.0#action-injection-with-fromkeyedservices)。
 
 在应用服务构造函数中注入命名 Batcher，并通过 `services.AddScoped<PriceLookup>()` 注册该服务。
@@ -483,10 +481,10 @@ public sealed class PricesController : ControllerBase
 ```
 
 使用 MVC Controller 时注册 `AddControllers()` 并调用 `MapControllers()`。当前 PostgreSQL 示例使用 Minimal API，
-同样在 endpoint 参数上标注 `[FromKeyedServices("price")]`。无返回值重载也支持 `batcherName`。
+同样在 Endpoint 参数上标注 `[FromKeyedServices("price")]`。无返回值重载也支持 `batcherName`。
 
 名称区分大小写，不能为 `null`、空字符串或纯空白。同一请求类型与名称只能注册一条管线，包括不同返回类型的情况。
-默认服务继续使用原有不带名称的重载。配置在注册时确定，可以通过 named options 查看，不支持运行时重配队列。
+默认服务继续使用原有不带名称的重载。各个 Batcher 的参数通过注册回调配置，注册后固定，不支持运行时调整。
 `UsePartitionKey` 仅负责选定 Batcher 内部的请求路由，不负责选择 Batcher，也不保证 Handler 批次串行执行。
 
 [命名与默认注册的性能对比](docs/evaluations/named-batching/README.md)保持请求、响应类型、Handler 和批处理配置一致，
@@ -497,19 +495,19 @@ public sealed class PricesController : ControllerBase
 
 ## 委托 Handler
 
-委托 Handler 适合逻辑较简单的批处理场景，例如批量查询和结果回填。在 `ExecuteAsync` 调用处使用 static lambda、
-static 匿名方法、static 局部函数或 static 方法组，可以将请求提交与处理逻辑放在一起，便于结合调用上下文阅读和修改。
+委托 Handler 适合逻辑较简单的批处理场景，例如批量查询和结果回填。在 `ExecuteAsync` 调用处使用静态 Lambda、
+静态匿名方法、静态局部函数或静态方法组，可以将请求提交与处理逻辑放在一起，便于结合调用上下文阅读和修改。
 处理逻辑较复杂，或需要多处复用、独立组织测试时，更适合使用单独的 `IRequestBatchHandler` 类。
 
 **委托 Handler 已针对稳定调用做过性能优化**：签名检查和通过表达式树编译强类型调用器只发生在首次绑定；
 后续提交优先通过引用比较校验委托，批次执行复用缓存的调用器，不进行反射调用、`DynamicInvoke` 或参数数组构造。
 自动绑定依赖动态代码，不支持 NativeAOT 或裁剪。
 
-现有相同配置的内存 benchmark 中，委托与传统 Handler 的逐条提交均值相差约 1%，内存分配接近，
+现有相同配置的内存 Benchmark 中，委托与传统 Handler 的逐条提交均值相差约 1%，内存分配接近，
 未观察到明显的稳定调用性能退化。该结果不包含首次绑定的编译开销，具体配置和结果见
 [性能对比](docs/evaluations/delegate-handlers/README.md)。
 
-**Handler 必须使用静态实现，不捕获局部变量或实例状态**。lambda、匿名方法和局部函数要显式加 `static`，
+**Handler 必须使用静态实现，不捕获局部变量或实例状态**。Lambda、匿名方法和局部函数要显式加 `static`，
 方法组应指向普通或泛型静态方法；所需服务通过参数注入。
 委托可以直接传入，也可以通过变量、字段、参数、属性或工厂传递，支持显式创建、括号和类型转换。
 
@@ -543,7 +541,7 @@ var prices = await batcher.ExecuteAsync(
     });
 ```
 
-也可以将上面的 lambda 替换为静态方法或静态局部函数。同一管线选择其中一种写法：
+也可以将上面的 Lambda 替换为静态方法或静态局部函数。同一管线选择其中一种写法：
 
 ```csharp
 var price = await batcher.ExecuteAsync(101, HandlePricesAsync);
@@ -561,54 +559,57 @@ static async ValueTask HandlePricesAsync(
 ```
 
 这里复用前文带返回值示例中的 `IPriceStore`，使用时需要注册自己的实现，示例中写作 `PriceStore`。
-无返回值时，使用 `AddDelegateRequestBatcher<TRequest>()` 注册，lambda 首参数改为 `IReadOnlyList<TRequest>`。
+无返回值时，使用 `AddDelegateRequestBatcher<TRequest>()` 注册，Lambda 首参数改为 `IReadOnlyList<TRequest>`。
 两种模式都通过 `ExecuteAsync` 扩展方法支持单条和显式列表提交。
 
 对于 `int`、`string` 这类容易在多个业务中复用的请求类型，建议用 `batcherName` 区分业务管线。
 例如，价格查询使用 `"price"`，其他同样以 `int` 为请求类型的业务使用各自的名称，避免共用管线时发生委托绑定冲突。
 省略 `batcherName` 时，注册的是默认管线。
 
-同一请求类型与名称只能选择一种注册模式：委托模式每次提交都传入 handler；
+同一请求类型与名称只能选择一种注册模式：委托模式每次提交都传入 Handler；
 原有 Handler 类型继续使用原有重载，`IRequestBatcher` 接口不增加成员。
 
-首次有效调用为该管线绑定唯一委托，后续传入相等的委托会复用绑定；传入不同委托会在入队前报错。
-不同的 handler 目标即使代码内容相同，也属于不同 Handler，应使用不同的 `batcherName`。并发首次调用只会绑定一次。
+该管线只绑定一个处理委托，后续传入相等的委托会复用绑定；传入不同委托会在入队前报错。
+不同的 Handler 目标即使代码内容相同，也属于不同 Handler，应使用不同的 `batcherName`。并发首次调用只会绑定一次。
 委托由管线以单例持有，服务参数在每个实际执行批次中注入，不捕获调用方的请求作用域。
 
-首参数必须是对应的批次列表类型。其余参数默认从 DI 解析必需服务，`[FromKeyedServices(key)]` 选择 keyed 服务；
-必须显式指定 key，不支持继承 key。
+首参数必须是对应的批次列表类型。其余参数默认从 DI 解析必需服务，`[FromKeyedServices(key)]` 选择 Keyed 服务；
+必须显式指定 Key，不支持继承 Key。
 Web 应用也可以标注 `[FromServices]`，普通服务按约定注入，因此此标注可省略。Handler 可以完全省略批次生命周期的
-`CancellationToken`；如果声明，只能声明一个，且不得写 `= default` 等默认值。这个注入的 token 由批次共享，
+`CancellationToken`；如果声明，只能声明一个，且不得写 `= default` 等默认值。这个注入的 Token 由批次共享，
 与调用方可选的 `ExecuteAsync` `cancellationToken` 参数不同。支持返回 `void`、`Task` 或 `ValueTask`，拒绝 `async void`
-和带返回值的 Task/ValueTask。每个响应 entry 仍需设置结果；列表即使被拆成多批，也会保留输入顺序、重复和缺失项。
+和带返回值的 Task/ValueTask。每个响应条目仍需设置结果；列表即使被拆成多批，也会保留输入顺序、重复和缺失项。
 
 委托 Handler 和绑定的委托始终是每条管线独立的单例，因此注册不提供 `ServiceLifetime` 参数。注入服务仍遵循各自的
 DI 生命周期：Singleton 在容器内共享，Scoped 在同一批次内共享，Transient 每个参数分别解析。单例 Handler 不缓存
 解析后的服务实例。原有类型 Handler 注册继续遵循显式指定的生命周期。
 
-有服务参数时，每批创建并异步释放独立 DI scope，释放完成后调用方才收到完成结果；没有服务参数则不创建 scope。
+有服务参数时，每批创建并异步释放独立 DI Scope，释放完成后调用方才收到完成结果；没有服务参数则不创建 Scope。
 
 **内置 Analyzer 提供基础的编译期检查**，两个诊断默认都作为编译错误报告：
 
-- `RB0001`：能确定 handler 来自非 static lambda、非静态局部函数或实例方法时，提示改用静态实现。
+- `RB0001`：能确定 Handler 来自非静态 Lambda、非静态局部函数或实例方法时，提示改用静态实现。
 - `RB0002`：检查能确定的委托签名，包括批次列表类型、返回类型、参数修饰符和默认值，
   以及 `CancellationToken` 和 `[FromKeyedServices]` 的使用限制。
 
 委托经过参数、属性或工厂传递后，Analyzer 可能无法确定它的目标。这类写法仍然允许使用，
 调用方应保证最终传入的是静态实现。运行时会验证实际签名、服务绑定和委托是否与已绑定的委托一致，
-但无法可靠区分源码中的 static lambda 与不捕获变量的普通 lambda。
+但无法可靠区分源码中的静态 Lambda 与不捕获变量的普通 Lambda。
 原有 Handler 调用不受影响，使用方也可以禁用 Analyzer。详见[委托 Handler 设计](docs/delegate-handlers-design.md)。
 
 [独立的委托版 PostgreSQL 示例](samples/RequestBatcher.Delegates)使用委托 Handler 完成价格写入和
-`POST /prices/query` 列表查询，每个 static lambda 都从批次 scope 注入 keyed scoped `PriceStore`。
+`POST /prices/query` 列表查询，每个静态 Lambda 都从批次 Scope 注入 Keyed Scoped `PriceStore`。
 [原有示例](samples/RequestBatcher.Deduplication)继续单独展示 Handler 类的写法。
 
 ## 处理语义
 
 ### 完成与失败
 
-- Handler 正常完成时，该处理批次中所有调用方的 `Task` 都会成功完成。
-- Handler 抛出异常时，这些调用方会收到原始异常。
+- Handler 正常完成时，该处理批次中的所有请求均记为成功。一次显式批量提交的 `Task` 仍需等待本次提交中的全部请求，
+  包括分配到其他 Handler 批次的请求。
+- Handler 抛出非取消异常时，该处理批次中的所有请求均以原始异常失败。
+- 带返回值的单条请求遇到 Handler 抛出的 `OperationCanceledException` 时，返回的 Task 为取消状态。
+  等待该 Task 会抛出带原始 Token 的 `TaskCanceledException`，不保留原取消异常的实例、消息和派生类型。
 - RequestBatcher 不会自动重试失败的 Handler。
 - 显式批量重载会等待本次提交中的所有请求；只要涉及的某次 Handler 调用失败，最终 `Task` 就会失败。
 - 一次显式批量提交可能跨越多个 Handler 调用。如果其中多次调用失败，`await` 会按普通 `Task` 语义抛出其中一个
@@ -648,7 +649,7 @@ DI 生命周期：Singleton 在容器内共享，Scoped 在同一批次内共享
 
 ## 依赖注入与日志
 
-`AddRequestBatcher` 会将 Handler、协调器和内部 BufferQueue topic 注册到现有的 `IServiceCollection` 中。应用无需
+`AddRequestBatcher` 会将 Handler、协调器和内部 BufferQueue Topic 注册到现有的 `IServiceCollection` 中。应用无需
 直接配置 BufferQueue，RequestBatcher 也不会创建嵌套的 Service Provider。
 
 `Scoped` 和 `Transient` Handler 会在每个处理批次专属的异步作用域中解析一次。`Singleton` Handler 会跨批次
@@ -713,14 +714,14 @@ Handler 执行不保证顺序，包括 `MaxConcurrency = 1` 的情况。
 **不调用 `UsePartitionKey` 时，所有请求只使用一个 Partition**，不随 CPU 数量或 `MaxConcurrency` 增加。
 单 Partition 仍能连续提供多个并发执行的 Handler 批次。需要提高下游并发时，应调整 `MaxConcurrency`。
 
-**没有按 key 路由的需求时，单 Partition 是更合适的默认选择。** 现有 [Partition benchmark](docs/evaluations/bufferqueue-2.0.3/README.md#issue-6-partitions)
-在 `BatchSize = 64`、`MaxConcurrency = 8` 下对比了 1 个和 8 个 Partition：无 key 场景中，多 Partition 的
+**没有按 Key 路由的需求时，单 Partition 是更合适的默认选择。** 现有 [Partition Benchmark](docs/evaluations/bufferqueue-2.0.3/README.md#issue-6-partitions)
+在 `BatchSize = 64`、`MaxConcurrency = 8` 下对比了 1 个和 8 个 Partition：无 Key 场景中，多 Partition 的
 吞吐量为单 Partition 的 0.97–1.01 倍，没有显示出稳定优势。
 
-在预先入队的 64 个无 key 请求中，单 Partition 形成 1 个批次，8 个 Partition 则形成 8 个批次。保持单
+在预先入队的 64 个无 Key 请求中，单 Partition 形成 1 个批次，8 个 Partition 则形成 8 个批次。保持单
 Partition 可以避免这种批次拆散，减少不满批次的 Handler 调用，同时保留由 `MaxConcurrency` 控制的异步并发能力。
 
-需要按 key 路由时，再通过 `UsePartitionKey` 显式设置 Partition 数量。下面配置使用 8 个队列 Partition，共享
+需要按 Key 路由时，再通过 `UsePartitionKey` 显式设置 Partition 数量。下面配置使用 8 个队列 Partition，共享
 4 个 Handler 执行名额：
 
 ```csharp
@@ -868,18 +869,14 @@ Handler 会在分发调用链上执行，直到完成或遇到尚未完成的异
 
 ## 可观测性
 
-### 执行上下文与链路追踪
-
-后台调度和消费者监控不会继承初始化调用方的执行上下文。Handler 不会继承初始化或提交请求时的 HTTP Activity
-（`Activity.Current`）、日志 scope 或其他 `AsyncLocal` 值。解析 batcher 和等待请求完成后，调用方的上下文保持不变。
-租户标识等业务数据应通过请求显式传递；Handler 内创建的 Activity 会正常跨越其异步等待。Singleton 构造函数遵循
-容器的常规创建规则，不应捕获请求专属状态。
-
 ### OpenTelemetry 集成
 
-核心 [`RequestBatcher`](https://www.nuget.org/packages/RequestBatcher) 包只使用 .NET 内置的 `ActivitySource` 和 `Meter` API，不依赖 OpenTelemetry 包。
-需要 Provider Builder 注册扩展时，可以安装可选的 [`RequestBatcher.OpenTelemetry`](https://www.nuget.org/packages/RequestBatcher.OpenTelemetry) 包；它支持 net8.0/net10.0，声明兼容的
-`RequestBatcher` 最低依赖版本，并要求 OpenTelemetry 1.20.1 或更高版本。两个包独立维护版本号。应用还需要安装所使用的 Hosting 和 Exporter：
+核心 [`RequestBatcher`](https://www.nuget.org/packages/RequestBatcher) 包通过 .NET 内置 API 提供名为
+`RequestBatcher` 的 ActivitySource 和 Meter，不依赖 OpenTelemetry。可选的
+[`RequestBatcher.OpenTelemetry`](https://www.nuget.org/packages/RequestBatcher.OpenTelemetry) 包提供注册扩展，
+并根据请求提交的采样结果决定 Handler 批次是否采样。两个包独立维护版本号。
+
+安装集成包，以及应用需要的 Hosting、Instrument 和 Exporter 包：
 
 ```bash
 dotnet add package RequestBatcher
@@ -889,7 +886,7 @@ dotnet add package OpenTelemetry.Instrumentation.AspNetCore
 dotnet add package OpenTelemetry.Exporter.OpenTelemetryProtocol
 ```
 
-在现有 OpenTelemetry Provider 中同时注册 tracing 和 metrics：
+在应用现有的 OpenTelemetry Provider 中注册 Tracing 和 Metrics：
 
 ```csharp
 using Microsoft.Extensions.DependencyInjection;
@@ -906,109 +903,82 @@ builder.Services.AddOpenTelemetry()
         .AddOtlpExporter());
 ```
 
-仅安装 [`RequestBatcher.OpenTelemetry`](https://www.nuget.org/packages/RequestBatcher.OpenTelemetry) 包不会自动注册 tracing。将 `.AddRequestBatcherInstrumentation()` 加入 tracing provider 后，它会注册
-`RequestBatcher` source，并在应用 sampler 外包装 linked-batch 采样策略。只要创建时的
-`Handle-to-Execute` link context 中有一个带 `Recorded` 标志，就采样 `Handle` 根 span；如果所有参与的 `Execute`
-都未采样，则返回 `Drop`。其他 Activity（包括 `Execute` 和 Handler 子 span）仍使用应用 sampler。
-该扩展的采样规则不受 `SetSampler` 先后顺序影响。若要直接注册 source、完全沿用应用
-采样器且不启用此策略，请使用 `AddSource("RequestBatcher")`；此时独立的 `Handle` 根 span 也由应用 sampler 决定，
-即使 `Execute` 已采样，Handle 批次及其下游子 span 仍可能未采样。ActivitySource 名称为 `RequestBatcher`。
-迁移和采样规则见
-[RequestBatcher.OpenTelemetry README](src/RequestBatcher.OpenTelemetry/README.md)。
+仅安装包不会自动开始采集；需要在使用的 Provider 中注册对应扩展。
 
-`RequestBatcher.Execute` 是调用方当前 span 下的 `Internal` span，覆盖调用方可见的完整过程，包括准入、容量等待、队列停留、
-Handler 执行和结果完成。有监听器时，每个实际分发的非空批次都会尝试创建独立的 `RequestBatcher.Handle` `Consumer` 根 span。
-应用的 sampler 决定 `Execute` 是否采样。启用上述策略后，本批次对应的 `Execute` span 中只要有一个被采样，就采样 `Handle` 根 span，并让
-`Handle` 通过 link 指向本批次全部 `Execute` span，包括未采样的 `Execute`；如果这些 `Execute` span 全部未采样，则不采样
-`Handle` 根 span。Handler 创建的数据库或 HTTP 子 span 仍由应用 sampler 决定；只有 ParentBased sampler
-才会让它们跟随 `Handle` 的采样结果。只有标记为已采样且请求全部 Activity 数据的 `Execute` span，才会添加指向处理其请求的
-`Handle` span 的 link；一次提交跨多个批次时仍可逐一跳转。这个 `Execute` -> `Handle` link 不会改变 `Execute` 的采样决定，
-库也不会修改应用的 HTTP/业务父 span。
-两种 span 的 `requestbatcher.request.type` 都使用公开请求类型的短名（例如 `Int32`），不包含命名空间或内部响应包装类型。
-按请求类型过滤的查询和采样规则也应使用短名。
+### 链路追踪
 
-直接使用 `AddSource("RequestBatcher")` 注册时，采样由应用的 tracing provider 控制。0% 采样仍可能创建用于传播上下文的 Activity，因此开销不等于完全不注册
-RequestBatcher source。被丢弃或仅用于传播的提交会保留有效上下文；同批次有其他 `Execute` span 已采样时，`Handle` 仍能通过 link 指向这个已保留的上下文，
-但该 `Execute` 不添加指向 `Handle` 的 link。RecordOnly 会请求全部 Activity 数据但没有 sampled 标志，`Execute` 同样不添加
-指向 `Handle` 的 link。直接注册 source 时，即使本批次对应的 `Execute` span 全部未采样，
-`Handle` 仍可能被应用采样器独立采样；集成扩展则会在所有参与的 Execute 都未采样时丢弃批次。混合批次保留指向所有不同有效提交上下文的 link。日志、任务完成、
-取消和 Handler 执行保持不变。固定调用元数据会复用，span 时长和任务完成语义保持不变。工作负载和分配开销见
-[20 ms 采样评估](docs/evaluations/tracing-io-overhead/README.md)。
-[采样相关 link 优化对比](docs/evaluations/tracing-io-overhead/sampled-links.md) 记录了当前低采样率下的分配收益和全采样的额外成本，
-没有证明耗时改善。
+| Span | 关注内容 |
+| --- | --- |
+| `RequestBatcher.Execute` | 一次 `ExecuteAsync` 提交，有调用方当前的 Span 时作为它的子 Span，否则自身为根 Span。耗时包含容量等待、排队、Handler 处理和结果完成。 |
+| `RequestBatcher.Handle` | 一次 Handler 批次，是独立链路的根 Span；Handler 内通过 Instrument 采集的数据库和 HTTP 调用显示为它的子 Span。 |
 
-命名注册会在 span 基础名后追加一个空格和公开名称，例如 `RequestBatcher.Execute pricing-queries` 和
-`RequestBatcher.Handle pricing-queries`，同时写入 `requestbatcher.name`。未命名注册保留基础名称并省略此 tag。
+查看链路时，从 `Execute` 沿 Link 跳转到实际处理其请求的 `Handle`。一次提交可以跨多个 Handler 批次，
+一个 Handler 批次也可以合并多次提交的请求。Link 用于在这些链路之间跳转，不会改变 Span 的父子关系，也不保证执行顺序。
 
-为保持兼容，自定义 span 名称查询应使用 `RequestBatcher.Handle`，具名注册在名称后追加空格和后缀，例如
-`RequestBatcher.Handle pricing-queries`。`RequestBatcher` ActivitySource 和 Meter 名称保持稳定；后端中历史写入的
-span 会继续使用旧名称，直到后端保留期清理。
-Link 表示跨队列的因果关系，不代表共享父 span、Trace ID 或执行顺序。Handler 不会继承调用方的执行上下文，需要的请求 scope、baggage
-和其他 `AsyncLocal` 状态应显式传递。
+Named RequestBatcher 会在操作名后追加注册名称，例如 `RequestBatcher.Execute pricing-queries` 和
+`RequestBatcher.Handle pricing-queries`。过滤和查看 Span 时，可以关注这些属性：
+
+- `requestbatcher.name`：配置的 Batcher 名称，未配置时省略。
+- `requestbatcher.request.type`：公开请求类型的短名，例如 `Int32`，不含命名空间。
+- `requestbatcher.batch.size`：一个 Handler 批次中的请求数。
+- `requestbatcher.batch.submission.count`：该 Handler 批次合并了多少次不同的 `ExecuteAsync` 提交。
+  同一次提交的多项请求，在每个批次中只计一次。
+
+Handler 不会继承调用方的 HTTP Span、日志 Scope、Baggage 或其他 `AsyncLocal` 值。
+租户标识等业务数据应通过请求显式传递；Handler 内创建的 Activity 会正常关联到当前批次 Span。
 
 ![RequestBatcher 可观测性模型](docs/diagrams/observability.zh-CN.svg)
 
-#### 采样与上下文传递
+#### 采样
 
-下图假设已安装可选集成包，并在 tracing provider 中注册 `.AddRequestBatcherInstrumentation()`。仅安装包不会自动注册 tracing。
+注册 Tracing 扩展后，应用的 Sampler 决定每个 `Execute` Span 是否采样。
+集成包根据进入当前 Handler 批次的请求所对应的 `Execute` Span，决定 `Handle` 是否采样：
 
-![RequestBatcher 采样与上下文传递流程](docs/diagrams/tracing-sampling.zh-CN.svg)
+| 当前批次对应的 Execute Span | Handle 采样行为 |
+| --- | --- |
+| 至少一个已采样 | 采样该 Handler 批次。 |
+| 全部未采样 | 不采样该 Handler 批次。 |
 
-调用方当前的 HTTP / 业务 span 是 `Execute` 的父 span；没有调用方 span 时，`Execute` 自身就是根 span。
-`Handle` 没有父 span，是 RequestBatcher Handler 处理链路的根 span；Handler 内数据库 / HTTP 操作产生的 span 则以 `Handle` 为父 span。
-HTTP 插桩通过 `traceparent` 将 Handler 所在的批次上下文传播到下游。
+Handler 内数据库和 HTTP 子 Span 仍使用应用的 Sampler。`ParentBasedSampler` 表示子 Span 跟随父 Span 的采样决定，
+没有父 Span 时使用指定的根采样器。例如 `ParentBasedSampler(new AlwaysOnSampler())` 会采样根 Span，
+子 Span 则跟随父级。集成包对独立的 `Handle` 根 Span 使用上表中的规则。
 
-应用的 sampler 决定 `Execute` 是否采样。集成包通过 `Handle` 指向本批次 `Execute` 的 links 读取这些上下文的采样标志：
-只要有一个 `Execute` 被采样，就采样 `Handle`；所有 `Execute` 都未采样时，则不采样 `Handle`。
-混合批次中，`Handle` 通过 link 指向本批次全部有效的 `Execute` 上下文，包括未采样的 `Execute`。
-只有标记为已采样且请求全部 Activity 数据的 `Execute`，才会添加指向处理其请求的 `Handle` span 的 link。
-`RecordOnly` 的 `Execute` 虽然请求全部 Activity 数据，但没有 sampled 标志，因此不添加指向 `Handle` 的 link；这些完成时添加的 link
-不会影响已经做出的采样决定。Handler 的数据库和 HTTP 子 span 仍由应用 sampler 决定；只有 ParentBased sampler 才会让它们跟随 `Handle`。
+也可以选择不安装集成包，直接注册 `AddSource("RequestBatcher")`。此时应用的 Sampler 会独立决定 `Handle`
+是否采样，因此即使 `Execute` 已采样，对应的 Handler 处理链路仍可能缺失。采样、导出及 Link 数量限制也可能导致
+关联不完整；大批次需要保留更多关联时，应调整 SDK 的 Span Link 上限。0% 采样不等于完全关闭 Instrument。
 
-`ParentBasedSampler` 的意思是：**有父 span 时跟随父级，没有父 span 时交给指定的根采样器**。
-例如 `ParentBasedSampler(new AlwaysOnSampler())` 表示父级已采样就采样、父级未采样就不采样、没有父级则采样。
-将内部的根采样器换成比例采样器，比例就只在没有父级时生效；根比例为 0% 也不会覆盖已经被采样的父级。
-`ParentBasedSampler` 不会自动沿 link 继承决定；注册集成扩展时，`Handle` 根 span 改由上述 `Execute` 采样结果决定，
-其 Handler 子 span 再按 ParentBased 的父级 sampled 标志处理。
+详细采样流程图、上下文与 Link 的实现，以及性能评估，见[可观测性设计](docs/observability-design.md)。
 
-项目可观测性示例显式使用 `AlwaysOnSampler`；tracing benchmark 则直接注册 source，使用
-`ParentBasedSampler(new TraceIdRatioBasedSampler(ratio))` 比较不同采样率，没有启用提交关联采样策略。
-图中的应用采样器不绑定这些示例配置。
+### Metrics
 
-未采样的 span 仍可能保留传播用 Activity、关联上下文和完成通知状态，0% 采样不等于完全不注册 source。
-如果已注册的监听器未创建 Execute Activity，已有的调用方上下文在同批次存在其他已采样上下文时，仍能使 `Handle` 添加指向该上下文的 link；没有有效上下文则 `Handle` 不添加提交 link。
-完全没有 RequestBatcher 监听器时会跳过 tracing，`Handle` 也不会添加指向调用方上下文的 link。
-
-批次 Activity 在采样后请求全部数据时，会记录 `requestbatcher.batch.submission.count`，表示进入该次 Handler 调用的不同公开提交数，不是 span 数量。
-一次显式多条提交在每个批次中只计一次；同一父 span 下的不同 Execute 调用分别计数；排队期间取消的请求不计入。
-没有创建 Execute Activity 的提交也会计入。该属性在采样后计算；它只是 span 属性，不是新的 metric 维度。
-
-`MaxConcurrency` 限制的是正在执行的 Handler 批次数量，不是尚未完成的 Execute span 数量。
-例如，1,024 次单条提交可以各自持有 Execute Activity，同时只有八个 Handler 批次执行。
-Activity 的生命周期覆盖整次提交，因此不能按这个并发上限把 tracing 对象当作八个槽位循环复用。
-
-#### Metrics
-
-对应的 `MeterProviderBuilder` 扩展会注册 `RequestBatcher` meter。如果只需要 metrics，可以选择不安装集成包，直接使用
-`AddMeter("RequestBatcher")`；也可以安装 [`RequestBatcher.OpenTelemetry`](https://www.nuget.org/packages/RequestBatcher.OpenTelemetry)
-后使用 metrics 注册扩展。两种方式都支持：
+如果只需要 Metrics，可以选择不安装集成包，直接监听 Meter：
 
 ```csharp
 builder.Services.AddOpenTelemetry()
     .WithMetrics(metrics => metrics.AddMeter("RequestBatcher"));
 ```
 
-Meter 会记录已接收请求、已处理请求、已处理批次数、批次大小和批次
-耗时。Metrics 只使用请求类型和配置的 batcher name 作为维度，不记录请求内容、租户值或 Partition Key；只有监听者订阅
-`RequestBatcher` meter 中对应的指标后才会输出数据。Tracing 和内存中的待处理请求都是尽力而为，进程故障后不会恢复请求。
+也可以安装 [`RequestBatcher.OpenTelemetry`](https://www.nuget.org/packages/RequestBatcher.OpenTelemetry)，
+使用前面示例中的 Metrics `AddRequestBatcherInstrumentation()` 扩展。
 
-请求类型使用公开类型的短名（例如 `Int32`），不包含命名空间或内部响应包装类型；不同命名空间的同名类型会共享此维度，
-需要区分时可配置不同的 batcher name。已有的请求类型标签过滤条件需要改用短名。
-指标名本身已经带有 `requestbatcher.`，例如 `requestbatcher.batches.processed` 在示例中导出为
-`requestbatcher_batches_processed_total`。导出端不要再添加 `requestbatcher` namespace/prefix，否则会出现
-`requestbatcher_requestbatcher_*`。
+| 指标名称 | 类型 | 单位 | 含义 |
+| --- | --- | --- | --- |
+| `requestbatcher.requests.submitted` | `Counter<long>` | `{request}`（请求） | 已接收的请求数。 |
+| `requestbatcher.requests.processed` | `Counter<long>` | `{request}`（请求） | Handler 已处理的请求数，包含失败的处理。 |
+| `requestbatcher.batches.processed` | `Counter<long>` | `{batch}`（批次） | 已处理的 Handler 批次数。 |
+| `requestbatcher.batch.size` | `Histogram<long>` | `{request}`（请求） | 每个 Handler 批次的请求数。 |
+| `requestbatcher.batch.duration` | `Histogram<double>` | `ms`（毫秒） | Handler 批次耗时，包含 Handler 作用域释放。 |
 
-自行使用 `System.Diagnostics.Metrics.MeterListener` 采集时，需要筛选 meter 并显式订阅指标：
+Counter 累加计数；Histogram 记录每个批次的测量值，用于统计批次大小和耗时的分布。
+
+维度只包含请求类型短名（`requestbatcher.request.type`）和可选的 Batcher 名称（`requestbatcher.name`）。
+同名类型会共享请求类型维度，需要区分时可以配置不同的 Batcher 名称。不记录请求内容、租户值或 Partition Key。
+
+指标名称已包含 `requestbatcher.`；示例的 Prometheus Exporter 会生成
+`requestbatcher_batches_processed_total`。导出端不要重复添加 `requestbatcher` 命名空间/前缀，
+以免出现 `requestbatcher_requestbatcher_*`。
+
+自行使用 `System.Diagnostics.Metrics.MeterListener` 采集时，需要显式订阅想采集的指标：
 
 ```csharp
 listener.InstrumentPublished = (instrument, meterListener) =>
@@ -1020,28 +990,25 @@ listener.InstrumentPublished = (instrument, meterListener) =>
 };
 ```
 
-- `InstrumentPublished` 只是通知发现了指标；收到该通知或注册测量值回调，都不等于已经订阅。
-  每个监听者需要对想采集的每个指标调用一次 `EnableMeasurementEvents`，无需每条测量值调用一次。
-  指标至少有一个订阅者时，`Instrument.Enabled` 才为 `true`；RequestBatcher 据此跳过无人监听的指标工作。
-  如需只采集部分指标，可以继续按 `instrument.Name` 筛选。
-- 注册 `long`（请求数、批次数和批次大小）与 `double`（批次耗时）的测量值回调，并在提交请求前调用 `Start()`。
-  让监听者存活到 batcher 关闭完成后，再释放监听者。订阅前的测量值不会补发。
-- 回调在记录指标的线程上同步执行，也可能被多个线程并发调用。生产回调应保持轻量、线程安全，并避免异常向外传播。
-  回调应避免阻塞 I/O。如需在回调返回后使用标签，应复制所需内容，不能保存标签 span。
-  直接使用 listener 时，聚合和导出需要自行实现。
+- 发现指标或注册测量值回调都不等于订阅。每个监听者对想采集的每个指标调用一次 `EnableMeasurementEvents`；
+  如需只采集部分指标，可以按 `instrument.Name` 筛选。
+- 为计数和批次大小注册 `long` 回调，为耗时注册 `double` 回调。在提交请求前调用 `Start()`，
+  并让监听者存活到 Batcher 关闭完成后。订阅前的测量值不会补发。
+- 回调同步执行，也可能被多个线程并发调用，应保持轻量、线程安全，避免阻塞 I/O 和异常向外传播。
+  回调返回后仍要使用的标签需要复制。聚合和导出由自定义 Listener 自行实现。
 
 ## 示例应用
 
 [持续读取可观测性示例](samples/RequestBatcher.Observability/README.md)通过 Docker Compose 启动 Cart、Pricing 两个 Web API、C# 流量生成器、
-PostgreSQL 和 Grafana OTel LGTM。生成器并发提交含 2 到 10 条商品的购物车报价，展示调用总耗时、`Handle` 指向本批次 `Execute` 的 link、
-`Execute` 指向处理它的 `Handle` 的 link，以及下游数据库 span。
+PostgreSQL 和 Grafana OTel LGTM。生成器并发提交含 2 到 10 条商品的购物车报价，展示调用总耗时、`Handle` 指向本批次 `Execute` 的 Link、
+`Execute` 指向处理它的 `Handle` 的 Link，以及下游数据库 Span。
 
 [PostgreSQL Web API 示例](samples/RequestBatcher.Deduplication)包含三个价格操作：
 
 - `POST /prices` 使用未命名的 `IRequestBatcher<PriceUpdate>`，提交完整的结构化 `PriceUpdate` 并写入价格。
-- `GET /prices/{productId}` 在 endpoint 参数上使用 `[FromKeyedServices("price")]` 注入命名的
+- `GET /prices/{productId}` 在 Endpoint 参数上使用 `[FromKeyedServices("price")]` 注入命名的
   `IRequestBatcher<int, decimal?>`，返回单个价格；商品不存在时返回 `404`。
-- `POST /prices/query` 使用同一个命名 Batcher 接收 JSON `int[]`，按输入顺序返回 nullable 价格，保留重复 ID，缺失
+- `POST /prices/query` 使用同一个命名 Batcher 接收 JSON `int[]`，按输入顺序返回可空价格，保留重复 ID，缺失
   商品返回 `null`。
 
 例如先写入商品 `101` 的价格 `17.90`，并假设 `102` 和 `999` 不存在，提交 `[101, 102, 101, 999]` 会返回
@@ -1049,8 +1016,8 @@ PostgreSQL 和 Grafana OTel LGTM。生成器并发提交含 2 到 10 条商品�
 [示例 README](samples/RequestBatcher.Deduplication/README.md)中的 Docker 启动和 curl 步骤。
 
 [独立的委托版 PostgreSQL 示例](samples/RequestBatcher.Delegates)通过 `AddDelegateRequestBatcher` 注册价格写入与
-查询，在 `POST /prices` 和 `POST /prices/query` 的调用处直接传入 static lambda。查询管线名为 `"price"`，接受
-`int` ID、返回 `decimal?`；委托从每个批次的 scope 注入 keyed scoped `PriceStore`，注册时不指定 Handler 生命周期。
+查询，在 `POST /prices` 和 `POST /prices/query` 的调用处直接传入静态 Lambda。查询管线名为 `"price"`，接受
+`int` ID、返回 `decimal?`；委托从每个批次的 Scope 注入 Keyed Scoped `PriceStore`，注册时不指定 Handler 生命周期。
 原示例继续展示 Handler 类的写法。委托版使用独立的 HTTP 和数据库端口，启动及 curl 步骤见其
 [README](samples/RequestBatcher.Delegates/README.md)。
 
