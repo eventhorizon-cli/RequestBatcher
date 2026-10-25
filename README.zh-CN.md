@@ -647,16 +647,13 @@ DI 生命周期：Singleton 在容器内共享，Scoped 在同一批次内共享
 `DisposeAsync` 会停止接收新请求，处理完已经接收的所有提交（包括仍在等待容量的提交），然后释放协调器持有的资源。
 并发或重复调用共享同一次释放操作。通过 `AddRequestBatcher` 注册时，由应用容器负责异步释放。
 
-## 依赖注入与日志
+## 依赖注入
 
 `AddRequestBatcher` 会将 Handler、协调器和内部 BufferQueue Topic 注册到现有的 `IServiceCollection` 中。应用无需
 直接配置 BufferQueue，RequestBatcher 也不会创建嵌套的 Service Provider。
 
 `Scoped` 和 `Transient` Handler 会在每个处理批次专属的异步作用域中解析一次。`Singleton` Handler 会跨批次
 复用；当 `MaxConcurrency > 1` 时，它必须保证线程安全。
-
-日志会通过应用现有的 `Microsoft.Extensions.Logging` 管道写入，类别为
-`RequestBatchCoordinator<TRequest>`。Handler 异常会连同原始 `Exception` 一起记录，日志不会包含请求内容。
 
 ## 请求处理流程
 
@@ -996,6 +993,24 @@ listener.InstrumentPublished = (instrument, meterListener) =>
   并让监听者存活到 Batcher 关闭完成后。订阅前的测量值不会补发。
 - 回调同步执行，也可能被多个线程并发调用，应保持轻量、线程安全，避免阻塞 I/O 和异常向外传播。
   回调返回后仍要使用的标签需要复制。聚合和导出由自定义 Listener 自行实现。
+
+### Logs
+
+内置日志通过应用现有的 `Microsoft.Extensions.Logging` 管道输出，无需安装 OpenTelemetry 集成包。
+日志类别前缀为 `RequestBatcher.RequestBatchCoordinator`；可以在 `appsettings.json` 中用 `RequestBatcher` 前缀统一调整级别：
+
+```json
+{
+  "Logging": {
+    "LogLevel": {
+      "RequestBatcher": "Warning"
+    }
+  }
+}
+```
+
+该配置保留 Warning 及以上级别；Debug 可查看启动和停止日志，Trace 还会记录每批处理的开始与完成。
+Handler 失败日志包含原始异常，库本身不会记录请求内容。
 
 ## 示例应用
 
