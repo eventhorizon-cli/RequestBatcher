@@ -169,11 +169,12 @@ to the HTTP request; the sample does not add automatic retries.
 
 ## Observability
 
-The sample can use the `RequestBatcher` package with the application's OpenTelemetry hosting
+The sample can use [`RequestBatcher.OpenTelemetry`](https://www.nuget.org/packages/RequestBatcher.OpenTelemetry) with the application's OpenTelemetry hosting
 and exporter packages. Register it with `WithTracing(tracing => tracing.AddRequestBatcherInstrumentation())`.
 `RequestBatcher.Execute` measures the full caller wait, while `RequestBatcher.Handle` is an independent Consumer
 span linked to contributing calls. See the [observability guide](../../docs/observability-design.md).
 
-For optional end-to-end validation of the Compose observability sample, see the [integration test guide](../../tests/it/README.md)
-([中文](../../tests/it/README.zh-CN.md)). It reuses the running stack and verifies one Cart `Execute` per HTTP request,
-cross-trace batch links, Pricing/database parent-child spans, and metrics with the explicit integration-test opt-in.
+For optional end-to-end validation of the observability sample, see the [integration test guide](../../tests/it/README.md)
+([中文](../../tests/it/README.zh-CN.md)). With the explicit integration-test opt-in and Docker running, the fixture starts
+an isolated environment through Testcontainers and cleans it up afterward. It verifies one Cart `Execute` per HTTP
+request, cross-trace batch links, Pricing/database parent-child spans, and metrics.

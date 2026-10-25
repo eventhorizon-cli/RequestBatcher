@@ -17,11 +17,11 @@ dotnet add package OpenTelemetry.Exporter.OpenTelemetryProtocol
 
 The package targets net8.0 and net10.0. It declares a minimum compatible `RequestBatcher` dependency and requires
 OpenTelemetry 1.20.1 or later, with no exact-version or upper-version constraint. It uses the application's provider and
-exporter configuration. Registering tracing decorates the application's sampler for RequestBatcher Handle batch roots.
+exporter configuration; it does not create a provider or select an exporter.
 
 ## Registration
 
-Register the source and meter with the application's existing providers:
+Register RequestBatcher with the application's existing tracing and metrics providers:
 
 ```csharp
 using Microsoft.Extensions.DependencyInjection;
@@ -38,48 +38,34 @@ builder.Services.AddOpenTelemetry()
         .AddOtlpExporter());
 ```
 
-Installing [`RequestBatcher.OpenTelemetry`](https://www.nuget.org/packages/RequestBatcher.OpenTelemetry) alone does not register tracing. The example calls `.AddRequestBatcherInstrumentation()` to
-register the stable `RequestBatcher` ActivitySource and decorate the application's sampler with linked-batch sampling.
-The extension samples a `Handle` root whenever any creation-time `Handle-to-Execute` link
-context has the `Recorded` flag and returns `Drop` when every participating `Execute` context is unsampled. Other
-Activities, including `Execute` and handler child spans, still use the application's sampler. Applications that want
-the original sampler to govern batch roots can register `.AddSource("RequestBatcher")` directly instead; a sampled
-`Execute` may then have an unsampled batch and downstream children.
+Installing [`RequestBatcher.OpenTelemetry`](https://www.nuget.org/packages/RequestBatcher.OpenTelemetry) alone does not register tracing. Add
+`.AddRequestBatcherInstrumentation()` to the tracing provider to register the stable `RequestBatcher` ActivitySource and
+enable the sampling behavior below. The metrics extension registers the `RequestBatcher` Meter.
 
 ## Linked-Batch Sampling
 
-Register the tracing extension when the application wants a `Handle` root to be retained whenever at least one
-participating `Execute` context is sampled. The package must be installed and registered explicitly:
+The application's sampler decides whether each `Execute` span is sampled. With the tracing extension registered:
 
-```csharp
-.WithTracing(tracing => tracing
-    .AddRequestBatcherInstrumentation()
-    .AddOtlpExporter())
-```
+| Execute spans represented in a Handler batch | Handle sampling |
+| --- | --- |
+| At least one is sampled | Sample the Handler batch. |
+| All are unsampled | Do not sample the Handler batch. |
 
-The extension decorates the sampler selected by application code or environment configuration through the SDK's public
-`ConfigureSampler` hook. It works whether `SetSampler` is registered before or after the extension. For a recognized
-`RequestBatcher.Handle` Consumer root, including named operation forms and the existing request-type and batch-size
-creation tags, the decorator returns `RecordAndSample` when any creation-time `Handle-to-Execute` link context has
-the `Recorded` flag. If every participating `Execute` context is unsampled, it returns `Drop`. A mixed batch retains all
-distinct valid participating `Execute` contexts that entered processing, including unsampled contexts. If no Execute
-Activity was created, a valid caller context can provide that submission's context. The batch remains an independent
-root; no parent is created from a link. Other Activities, including `Execute` and handler child spans, continue through
-the application's sampler. ParentBased child sampling follows the batch's sampled flag; arbitrary application samplers
-may make their own decisions. The extension does not write Activity flags after creation.
+`Handle` remains an independent trace root. Handler child spans continue through the application's sampler; with a
+ParentBased sampler, those children follow `Handle`. Named instances use the same behavior.
 
-Repeated registration is idempotent. SDK suppression,
-processor/exporter decisions, and link delivery limits still apply, so `RecordAndSample` does not guarantee backend
-delivery.
+You can choose direct `.AddSource("RequestBatcher")` registration without this package. The application's sampler then
+decides `Handle` sampling independently, so a sampled `Execute` may lack its corresponding recorded Handler trace.
 
-For compatibility, custom span-name queries should use `RequestBatcher.Handle` and append a named-registration suffix
-after a space, such as `RequestBatcher.Handle pricing-queries`. The `RequestBatcher` ActivitySource and Meter names
-are stable. Historical backend spans retain their previous names until backend retention removes them.
+For the current contract and detailed tracing flow, see the
+[observability design](https://github.com/eventhorizon-cli/RequestBatcher/blob/main/docs/observability-design.md).
+
+Span names are `RequestBatcher.Execute` and `RequestBatcher.Handle`. Named instances append the registered name after a
+space, such as `RequestBatcher.Handle pricing-queries`.
 
 ## Metrics
 
-If only metrics are needed, you can choose to subscribe to the `RequestBatcher` Meter directly without installing this
-package:
+If only metrics are needed, you can choose direct `RequestBatcher` Meter registration without installing this package:
 
 ```csharp
 builder.Services.AddOpenTelemetry()
@@ -87,8 +73,8 @@ builder.Services.AddOpenTelemetry()
 ```
 
 You can also install [`RequestBatcher.OpenTelemetry`](https://www.nuget.org/packages/RequestBatcher.OpenTelemetry) and use
-`.WithMetrics(metrics => metrics.AddRequestBatcherInstrumentation())`.
-Both options register the same Meter and are supported independently of tracing.
+`.WithMetrics(metrics => metrics.AddRequestBatcherInstrumentation())`. Both options register the same Meter and are
+independent of tracing; the metrics extension only adds the meter.
 
 Applications using `System.Diagnostics.Metrics.MeterListener` instead of the SDK do not need this package. Filter
 `InstrumentPublished` by `instrument.Meter.Name == "RequestBatcher"` and call `EnableMeasurementEvents(instrument)` once

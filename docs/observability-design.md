@@ -1,5 +1,18 @@
 # Observability
 
+## Documentation scope
+
+The root READMEs and both package READMEs describe the application-facing setup and behavior: installing and registering
+the integration, stable source/meter and span names, navigating submission-to-Handler links, batch attributes, the
+sampling policy, execution-context boundaries relevant to application data, and metric collection. Metrics have their
+own subsection, including the direct Meter and custom MeterListener options.
+
+Keep SDK sampler decoration and operation recognition, Activity creation and flags, caller-context fallback,
+creation-time versus completion-time links, completion notifications, allocation behavior, and benchmark setup here
+or in the linked evaluation reports. These implementation details do not belong in the README setup path. The detailed
+sampling diagram below documents those mechanics; the README keeps the span relationship diagram and a short sampling
+table. Registration snippets must not depend on a particular sample's sampler configuration.
+
 ## Contract
 
 RequestBatcher exposes the `RequestBatcher` ActivitySource and meter through built-in .NET APIs. The core package has no
@@ -110,11 +123,14 @@ linked-batch sampling. Parent-based sampling does not automatically follow links
 ### Sampling policy propagation
 
 Core RequestBatcher follows the application's OpenTelemetry SDK sampling configuration and installs no sampler. The
-[sampling diagram](diagrams/tracing-sampling.svg) describes using RequestBatcher.OpenTelemetry with its parameterless
+following diagram describes using RequestBatcher.OpenTelemetry with its parameterless
 tracing extension registered. It shows the package's sampling contract without binding to a particular application sampler, root ratio, or
 sample application code. The caller HTTP or business span is Execute's parent; without a caller
 span, Execute is a root. Handle has no parent and starts an independent trace. It is the parent of the Handler's DB
 and HTTP spans, and HTTP instrumentation propagates that batch context through `traceparent`.
+
+![RequestBatcher sampling and context flow](diagrams/tracing-sampling.svg)
+
 Handle links to the Execute spans whose requests it handles, associating submission with processing. These links
 carry Execute trace/span IDs and sampling flags. At least one sampled Execute context enables links to all participating
 contexts in that batch, including contexts useful for searching unsampled trace logs. When all Execute contexts are

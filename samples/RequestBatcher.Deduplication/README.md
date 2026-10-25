@@ -60,7 +60,7 @@ var prices = await batcher.ExecuteAsync(new[] { 101, 102, 101 });
 ```
 
 Inject that same named pipeline with `[FromKeyedServices("price")] IRequestBatcher<int, decimal?>` on a constructor,
-Controller Action, or Minimal API handler parameter. The [root README](../../README.md#named-batchers-and-primitive-requests)
+Controller Action, or Minimal API handler parameter. The [root README](../../README.md#named-requestbatcher-instances-and-primitive-requests)
 shows complete constructor and Controller Action examples; this sample uses Minimal API handler parameters in `Program.cs`.
 See Microsoft's official documentation for
 [constructor injection with keyed services](https://learn.microsoft.com/en-us/dotnet/core/extensions/dependency-injection/overview#keyed-services)
@@ -125,12 +125,13 @@ RequestBatcher is in-process, so pending requests are not recovered after a proc
 
 ## Observability
 
-For OpenTelemetry in this Web API, install `RequestBatcher` with your OpenTelemetry hosting and exporter
+For OpenTelemetry in this Web API, install [`RequestBatcher.OpenTelemetry`](https://www.nuget.org/packages/RequestBatcher.OpenTelemetry) with your OpenTelemetry hosting and exporter
 packages, then call `AddRequestBatcherInstrumentation()` from `WithTracing`. `RequestBatcher.Execute` covers the
 caller's full wait; each `RequestBatcher.Handle` span is an independent Consumer trace linked to the calls that
 entered that batch. See the [observability guide](../../docs/observability-design.md) and
 [correlation diagram](../../docs/diagrams/observability.svg).
 
-For optional end-to-end validation of the Compose observability sample, see the [integration test guide](../../tests/it/README.md)
-([中文](../../tests/it/README.zh-CN.md)). It reuses the running stack and verifies one Cart `Execute` per HTTP request,
-cross-trace batch links, Pricing/database parent-child spans, and metrics with the explicit integration-test opt-in.
+For optional end-to-end validation of the observability sample, see the [integration test guide](../../tests/it/README.md)
+([中文](../../tests/it/README.zh-CN.md)). With the explicit integration-test opt-in and Docker running, the fixture starts
+an isolated environment through Testcontainers and cleans it up afterward. It verifies one Cart `Execute` per HTTP
+request, cross-trace batch links, Pricing/database parent-child spans, and metrics.

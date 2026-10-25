@@ -132,8 +132,8 @@ The [sample source](https://github.com/eventhorizon-cli/RequestBatcher/tree/main
 shows the two Web APIs, the traffic generator, and their telemetry setup.
 
 For optional end-to-end validation, see the [integration test guide](../../tests/it/README.md)
-([中文](../../tests/it/README.zh-CN.md)). It reuses the running Compose stack and explicitly enables
-`REQUESTBATCHER_RUN_INTEGRATION_TESTS=1` while checking one Cart `Execute` per HTTP request, cross-trace batch links,
-Pricing/database parent-child spans, and metrics.
+([中文](../../tests/it/README.zh-CN.md)). Set `REQUESTBATCHER_RUN_INTEGRATION_TESTS=1` to let the integration-test
+fixture create an isolated environment through Testcontainers and clean it up after validation. It checks one Cart
+`Execute` per HTTP request, cross-trace batch links, Pricing/database parent-child spans, and metrics.
 
 RequestBatcher is in-process and does not recover pending requests after a process failure.
