@@ -50,6 +50,8 @@ internal sealed class DelegateRequestBatchHandler<TRequest>(
 
         if (binding.RequiresServices)
         {
+            // Parameter metadata identifies services, not their registered lifetimes. IServiceProvider
+            // has no standard lifetime query, so even singleton-only parameters use a batch scope.
             return HandleInScopeAsync(binding, requests, cancellationToken);
         }
 
@@ -76,6 +78,8 @@ internal sealed class DelegateRequestBatchHandler<TRequest>(
         CancellationToken cancellationToken)
     {
         // Keep injected services alive through invocation and validation; completion also waits for async disposal.
+        // This scope belongs to the batch, not a submitting caller. Singletons remain shared;
+        // container-owned singletons are disposed with the root, not with this batch scope.
         await using var scope = scopeFactory.CreateAsyncScope();
         await binding.Invoke(requests, scope.ServiceProvider, cancellationToken).ConfigureAwait(false);
         validateResponses?.Invoke(requests);

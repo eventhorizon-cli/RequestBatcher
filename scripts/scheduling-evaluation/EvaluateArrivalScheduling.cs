@@ -1,4 +1,4 @@
-#:property TargetFramework=net8.0
+#:property TargetFramework=net10.0
 #:property PublishAot=false
 #:property LangVersion=12.0
 
@@ -17,6 +17,7 @@ internal static class EvaluateArrivalScheduling
     [
         "src/RequestBatcher",
         "src/RequestBatcher.Analyzers",
+        "src/RequestBatcher.OpenTelemetry",
         "tests/RequestBatcher.Benchmarks",
     ];
 
@@ -93,7 +94,7 @@ internal static class EvaluateArrivalScheduling
             ["OnePartition"] = true,
             ["Database"] = options.Database,
             ["DatabaseOperation"] = options.DatabaseOperation,
-            ["Isolation"] = "Copied src, analyzer, and benchmark project; hooks and derived core package references patched only in scratch",
+            ["Isolation"] = "Copied core, OpenTelemetry, analyzer, and benchmark projects; hooks and derived core package references patched only in scratch",
         };
         WriteJson(Path.Combine(output, "environment.json"), metadata);
         Console.WriteLine($"Isolated source: {scratch}");
@@ -104,7 +105,7 @@ internal static class EvaluateArrivalScheduling
             {
                 var workloads = options.Database == "none" ? options.Workloads : [options.Database];
                 var cases = CreateCases(options, workloads);
-                var dll = Path.Combine(scratch, "tests/RequestBatcher.Benchmarks/bin/Release/net8.0/RequestBatcher.Benchmarks.dll");
+                var dll = Path.Combine(scratch, "tests/RequestBatcher.Benchmarks/bin/Release/net10.0/RequestBatcher.Benchmarks.dll");
                 await RunCasesAsync(cases, dll, scratch, environment, output, options.TimeoutSeconds)
                     .ConfigureAwait(false);
             }

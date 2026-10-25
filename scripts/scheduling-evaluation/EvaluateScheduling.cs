@@ -1,4 +1,4 @@
-#:property TargetFramework=net8.0
+#:property TargetFramework=net10.0
 #:property PublishAot=false
 #:property LangVersion=12.0
 
@@ -27,7 +27,7 @@ internal static class EvaluateScheduling
             Directory.CreateDirectory(output);
 
             await PrepareAsync(repository, scratch).ConfigureAwait(false);
-            var probe = Path.Combine(scratch, "Probe", "bin", "Release", "net8.0", "RequestBatcher.Benchmarks.dll");
+            var probe = Path.Combine(scratch, "Probe", "bin", "Release", "net10.0", "RequestBatcher.Benchmarks.dll");
             var environment = new Dictionary<string, object?>
             {
                 ["Scratch"] = scratch,
@@ -198,7 +198,7 @@ internal static class EvaluateScheduling
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net8.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <AssemblyName>RequestBatcher.Benchmarks</AssemblyName>
   </PropertyGroup>
   <ItemGroup>

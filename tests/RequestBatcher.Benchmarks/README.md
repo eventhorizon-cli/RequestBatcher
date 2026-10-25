@@ -5,7 +5,7 @@ Use this index to find benchmark source and execution requirements. Recorded mea
 
 ## Run
 
-Run from the repository root using the SDK selected by `global.json`. Benchmarks target .NET 8.
+Run from the repository root using the SDK selected by `global.json`. Benchmarks target .NET 10 and require its runtime.
 List available methods, then select a class or method with `--filter`:
 
 ```bash
@@ -82,12 +82,14 @@ These benchmarks run in process without Docker. Some use simulated asynchronous 
 | [QueuePullBenchmarks](InMemory/QueuePullBenchmarks.cs) | One consumer drains 4,096 prefilled BufferQueue records; batch limits 32/128 and 1/16 partitions. See the [pull capacity evaluation](../../docs/evaluations/queue-pull-capacity/README.md). |
 | [DispatchCapacityBenchmarks](InMemory/DispatchCapacityBenchmarks.cs) | Direct full batches versus public explicit submission, synchronous/20 ms handlers, concurrency 8/32 and 1/16 partitions. |
 | [PartitionKeySubmissionBenchmarks](InMemory/PartitionKeySubmissionBenchmarks.cs) | Concurrent single submissions versus one explicit submission under partition-key routing. |
+| [PartitionSubmissionBenchmarks](InMemory/PartitionSubmissionBenchmarks.cs) | Two independent experiments: filter `*SingleSubmissions*` or `*ExplicitSubmissions*`. Each varies Partition 1/4 at BatchSize 64 and MaxConcurrency 4; validates every response, group order, exactly-once handling and concurrency. Records batch formation, query work, time and allocation. See the [evaluation](../../docs/evaluations/partition-submissions/README.md). |
 | [ExplicitSubmissionBenchmarks](InMemory/ExplicitSubmissionBenchmarks.cs) | Explicit groups versus mixed single/group submissions. |
 | [NamedBatchingBenchmarks](InMemory/NamedBatchingBenchmarks.cs) | Named versus unnamed pipelines, single/list submissions and singleton/scoped handlers. |
 | [DelegateHandlerBenchmarks](InMemory/DelegateHandlerBenchmarks.cs) | Typed versus cached delegate handlers, with and without scoped service injection. |
 | [DelegateRequestOnlyBenchmarks](InMemory/DelegateRequestOnlyBenchmarks.cs) | Typed singleton versus no-service delegate; 256-request single/list waves with Yield or 20 ms work and per-ID validation. |
 | [DelegateForwardingBenchmarks](InMemory/DelegateForwardingBenchmarks.cs) | Isolated typed/delegate forwarding of an incomplete operation, with exactly-once completion validation. |
 | [DelegateServiceInjectionBenchmarks](InMemory/DelegateServiceInjectionBenchmarks.cs) | Typed/delegate service injection across dependency lifetimes and ordinary/keyed services. |
+| [BatchScopeBenchmarks](InMemory/BatchScopeBenchmarks.cs) | Per-batch scope creation/disposal, root versus scoped singleton resolution, and actual delegate invocation with a singleton. Synchronous isolated work with identity, result, exactly-once processing and disposal checks; no Docker. See the [scope cost evaluation](../../docs/evaluations/delegate-handlers/batch-scope/README.md). |
 | [DelegateReturnTypeBenchmarks](InMemory/DelegateReturnTypeBenchmarks.cs) | Typed handlers versus delegates returning void, completed Task or completed ValueTask. |
 | [DelegateFirstSubmissionBenchmarks](InMemory/DelegateFirstSubmissionBenchmarks.cs) | First submission through a fresh typed/delegate pipeline; includes initial delegate binding, excludes provider creation. |
 

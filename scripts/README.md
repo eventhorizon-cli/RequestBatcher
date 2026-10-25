@@ -14,7 +14,8 @@ Run commands from the repository root with the SDK selected by [global.json](../
 dotnet run --file scripts/CompareTracingIoOverhead.cs -- --help
 ```
 
-The current script entry points target .NET 8 and require its runtime as well as the repository SDK. A runner's target
+The current script entry points and generated evaluation projects target .NET 10 with C# 12 and require the .NET 10
+runtime as well as the repository SDK. A runner's target
 framework does not determine the runtime of every benchmark it launches; check the script and evaluation guide before
 comparing measurements. Package restore requires access to the configured NuGet sources.
 
@@ -33,6 +34,13 @@ respectively, under the system temporary directory. Profiling requires the addit
 its guide. These tracing tools do not require Docker or an OpenTelemetry backend.
 
 ## Scheduling Experiments
+
+[`SummarizePartitionSubmissions.cs`](SummarizePartitionSubmissions.cs) validates and summarizes one independent
+partition-count experiment. Run `dotnet run --file scripts/SummarizePartitionSubmissions.cs -- <benchmark-report.csv>
+<benchmark.log> <output-directory>`. It requires six cases for one submission API and two successful process diagnostics
+per case, checks request/batch counts and correctness flags, and writes `summary.csv` plus `diagnostics.jsonl`.
+Run it separately for single and explicit submissions. See the [partition evaluation](../docs/evaluations/partition-submissions/README.md)
+for commands, workload definitions and throughput units.
 
 These tools build isolated source copies with experimental scheduling instrumentation. Read their guides before
 interpreting the results; the copies are evaluation fixtures rather than supported production configuration.

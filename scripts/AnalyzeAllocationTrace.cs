@@ -1,4 +1,4 @@
-#:property TargetFramework=net8.0
+#:property TargetFramework=net10.0
 #:property PublishAot=false
 #:property LangVersion=12.0
 #:package Microsoft.Diagnostics.Tracing.TraceEvent@3.1.21

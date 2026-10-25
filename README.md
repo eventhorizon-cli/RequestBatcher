@@ -761,19 +761,15 @@ No ordering is guaranteed for handler execution, including when `MaxConcurrency 
 
 ### Partition Count and Concurrency
 
-**Without `UsePartitionKey`, or with `partitionCount: 1`, all requests use one partition**, regardless of CPU count or
-`MaxConcurrency`. Setting the count to `1` clears any previously configured key and skips the selector. Counts below `1`
+**`UsePartitionKey(selector, partitionCount: 1)` behaves the same at runtime as leaving `UsePartitionKey` unconfigured.**
+Setting the count to `1` clears any previously configured key and skips the selector. Counts below `1`
 throw `ArgumentOutOfRangeException`; the selector must still be non-null.
 A single partition can still supply several concurrent handler batches. Increase `MaxConcurrency` when you need more
 downstream concurrency.
 
-**One partition is the preferred default when keyed routing is not needed.** The existing [partition benchmark](docs/evaluations/bufferqueue-2.0.3/README.md#issue-6-partitions)
-compared one and eight partitions at `BatchSize = 64` and `MaxConcurrency = 8`. In the unkeyed cases, eight partitions
-achieved 0.97–1.01 times the throughput of one partition, showing no consistent advantage.
-
-A preloaded burst of 64 unkeyed requests produced one batch with one partition, versus eight batches with eight
-partitions. Keeping one partition avoids this fragmentation and reduces partially filled handler calls while retaining
-asynchronous concurrency controlled by `MaxConcurrency`.
+**One partition is the preferred default when keyed routing is not needed.** More partitions do not add Handler
+execution slots. Each pull reads only one partition, so splitting a small burst can increase partially filled
+batches and downstream calls. The independent experiments below measure this tradeoff with the current implementation.
 
 When keyed routing is needed, set the partition count explicitly through `UsePartitionKey`. This configuration uses
 eight queue partitions sharing four handler execution slots:
@@ -797,6 +793,66 @@ builder.Services.AddRequestBatcher<ProductQueryItem, ProductBatchHandler>(
 `MaxConcurrency` limits concurrent handler batches for one registered batcher, with all partitions sharing those slots.
 A single partition can also supply several concurrent batches.
 
+### Partition Measurements: Single Submissions
+
+**These are single-machine tests with simulated downstream latency, for reference only. Repeat the measurements
+with your own deployment, request distribution and real downstream service.**
+
+Test environment: Apple M2 Max, macOS 27.0.1, .NET 10.0.0 (Arm64), and BenchmarkDotNet 0.15.8.
+In-process asynchronous delays simulate downstream latency.
+
+The two submission APIs were measured as **independent experiments**, each comparing one and four partitions at
+`BatchSize = 64`, `MaxConcurrency = 4`, and eight producers. Each chart compares partition counts within a workload;
+workloads differ in request count and downstream cost. The charts show **in-process QPS**, counting Execute calls.
+
+**One request queries one product**; several requests may query the same product. A **wave** is one round in which
+eight producers submit their requests and await every response before the next round. The chart shows **total requests
+per wave** and their product distribution. Each `ExecuteAsync(request)` call submits one request; producers start
+their calls before awaiting the results. Each Handler invocation processes at most 64 requests, with at most four
+Handler batches executing concurrently.
+
+![Single-submission throughput with one and four partitions](docs/assets/partition-submission-single.svg)
+
+**Changing the partition count from one to four** spreads small request sets across queues and creates more partial
+batches. Each batch still makes a downstream call and occupies an execution slot, so the same wave requires more
+calls and waiting. **Prefer one partition for this workload** so queued requests can merge.
+
+With enough unique-product requests, both configurations form nearly full batches and additional partitions show
+no established benefit. Repeated-product requests gain more opportunities for within-batch deduplication when routed
+by product. The simulated downstream latency increases with distinct product count, so less duplicate querying helps.
+**Check that the real downstream benefits from this locality before adding partitions.**
+
+### Partition Measurements: Explicit Batch Submissions
+
+**This is also a single-machine simulation for reference; validate it in your own environment.**
+
+Each `ExecuteAsync(requests)` call submits a list: a 96-request wave makes eight calls of 12 requests; a 4,096-request
+wave makes 128 calls of 32 requests. A call can split across Handler batches, and separate calls can share a Handler
+batch. The Handler limit remains 64 requests per batch.
+Compare one and four partitions within this experiment, not against the single-submission chart.
+
+![Explicit-submission throughput with one and four partitions](docs/assets/partition-submission-explicit.svg)
+
+**Explicit submission enqueues a group without fixing the Handler batch boundary.** Changing the partition count from
+one to four still splits small request sets into more Handler calls. Grouping requests at the caller therefore does
+not prevent partial batches caused by partition routing. Use explicit submission when a list is already available,
+and choose partition count according to the batches actually formed.
+
+For large unique-product workloads, more partitions show no established timing benefit and increase allocation.
+The repeated-product workload benefits from fewer duplicate downstream queries while retaining nearly full Handler
+batches. **Evaluate actual batch size, downstream work and allocation together**, rather than choosing partitions from
+the caller's list size alone.
+
+The distinct-item workloads simulate 12 ms per downstream batch call. The repeated-key workload uses 128 product
+IDs and `8 + ceil(distinct IDs in the Handler batch / 8)` ms, so querying fewer distinct items reduces simulated RT.
+This benefit depends on the workload and downstream behavior; equal keys can still span batches.
+**Start with one partition by default. Add partitions cautiously, only when measured benefits outweigh smaller batches and routing costs.**
+Already having a list is a reason to use explicit submission, not a reason to add partitions. Both APIs still form
+Handler batches from requests available in one partition.
+
+See the [complete evaluation](docs/evaluations/partition-submissions/README.md) for item QPS, Handler batch QPS, allocations, confidence intervals,
+correctness checks and limitations. Each chart shows means; time uncertainty is reported separately.
+
 ### Sizing `MaxConcurrency` with Little's Law
 
 For queries, assume one handler batch makes one downstream batch call and other handler work takes negligible time.
@@ -809,6 +865,12 @@ MaxConcurrency_per_pod ≈ ceil(average concurrent calls / pod_count × headroom
 
 Use monitoring data for an existing operation, or expected values and load-test results for a new one. QPS and RT must
 refer to the same operation and configuration. Recalibrate with production metrics after launch.
+
+Distinguish Execute call QPS, request-item QPS and Handler batch QPS. One explicit submission may contain many items
+and span several Handler batches. Under sustained backlog, a rough Handler
+capacity estimate is `MaxConcurrency / mean Handler seconds`; item capacity additionally depends on the **actual**
+mean batch size. Use measured batch size in this estimate rather than configured `BatchSize`.
+Leave headroom and verify the downstream can sustain the load.
 
 For example, six active pods making a combined 1,920 downstream batch queries per second at a mean RT of 50 ms have
 about `1,920 × 0.050 = 96` concurrent calls on average. With even traffic distribution, that is `96 / 6 = 16` per pod.
@@ -1012,6 +1074,8 @@ The integration determines `Handle` sampling from the `Execute` spans whose requ
 | --- | --- |
 | At least one is sampled | Sample the Handler batch. |
 | All are unsampled | Do not sample the Handler batch. |
+
+![Sampling with the RequestBatcher OpenTelemetry integration](docs/diagrams/tracing-sampling.svg)
 
 Handler database and HTTP child spans still use the application's sampler. With `ParentBasedSampler`, children
 follow their parent's sampling decision; spans without a parent use its configured root sampler.

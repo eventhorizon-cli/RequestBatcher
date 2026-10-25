@@ -1,5 +1,10 @@
 # Typed versus delegate handlers
 
+The [batch scope cost evaluation](batch-scope/README.md) separately measures scope
+creation/disposal and singleton service resolution. The service-injection matrix
+below uses scoped typed handlers even when the dependency itself is singleton;
+it does not isolate the cost of an otherwise unnecessary scope.
+
 `DelegateHandlerBenchmarks` compares the existing typed-handler path with
 `AddDelegateRequestBatcher` and the `ExecuteAsync` delegate extensions. Each pair
 uses `int` requests and responses, the same business logic, a 256-request wave,

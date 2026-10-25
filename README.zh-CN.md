@@ -52,7 +52,7 @@ RequestBatcher 基于 [BufferQueue](https://github.com/eventhorizon-cli/BufferQu
 **只有所有分配的 Partition 都没有数据时，才等待下一次通知。**
 
 这个过程不依赖定时轮询，也没有固定的收集窗口。有空闲名额时，等待主要来自唤醒和调度；名额占满时，请求仍需排队。
-`BatchSize` 只限制每批的最大数量：低流量时一批可能只有一个请求，突发流量时则可能合并同一 Partition 中的多个请求。
+`BatchSize` 只限制每批的最大数量：低流量时一批可能只有一个请求，请求短时间集中到达时则可能合并同一 Partition 中的多个请求。
 
 ![机会式合并流程图](docs/assets/request-batcher-opportunistic-merging.zh-CN.svg)
 
@@ -71,7 +71,7 @@ RequestBatcher 基于 [BufferQueue](https://github.com/eventhorizon-cli/BufferQu
 等价查询也更容易去重，无需处理写入副作用。前提是请求彼此独立、可以接受在内存中短暂排队，且下游一次处理多项确实更高效：
 
 - 按多个 ID 批量查询数据库、批量读取缓存，或调用下游批量查询接口；
-- 需要限制内部队列容量和下游并发量的短时流量突发；
+- 请求在短时间内大量到达，需要限制内部队列容量和下游并发量；
 - 调用方取消时，只需要撤销尚未分发的请求；已分发的操作应继续执行并返回实际处理结果；
 - 可以在同一处理批次内合并相关请求，且正确性不依赖 Handler 执行顺序。
 
@@ -706,21 +706,19 @@ DI 生命周期：Singleton 在容器内共享，Scoped 在同一批次内共享
 | `MaxConcurrency` | `1` | Handler 批次最大并发数；它始终是 Handler 并发上限，与按键路由的 Partition 数量相互独立。 |
 | `MaxPendingRequests` | `8192` | 内部 BufferQueue 中尚未被拉取执行的请求容量上限。 |
 | `FullMode` | `Wait` | 队列空间不足时，`Wait` 等待空位，`Fail` 立即拒绝本次提交。 |
-| `UsePartitionKey(selector, partitionCount)` | 未配置（单 Partition） | 配置按键路由和显式 Partition 数量；`partitionCount` 必须大于 1，相同键值的请求进入同一 Partition。 |
+| `UsePartitionKey(selector, partitionCount)` | 未配置（单 Partition） | `partitionCount` 至少为 1；设为 1 时关闭按 Key 路由且不调用选择器，大于 1 时将相同键值的请求路由到同一 Partition。 |
 
 Handler 执行不保证顺序，包括 `MaxConcurrency = 1` 的情况。
 
 ### Partition 数量与并发数
 
-**不调用 `UsePartitionKey` 时，所有请求只使用一个 Partition**，不随 CPU 数量或 `MaxConcurrency` 增加。
+**`UsePartitionKey(selector, partitionCount: 1)` 与不配置 `UsePartitionKey` 的运行行为相同。**
+设置为 `1` 会清除已配置的 Key 路由且不调用选择器；小于 `1` 会抛出 `ArgumentOutOfRangeException`，选择器仍不能为 `null`。
 单 Partition 仍能连续提供多个并发执行的 Handler 批次。需要提高下游并发时，应调整 `MaxConcurrency`。
 
-**没有按 Key 路由的需求时，单 Partition 是更合适的默认选择。** 现有 [Partition Benchmark](docs/evaluations/bufferqueue-2.0.3/README.md#issue-6-partitions)
-在 `BatchSize = 64`、`MaxConcurrency = 8` 下对比了 1 个和 8 个 Partition：无 Key 场景中，多 Partition 的
-吞吐量为单 Partition 的 0.97–1.01 倍，没有显示出稳定优势。
-
-在预先入队的 64 个无 Key 请求中，单 Partition 形成 1 个批次，8 个 Partition 则形成 8 个批次。保持单
-Partition 可以避免这种批次拆散，减少不满批次的 Handler 调用，同时保留由 `MaxConcurrency` 控制的异步并发能力。
+**没有按 Key 路由的需求时，单 Partition 是更合适的默认选择。** 增加 Partition 不会增加 Handler 执行名额。
+每次拉取只读取一个 Partition，把短时间集中提交的少量请求分散到多个 Partition 可能增加不满批次和下游调用。下面的两个独立实验
+使用当前实现测量这种取舍。
 
 需要按 Key 路由时，再通过 `UsePartitionKey` 显式设置 Partition 数量。下面配置使用 8 个队列 Partition，共享
 4 个 Handler 执行名额：
@@ -743,6 +741,60 @@ builder.Services.AddRequestBatcher<ProductQueryItem, ProductBatchHandler>(
 `partitionCount` 决定请求分布在哪些队列中，相同键值始终路由到同一 Partition。`MaxConcurrency` 限制同一个
 批处理服务中同时执行的 Handler 批次数，所有 Partition 共享这些名额。同一 Partition 也可以同时执行多个批次。
 
+### Partition 实测：单条提交
+
+**以下是单机、模拟下游耗时的测试，结果仅供参考；请结合自己的部署环境、请求分布和真实下游重新压测。**
+
+压测环境：Apple M2 Max、macOS 27.0.1、.NET 10.0.0（Arm64），使用 BenchmarkDotNet 0.15.8；
+下游耗时通过进程内异步延迟模拟。
+
+两种提交 API 分成**两个独立实验**，各自在 `BatchSize = 64`、`MaxConcurrency = 4`、8 个生产者下比较
+1 个与 4 个 Partition。图中只比较同一负载下的 Partition 配置；不同负载的请求数和下游耗时模型不同。
+纵轴是**进程内 QPS**，按 Execute 调用次数统计。
+
+这里的**一个请求指查询一个商品**，同一个商品可以对应多个请求。**一轮**指 8 个生产者集中提交各自的请求，
+等全部响应返回后，再开始下一轮。图中的请求数是**每轮提交的总数**，商品分布也标在图中。
+`ExecuteAsync(request)` 每次只提交一个请求，生产者连续发起调用后统一等待结果。
+每次 Handler 最多处理 64 个请求，同时最多执行 4 个 Handler 批次。
+
+![单条提交在一个与四个 Partition 下的吞吐](docs/assets/partition-submission-single.zh-CN.svg)
+
+**Partition 数量从 1 个改为 4 个后**，少量集中提交的请求被分散到不同队列，更容易形成小批次。
+每批仍需一次下游调用，并占用一个执行名额，因此处理同一轮请求需要更多次调用和等待。
+**这类场景应优先保持单 Partition**，让已经排队的请求更容易合并。
+
+请求充足且没有重复商品时，两种配置都能形成接近上限的批次，增加 Partition 没有显示出稳定收益。
+重复商品请求较多时，按商品路由提高了批内去重机会；本次模型的下游耗时随去重后的商品数增加，
+所以减少重复查询带来了收益。**选择多 Partition 前，应确认真实下游也能从这种局部性中获益。**
+
+### Partition 实测：显式批量提交
+
+**本组同样是单机模拟测试，仅供参考，请在自己的环境复测。**
+
+`ExecuteAsync(requests)` 每次提交一个请求列表。每轮 96 个请求分为 8 次调用，每次提交 12 个请求；
+每轮 4,096 个请求分为 128 次调用，每次提交 32 个请求。一次调用可能拆成多个 Handler 批次，
+不同调用也可能合并到同一个 Handler 批次；Handler 每批最多 64 个请求的上限不变。
+本实验只比较自己的 1/4 个 Partition，不与单条提交图横向比较。
+
+![显式批量提交在一个与四个 Partition 下的吞吐](docs/assets/partition-submission-explicit.zh-CN.svg)
+
+**显式提交会批量入队，但不会固定 Handler 的批次边界。** Partition 数量从 1 个改为 4 个后，
+少量请求仍会被拆散成更多 Handler 调用，所以“调用方已经分好组”并不能避免队列分区带来的小批次。
+已有请求列表时可以使用显式批量提交，Partition 数量仍应按实际合并效果选择。
+
+大量无重复请求下，更多 Partition 没有带来稳定的耗时收益，分配反而增加。
+重复商品场景的收益来自下游重复查询减少，同时仍保持了接近上限的 Handler 批次。
+因此应**同时观察实际批大小、下游查询量和分配**，不能只看提交列表大小或分区数量。
+
+无重复负载模拟每次下游批量调用固定 12 ms；重复 Key 负载使用 128 个商品 ID，
+耗时模型为 `8 + ceil(当前 Handler 批次去重后项数 / 8)` ms，因此查询项数减少会缩短模拟 RT。
+这一收益取决于数据分布和下游行为，相同 Key 的请求仍可能分散到不同批次。
+**默认从 1 个 Partition 开始，谨慎增加 Partition；只有实测收益超过小批次和路由开销时再采用。**
+调用方已经持有列表时可以显式批量提交，但不因此需要更多 Partition；两种 API 都只合并同一 Partition 中当前可用的请求。
+
+请求项 QPS、Handler 批次 QPS、分配、置信区间、正确性校验和局限见[完整评估](docs/evaluations/partition-submissions/README.md)。
+图中展示均值，耗时的不确定性在报告中单独列出。
+
 ### 用利特尔法则（Little’s Law）估算 `MaxConcurrency`
 
 以查询为例，假设一个 Handler 批次对应一次下游批量查询，且 Handler 的其他耗时可忽略。
@@ -755,6 +807,11 @@ builder.Services.AddRequestBatcher<ProductQueryItem, ProductBatchHandler>(
 
 已有功能可以取监控数据，新功能可以先用预期值或压测结果；QPS 和 RT 必须来自同一种操作、同一组配置。
 上线后再用实际指标校准。
+
+区分 Execute 调用 QPS、请求项 QPS 和 Handler 批次 QPS。一次显式提交可以包含多项，也可能拆成多个 Handler 批次。
+持续有积压时，可以用 `MaxConcurrency / Handler 平均耗时（秒）` 粗估 Handler 批次处理能力；
+请求项处理能力还要乘以**实际平均批大小**。估算时使用实际批大小，而不是配置的 `BatchSize`。
+需要留出余量，并验证下游能持续承受该负载。
 
 例如，6 个活跃 Pod 的下游批量查询合计为 1,920 QPS，平均 RT 为 50 ms，
 对应的平均并发调用数约为 `1,920 × 0.050 = 96`。流量均匀分配时，每 Pod 平均约 `96 / 6 = 16` 个并发调用。
@@ -804,7 +861,7 @@ Partition 数量和消费速度都会影响合并效果，应从较少的 Partit
 ### 用压测验证合并与去重收益
 
 以原来每次批量查询 20 个商品为基线，保持请求数据、到达速率、重复比例、热点分布及下游资源限制一致，
-覆盖低流量、正常流量和突发流量，重点比较：
+覆盖低流量、正常流量和请求短时间大量到达的情况，重点比较：
 
 - **工作量**：实际每批项数、去重后商品数、下游调用次数和查询总项数（跨批重复查询仍计数）。
 - **延迟与吞吐**：下游及 Handler 平均 RT、调用方端到端 P95/P99、排队时间、吞吐量及错误和限流情况。
@@ -816,7 +873,7 @@ Partition 数量和消费速度都会影响合并效果，应从较少的 Partit
 **目标是减少下游工作量，同时满足延迟和资源要求**，不以批次越大或下游 QPS 越低为唯一标准。
 
 `MaxPendingRequests` 控制队列容量，可按 `单个批处理服务的请求项数/秒 × 可接受排队时间` 估算，
-再用突发流量验证接收延迟和内存占用。
+再用短时间大量到达的请求验证接收延迟和内存占用。
 
 ## Partition Key 路由
 
@@ -828,7 +885,7 @@ options.UsePartitionKey(query => query.ProductId, partitionCount: 8);
 ```
 
 值相同的有限整数数值键，或值相同的非 `null` 字符串键，会进入指定数量中的同一 Partition。不同键值仍可能落入
-同一 Partition，因此键值与 Partition 不是一一对应关系。`partitionCount` 必须大于 1。
+同一 Partition，因此键值与 Partition 不是一一对应关系。`partitionCount` 至少为 1，设为 1 时关闭按 Key 路由。
 
 Partition 路由只决定请求进入哪个 Partition：它不会强制同一键值的全部请求进入同一个处理批次，也不会自动去重。
 它提供了一个路由边界，不提供执行顺序或互斥保证。
@@ -854,8 +911,8 @@ Partition 路由只决定请求进入哪个 Partition：它不会强制同一键
 
 | 配置 | 请求如何路由 | 调度行为 |
 | --- | --- | --- |
-| 未配置 `UsePartitionKey` | 所有请求进入同一个 Partition，避免将无关请求分散到多个队列。 | 批次共享全局执行名额；单个 Partition 可以连续提供多个异步批次。 |
-| 配置 `UsePartitionKey(selector, partitionCount)` | 有限整数数值键或非 `null` 字符串键将相同值路由到指定 Partition；不同键仍可能共享 Partition。 | 相同键值的不同 Handler 批次仍可同时分发执行。 |
+| 未配置 `UsePartitionKey`，或 `partitionCount: 1` | 所有请求进入同一个 Partition，不调用 Key 选择器，避免将无关请求分散到多个队列。 | 批次共享全局执行名额；单个 Partition 可以连续提供多个异步批次。 |
+| 配置 `UsePartitionKey(selector, partitionCount)`，且数量大于 1 | 有限整数数值键或非 `null` 字符串键将相同值路由到指定 Partition；不同键仍可能共享 Partition。 | 相同键值的不同 Handler 批次仍可同时分发执行。 |
 
 RequestBatcher 不提供全局、Partition 内或 Partition Key 级别的 Handler 执行顺序保证。Partition Key 只决定队列
 路由，不能用于串行化处理。
@@ -939,6 +996,8 @@ Handler 不会继承调用方的 HTTP Span、日志 Scope、Baggage 或其他 `A
 | --- | --- |
 | 至少一个已采样 | 采样该 Handler 批次。 |
 | 全部未采样 | 不采样该 Handler 批次。 |
+
+![安装 RequestBatcher OpenTelemetry 集成后的采样规则](docs/diagrams/tracing-sampling.zh-CN.svg)
 
 Handler 内数据库和 HTTP 子 Span 仍使用应用的 Sampler。`ParentBasedSampler` 表示子 Span 跟随父 Span 的采样决定，
 没有父 Span 时使用指定的根采样器。例如 `ParentBasedSampler(new AlwaysOnSampler())` 会采样根 Span，
