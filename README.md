@@ -690,7 +690,7 @@ on the number of callers waiting for capacity:
 capacity), then releases coordinator-owned resources. Concurrent and repeated disposal calls share the same operation.
 When registered through `AddRequestBatcher`, the application container owns async disposal.
 
-## Dependency Injection and Logging
+## Dependency Injection
 
 `AddRequestBatcher` registers the handler, coordinator, and internal BufferQueue topic in the application's existing
 `IServiceCollection`. The application does not configure BufferQueue directly, and RequestBatcher never builds a
@@ -698,10 +698,6 @@ nested service provider.
 
 Scoped and transient handlers are resolved once per handler batch in an asynchronous scope. A singleton handler is
 reused across batches and must be thread-safe when `MaxConcurrency > 1`.
-
-Logs use the application's `Microsoft.Extensions.Logging` pipeline under the category
-`RequestBatchCoordinator<TRequest>`. Handler failures are logged with their original exception, and request payloads
-are not logged.
 
 ## Request Processing Flow
 
@@ -1074,6 +1070,19 @@ listener.InstrumentPublished = (instrument, meterListener) =>
 - Callbacks run synchronously and may run concurrently. Keep them lightweight and thread-safe, avoid blocking I/O,
   and prevent exceptions from escaping. Copy any tags needed after the callback returns. Custom listeners provide
   their own aggregation and export.
+
+### Logs
+
+Built-in logs use the application's `Microsoft.Extensions.Logging` pipeline; no OpenTelemetry integration package is
+required. The category prefix is `RequestBatcher.RequestBatchCoordinator`. Configure the whole library in
+`appsettings.json`:
+
+```json
+{"Logging":{"LogLevel":{"RequestBatcher":"Warning"}}}
+```
+
+`Warning` retains Warning and more severe logs. Use `Debug` for startup and shutdown diagnostics, or `Trace` to also
+see each batch start and completion. Handler failures include the original exception; request payloads are not logged.
 
 ## Sample Application
 

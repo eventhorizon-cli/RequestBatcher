@@ -990,6 +990,19 @@ listener.InstrumentPublished = (instrument, meterListener) =>
   and prevent exceptions from escaping. Copy any tags needed after the callback returns. Custom listeners provide
   their own aggregation and export.
 
+### Logs
+
+Built-in logs use the application's `Microsoft.Extensions.Logging` pipeline; no OpenTelemetry integration package is
+required. The category prefix is `RequestBatcher.RequestBatchCoordinator`. Configure the whole library in
+`appsettings.json`:
+
+```json
+{"Logging":{"LogLevel":{"RequestBatcher":"Warning"}}}
+```
+
+`Warning` retains Warning and more severe logs. Use `Debug` for startup and shutdown diagnostics, or `Trace` to also
+see each batch start and completion. Handler failures include the original exception; request payloads are not logged.
+
 ## Sample Application
 
 The [continuous-read observability sample](https://github.com/eventhorizon-cli/RequestBatcher/blob/main/samples/RequestBatcher.Observability/README.md) starts the Cart and Pricing Web APIs, a C# traffic generator, PostgreSQL,
