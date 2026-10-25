@@ -8,6 +8,7 @@ The temporary checkout is retained so its exact patched source and build output
 can be inspected. The runner prints its path and records it in `environment.json`;
 remove that directory after inspection, including after a failed campaign.
 `--prepare-only` retains the compiled copy without running measurements.
+The script and generated projects target .NET 10 with C# 12.
 
 The probe compares direct dispatch with the isolated offload path for `fast`,
 `io` (`Task.Delay(1)`), fixed CPU-prefix, and blocking-prefix handlers. The

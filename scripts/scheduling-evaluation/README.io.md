@@ -2,6 +2,8 @@
 
 Run from the repository root:
 
+The script and its temporary Probe and Server projects target .NET 10 with C# 12.
+
 ```bash
 dotnet run --file scripts/scheduling-evaluation/EvaluateHttpScheduling.cs -- --output artifacts/http-scheduling-evaluation
 ```

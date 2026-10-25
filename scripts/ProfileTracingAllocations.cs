@@ -1,4 +1,4 @@
-#:property TargetFramework=net8.0
+#:property TargetFramework=net10.0
 #:property PublishAot=false
 #:property LangVersion=12.0
 #:project ../tests/RequestBatcher.Benchmarks/RequestBatcher.Benchmarks.csproj

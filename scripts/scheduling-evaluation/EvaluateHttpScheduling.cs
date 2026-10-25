@@ -1,4 +1,4 @@
-#:property TargetFramework=net8.0
+#:property TargetFramework=net10.0
 #:property PublishAot=false
 #:property LangVersion=12.0
 
@@ -51,7 +51,7 @@ internal static class EvaluateHttpScheduling
             await File.WriteAllTextAsync(Path.Combine(serverDirectory, "Server.csproj"),
                 """
 <Project Sdk="Microsoft.NET.Sdk.Web">
-  <PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup>
+  <PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup>
 </Project>
 """).ConfigureAwait(false);
 
@@ -85,7 +85,7 @@ internal static class EvaluateHttpScheduling
                 environmentPath,
                 environment.ToJsonString(new JsonSerializerOptions { WriteIndented = true }) + "\n").ConfigureAwait(false);
 
-            var serverPath = Path.Combine(scratch, "Server", "bin", "Release", "net8.0", "Server.dll");
+            var serverPath = Path.Combine(scratch, "Server", "bin", "Release", "net10.0", "Server.dll");
             using var server = StartProcess(scratch, processEnvironment, "dotnet",
                 [serverPath, "--urls", url], Path.Combine(output, "server.log"));
             try
@@ -108,7 +108,7 @@ internal static class EvaluateHttpScheduling
 
                 new Random(3901).Shuffle(CollectionsMarshal.AsSpan(probes));
                 await using var measurements = new JsonLinesWriter(Path.Combine(output, "measurements.jsonl"));
-                var probePath = Path.Combine(scratch, "Probe", "bin", "Release", "net8.0", "RequestBatcher.Benchmarks.dll");
+                var probePath = Path.Combine(scratch, "Probe", "bin", "Release", "net10.0", "RequestBatcher.Benchmarks.dll");
                 for (var index = 0; index < probes.Count; index++)
                 {
                     var probe = probes[index];

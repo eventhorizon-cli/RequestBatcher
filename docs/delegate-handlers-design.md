@@ -90,6 +90,28 @@ response validation and scope disposal. Exceptions, cancellation after dispatch,
 draining and capacity release reuse the existing behavior. RequestBatcher remains
 in-process and does not recover accepted work after process failure.
 
+The scope decision depends on whether the delegate requests services, not on their
+registered lifetimes. `IServiceProvider` has no standard lifetime-query API;
+`IServiceProviderIsService` only reports service availability. The binding records
+parameter types and explicit service keys without inferring container lifetimes.
+Consequently, a delegate whose parameters all resolve to singletons still owns one
+scope per batch. The container reuses those singletons; container-owned singletons
+are disposed with the root provider, not the batch scope. Scoped and disposable transient
+dependencies remain owned by the batch scope, including services resolved through
+an injected `IServiceProvider`. No batch scope, scoped service, or transient service
+instance is shared across concurrent batches by the forwarding handler; singleton
+instances remain shared according to container lifetime semantics.
+
+ASP.NET Core Middleware and MVC Action method injection use the HTTP request's
+`RequestServices` provider. RequestBatcher batches may combine multiple callers
+and do not have a shared HTTP request scope, so the batch owns this boundary.
+Typed singleton handlers already bypass batch scope creation because their lifetime
+is explicitly supplied at registration. This scope policy changes no public API
+or completion behavior; lifetime tests cover singleton reuse and root-owned disposal,
+per-batch scoped/transient disposal, and scope elision for service-free delegates.
+The [batch scope evaluation](evaluations/delegate-handlers/batch-scope/README.md)
+isolates creation and disposal costs from queueing and downstream work.
+
 For request-only delegates without service parameters, the forwarding handler returns
 the invoker's original `ValueTask` directly. The consumer awaits it before completing
 requests and returning the execution slot. Response delegates retain post-invocation

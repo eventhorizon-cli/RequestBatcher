@@ -7,6 +7,8 @@ PostgreSQL/Redis comparisons, see the [arrival-rate probe](README.arrival.md).
 
 Run from the repository root with the SDK selected by `global.json`:
 
+The script and every temporary evaluation project it generates target .NET 10 and C# 12.
+
 ```bash
 dotnet run --file scripts/scheduling-evaluation/EvaluateScheduling.cs -- --output artifacts/scheduling-evaluation
 ```

@@ -330,8 +330,11 @@ The implementation must add or adjust deterministic tests for:
 
 ## Evaluation Evidence
 
-The [BufferQueue 2.0.3 evaluation](evaluations/bufferqueue-2.0.3/README.md) compares
-partition counts and handler offloading with controlled in-memory workloads.
+The [partition submission evaluation](evaluations/partition-submissions/README.md)
+varies partition count independently for single and explicit submissions while
+holding batch size and handler concurrency fixed. The
+[queue pull evaluation](evaluations/queue-pull-capacity/README.md) checks dispatch
+capacity with asynchronous workloads.
 These measurements are evidence for tradeoffs, not throughput guarantees.
 The [paced-arrival evaluation](evaluations/arrival-scheduling/README.md) adds
 caller latency, occupied-slot wall time, batch formation, and PostgreSQL/Redis

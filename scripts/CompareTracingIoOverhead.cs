@@ -1,4 +1,4 @@
-#:property TargetFramework=net8.0
+#:property TargetFramework=net10.0
 #:property PublishAot=false
 #:property LangVersion=12.0
 
@@ -110,7 +110,7 @@ internal static class CompareTracingIoOverhead
                     <Project Sdk="Microsoft.NET.Sdk">
                       <PropertyGroup>
                         <OutputType>Exe</OutputType>
-                        <TargetFramework>net8.0</TargetFramework>
+                        <TargetFramework>net10.0</TargetFramework>
                       </PropertyGroup>
                       <ItemGroup>
                         <PackageReference Include="BenchmarkDotNet" Version="0.15.8" />

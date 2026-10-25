@@ -5,9 +5,7 @@ Find reports by question; versions, workloads, and limitations are documented in
 ## Batching, Concurrency, and Deduplication
 
 - [deduplication-concurrency](deduplication-concurrency/README.md): compares batch size, concurrency, in-batch deduplication, `Task.WhenAll`, and submission size (simulated I/O).
-- [partition-key-submissions](partition-key-submissions/README.md): compares explicit batch submission with per-item submission followed by `Task.WhenAll` (in-process).
-- [delay-overhead](delay-overhead/README.md): compares direct calls, direct batching, bounded batching, and RequestBatcher processing cost (simulated I/O).
-- [bufferqueue-2.0.3](bufferqueue-2.0.3/README.md): measures how partition count, direct dispatch, and controlled `Task.Run` affect batch processing (in-process).
+- [partition-submissions](partition-submissions/README.md): independently measures single and explicit submission APIs with one/four partitions at fixed batch size and handler concurrency, including throughput, batch formation and duplicate-query work.
 - [bufferqueue-2.1.0](bufferqueue-2.1.0/README.md): compares BufferQueue 2.0.3 and 2.1.0 with matched RequestBatcher source and the 20 ms tracing sampling matrix.
 
 ## Scheduling and External I/O
@@ -22,6 +20,7 @@ Find reports by question; versions, workloads, and limitations are documented in
 - [named-batching](named-batching/README.md): compares named and unnamed batchers, single-item and explicit-list submission, and handler lifetimes (in-process).
 - [delegate-handlers](delegate-handlers/README.md): compares delegate and typed handlers across service injection, return types, and batch configurations (in-process).
 - [request-only delegate forwarding](delegate-handlers/request-only-forwarding/README.md): compares allocation before and after removing an async wrapper, including simulated 20 ms work.
+- [batch scope cost](delegate-handlers/batch-scope/README.md): isolates scope creation/disposal and singleton service resolution, including the actual delegate forwarding path.
 
 ## Completion Paths and Allocation
 
@@ -33,10 +32,10 @@ Find reports by question; versions, workloads, and limitations are documented in
 
 ## Observability
 
-RequestBatcher exposes optional `RequestBatcher.Execute` and `RequestBatcher.Handle` spans through the
-`RequestBatcher` adapter. The reports indexed here describe their recorded workloads and do not claim
-to have run with the new tracing instrumentation. Read the [observability design](../observability-design.md) for
-correlation and configuration guidance.
+RequestBatcher exposes optional `RequestBatcher.Execute` and `RequestBatcher.Handle` spans through its
+`RequestBatcher` ActivitySource. Each report identifies its measured version and listener/provider configuration;
+historical baseline results do not describe the current implementation. Read the
+[observability design](../observability-design.md) for correlation and configuration guidance.
 
 The [tracing-overhead evaluation](tracing-overhead/README.md) measures the disabled, sampled-out, and recorded paths
 separately; its results are the reference for instrumentation cost.
