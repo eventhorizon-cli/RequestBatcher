@@ -93,6 +93,26 @@ public sealed class BatchSubmissionCompletionTests
     }
 
     [Fact]
+    public async Task CompleteCanceled_InterfaceCall_WaitsForAllItemsAndUsesSubmissionToken()
+    {
+        using var submissionCancellation = new CancellationTokenSource();
+        using var itemCancellation = new CancellationTokenSource();
+        submissionCancellation.Cancel();
+        itemCancellation.Cancel();
+        var subject = new BatchSubmissionCompletion(2, submissionCancellation.Token);
+        IRequestCompletion completion = subject;
+
+        completion.CompleteCanceled(itemCancellation.Token);
+
+        Assert.False(subject.Task.IsCompleted);
+        completion.CompleteSuccessfully();
+
+        var exception = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => subject.Task);
+        Assert.True(subject.Task.IsCanceled);
+        Assert.Equal(submissionCancellation.Token, exception.CancellationToken);
+    }
+
+    [Fact]
     public async Task CompleteRequest_MixedOutcomes_WaitsForAllAndPreservesEveryFailure()
     {
         var first = new FirstTestException();

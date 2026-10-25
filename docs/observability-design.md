@@ -80,6 +80,21 @@ the instruments return immediately and do not allocate metric tags or timing
 state. Payload values, tenant identifiers, partition keys, and exception text
 are never metric dimensions.
 
+The submission and batch entry points check subscription state before preparing tags or timing state. At batch
+completion, instruments share one tag list and check Enabled individually so unsubscribed instruments skip their
+recording calls. Enabled reflects listener subscriptions, not application configuration. The duration check also
+avoids computing elapsed time when it is not collected. These guards are an early exit, not a correctness requirement;
+the instruments also handle an empty subscription list internally. No measured speedup is attributed to the individual
+guards. Unit tests cover subscribing to each metric independently.
+
+Applications can collect metrics directly through MeterListener without OpenTelemetry. Documentation must distinguish
+instrument discovery through InstrumentPublished from subscription through EnableMeasurementEvents: discovery and
+callback registration alone do not enable measurements. The listener selects the RequestBatcher Meter and enables each
+desired instrument once, registers long and double callbacks, and starts before the work to be measured. Callbacks run
+synchronously on recording threads, can run concurrently, and must remain lightweight and thread-safe. Subscriptions
+do not replay earlier measurements; keep the listener alive through batcher shutdown and then dispose it. Unit tests
+cover discovery without subscription, enable/disable transitions, and independent subscriptions from multiple listeners.
+
 ## Context and outcomes
 
 Batch correlation uses ActivityContext and a shared per-submission collection of batch contexts. Handler execution

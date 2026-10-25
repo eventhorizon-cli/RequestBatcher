@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using BufferQueue;
@@ -101,6 +102,96 @@ public sealed class ConsumerFailureTests
         bufferQueue.VerifyAll();
     }
 
+    [Fact]
+    public async Task ExecuteAsync_ConsumerFailsBeforeDispatch_FailsQueuedRequestsAndRejectsLaterSubmissions()
+    {
+        var expected = new TestConsumerException();
+        var allSubmitted = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var submittedRequests = new ConcurrentQueue<PendingBatchRequest<int>>();
+        var submittedCount = 0;
+        var handlerInvocationCount = 0;
+        var producer = new Mock<IBufferProducer<PendingBatchRequest<int>>>(MockBehavior.Strict);
+        producer
+            .Setup(candidate => candidate.ProduceAsync(
+                It.IsAny<PendingBatchRequest<int>>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((PendingBatchRequest<int> request, CancellationToken _) =>
+            {
+                submittedRequests.Enqueue(request);
+                if (Interlocked.Increment(ref submittedCount) == 2)
+                {
+                    allSubmitted.SetResult();
+                }
+
+                return ValueTask.CompletedTask;
+            });
+        var consumer = new Mock<IBufferPullConsumer<PendingBatchRequest<int>>>(MockBehavior.Strict);
+        consumer
+            .Setup(candidate => candidate.ConsumeAsync(It.IsAny<CancellationToken>()))
+            .Returns((CancellationToken cancellationToken) =>
+                ConsumeAndThrowAsync<PendingBatchRequest<int>>(allSubmitted.Task, expected, cancellationToken));
+
+        var bufferQueue = new Mock<IBufferQueue>(MockBehavior.Strict);
+        bufferQueue
+            .Setup(candidate => candidate.GetProducer<PendingBatchRequest<int>>(
+                RequestBatchCoordinator<int>.TopicName))
+            .Returns(producer.Object);
+        bufferQueue
+            .Setup(candidate => candidate.CreatePullConsumers<PendingBatchRequest<int>>(
+                It.Is<BufferPullConsumerOptions>(options =>
+                    options.TopicName == RequestBatchCoordinator<int>.TopicName &&
+                    options.GroupName == RequestBatchCoordinator<int>.ConsumerGroupName &&
+                    options.BatchSize == 128 &&
+                    options.AutoCommit),
+                1))
+            .Returns([consumer.Object]);
+
+        var coordinator = new RequestBatchCoordinator<int>(
+            bufferQueue.Object,
+            (_, _) =>
+            {
+                Interlocked.Increment(ref handlerInvocationCount);
+                return ValueTask.CompletedTask;
+            },
+            Options.Create(new RequestBatchOptions<int>()),
+            NullLogger<RequestBatchCoordinator<int>>.Instance);
+
+        var first = coordinator.ExecuteAsync(1);
+        var second = coordinator.ExecuteAsync(2);
+        await allSubmitted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var firstException = await Assert.ThrowsAsync<TestConsumerException>(
+            () => first.WaitAsync(TimeSpan.FromSeconds(5)));
+        var secondException = await Assert.ThrowsAsync<TestConsumerException>(
+            () => second.WaitAsync(TimeSpan.FromSeconds(5)));
+
+        Assert.Same(expected, firstException);
+        Assert.Same(expected, secondException);
+        Assert.Equal(0, Volatile.Read(ref handlerInvocationCount));
+        Assert.Equal(2, submittedRequests.Count);
+        foreach (var request in submittedRequests)
+        {
+            var requestException = await Assert.ThrowsAsync<TestConsumerException>(
+                () => request.Completion.WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.Same(expected, requestException);
+        }
+
+        await Assert.ThrowsAsync<ObjectDisposedException>(
+            () => coordinator.ExecuteAsync(3).WaitAsync(TimeSpan.FromSeconds(5)));
+
+        var firstDisposeException = await Assert.ThrowsAsync<TestConsumerException>(
+            () => coordinator.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5)));
+        var secondDisposeException = await Assert.ThrowsAsync<TestConsumerException>(
+            () => coordinator.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5)));
+
+        Assert.Same(expected, firstDisposeException);
+        Assert.Same(expected, secondDisposeException);
+        producer.VerifyAll();
+        consumer.VerifyAll();
+        bufferQueue.VerifyAll();
+    }
+
     private static async IAsyncEnumerable<IReadOnlyList<T>> ConsumeAndFailAsync<T>(
         Task<T> submitted,
         Exception exception,
@@ -108,6 +199,20 @@ public sealed class ConsumerFailureTests
     {
         var request = await submitted.WaitAsync(cancellationToken);
         yield return new FailingReadOnlyList<T>(request, exception);
+    }
+
+    private static async IAsyncEnumerable<IReadOnlyList<T>> ConsumeAndThrowAsync<T>(
+        Task submitted,
+        Exception exception,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        await submitted.WaitAsync(cancellationToken);
+        if (exception is not null)
+        {
+            throw exception;
+        }
+
+        yield break;
     }
 
     private sealed class FailingReadOnlyList<T>(T request, Exception exception) : IReadOnlyList<T>

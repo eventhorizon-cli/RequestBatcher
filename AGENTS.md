@@ -83,6 +83,18 @@ You are an AI coding assistant for this repository.
 ## Testing and validation
 
 - For performance work, see the [benchmark index](tests/RequestBatcher.Benchmarks/README.md) and [evaluation index](docs/evaluations/README.md).
+- Before committing changes to critical paths, run the relevant benchmarks and correctness stress tests listed in the
+  benchmark index. Critical paths include single/batch admission, queue adapters, batching and dispatch, capacity and
+  concurrency control, response completion, cancellation and draining, tracing/metrics hot paths, and scheduling
+  dependency upgrades. Select workloads that exercise the changed path; documentation-only and test-only changes do
+  not require unrelated performance runs.
+- Correctness stress tests must validate every response against its originating request, explicit-submission response
+  order, and exactly-once handling; completion counts alone are insufficient. Include concurrent single, explicit-batch,
+  and mixed submissions when changing shared submission, scheduling, or completion logic.
+- For critical-path changes, record the commands, runtime/configuration, workload, correctness outcome, and relevant
+  time/allocation results in the appropriate evaluation report. Performance optimizations require a comparable baseline
+  and measured results before committing; a benchmark smoke run alone does not demonstrate a gain. Keep the benchmark
+  index current when adding or changing stress workloads.
 - Add or update deterministic unit tests for behavior changes, especially batching, concurrency, cancellation,
   backpressure, exception fan-out, and shutdown.
 - Use strict Moq mocks for interaction boundaries. Prefer stateful test collaborators only when a mock would obscure

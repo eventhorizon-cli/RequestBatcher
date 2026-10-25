@@ -90,6 +90,16 @@ You can also install [`RequestBatcher.OpenTelemetry`](https://www.nuget.org/pack
 `.WithMetrics(metrics => metrics.AddRequestBatcherInstrumentation())`.
 Both options register the same Meter and are supported independently of tracing.
 
+Applications using `System.Diagnostics.Metrics.MeterListener` instead of the SDK do not need this package. Filter
+`InstrumentPublished` by `instrument.Meter.Name == "RequestBatcher"` and call `EnableMeasurementEvents(instrument)` once
+per desired instrument per listener. Discovery notifications and measurement callback registration alone do not enable
+measurements. Register `long` callbacks for counts and batch size, and a `double` callback for batch duration. Start the
+listener before submitting work and keep it alive until the batcher has shut down; subscriptions do not replay earlier
+measurements. Recording invokes callbacks synchronously and potentially concurrently, so keep callbacks lightweight,
+thread-safe, and prevent exceptions from escaping. Copy any tags needed after the callback returns. Custom listeners
+provide their own aggregation and export. See the core package's
+[metrics guidance](https://www.nuget.org/packages/RequestBatcher#readme-body-tab) for a listener example.
+
 ## Migration
 
 The registration extensions moved from the core package to `RequestBatcher.OpenTelemetry`. Existing users of

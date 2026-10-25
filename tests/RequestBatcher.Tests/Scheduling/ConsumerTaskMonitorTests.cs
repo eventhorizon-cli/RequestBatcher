@@ -6,6 +6,28 @@ namespace RequestBatcher.Tests.Scheduling;
 public sealed class ConsumerTaskMonitorTests
 {
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Monitor_ConsumerStopsWithoutShutdown_ReportsUnexpectedStop(bool canceled)
+    {
+        var consumer = canceled ? Task.FromCanceled(new CancellationToken(true)) : Task.CompletedTask;
+        Exception? reported = null;
+        var callbackCount = 0;
+        var monitor = new ConsumerTaskMonitor([consumer], CancellationToken.None, "test-request", exception =>
+        {
+            reported = exception;
+            Interlocked.Increment(ref callbackCount);
+        });
+
+        await monitor.Completion.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var actual = Assert.IsType<InvalidOperationException>(reported);
+        Assert.Contains("test-request", actual.Message);
+        Assert.Contains("stopped unexpectedly", actual.Message);
+        Assert.Equal(1, callbackCount);
+    }
+
+    [Theory]
     [InlineData(true, false)]
     [InlineData(false, false)]
     [InlineData(true, true)]

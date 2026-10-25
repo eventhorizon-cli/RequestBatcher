@@ -34,6 +34,7 @@ internal static class RequestBatcherMetrics
 
     internal static void RecordSubmitted(string requestTypeName, string? batcherName, int count)
     {
+        // Avoid preparing tags when no listener subscribes to this instrument.
         if (!_submittedRequests.Enabled)
         {
             return;
@@ -44,6 +45,7 @@ internal static class RequestBatcherMetrics
 
     internal static BatchScope StartBatch(string requestTypeName, string? batcherName, int count)
     {
+        // Skip tag preparation and timing state when none of the batch instruments has subscribers.
         if (!_processedBatches.Enabled && !_processedRequests.Enabled && !_batchSize.Enabled && !_batchDuration.Enabled)
         {
             return default;
@@ -93,6 +95,8 @@ internal static class RequestBatcherMetrics
                 tags.Add("requestbatcher.name", _batcherName);
             }
 
+            // Enabled reflects each instrument's listener subscriptions, which can differ within the same Meter.
+            // These guards skip unsubscribed recording calls; the instruments also handle no subscribers internally.
             if (_processedBatches.Enabled)
             {
                 _processedBatches.Add(1, tags);
@@ -108,6 +112,7 @@ internal static class RequestBatcherMetrics
                 _batchSize.Record(_count, tags);
             }
 
+            // Keep elapsed-time calculation inside the guard so it runs only when duration is collected.
             if (_batchDuration.Enabled)
             {
                 _batchDuration.Record(Stopwatch.GetElapsedTime(_startedAt).TotalMilliseconds, tags);

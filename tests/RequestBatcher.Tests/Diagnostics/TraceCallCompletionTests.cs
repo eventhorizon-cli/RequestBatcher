@@ -173,16 +173,17 @@ public sealed class TraceCallCompletionTests
         Assert.Equal(typeof(InvalidOperationException).FullName, span.GetTagItem("error.type"));
     }
 
-    [Fact]
-    public async Task TraceCall_GenericPendingCancellation_PreservesTokenAndEndsSpan()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task TraceCall_PendingCancellation_PreservesTokenAndEndsSpan(bool useGeneric)
     {
         using var capture = new ActivityCapture();
         using var cancellation = new CancellationTokenSource();
         var pending = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
-        var returned = RequestBatcherTracing.TraceCall(
-            new RequestBatcherTraceMetadata("pending-canceled"),
-            pending.Task,
-            static (task, _) => task);
+        var returned = useGeneric
+            ? InvokeGeneric("pending-canceled", pending.Task)
+            : InvokeVoid("pending-canceled", pending.Task);
 
         Assert.False(returned.IsCompleted);
         pending.SetCanceled(cancellation.Token);

@@ -665,6 +665,22 @@ public sealed class RequestBatchCoordinatorTests
     }
 
     [Theory]
+    [InlineData(-1)]
+    [InlineData(2)]
+    public void AddRequestBatcher_UnknownFullMode_Throws(int fullMode)
+    {
+        var services = new ServiceCollection();
+
+        var exception = Assert.Throws<ArgumentOutOfRangeException>(() =>
+            services.AddRequestBatcher<int, TestBatchHandler<int>>(
+                ServiceLifetime.Singleton,
+                options => options.FullMode = (RequestBatchFullMode)fullMode));
+
+        Assert.Equal(nameof(RequestBatchOptions<int>.FullMode), exception.ParamName);
+        Assert.Equal((RequestBatchFullMode)fullMode, exception.ActualValue);
+    }
+
+    [Theory]
     [InlineData(0)]
     [InlineData(-1)]
     public void UsePartitionKey_PartitionCountLessThanOne_Throws(int partitionCount)
