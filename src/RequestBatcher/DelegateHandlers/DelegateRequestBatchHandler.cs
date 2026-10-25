@@ -48,8 +48,15 @@ internal sealed class DelegateRequestBatchHandler<TRequest>(
         var binding = Volatile.Read(ref _binding) ??
             throw new InvalidOperationException("The delegate handler has not been bound.");
 
-        return binding.RequiresServices
-            ? HandleInScopeAsync(binding, requests, cancellationToken)
+        if (binding.RequiresServices)
+        {
+            return HandleInScopeAsync(binding, requests, cancellationToken);
+        }
+
+        // Return the actual operation, which the consumer still awaits before completing requests.
+        // Only response handlers need post-invocation work on the no-service path.
+        return validateResponses is null
+            ? binding.Invoke(requests, null!, cancellationToken)
             : HandleWithoutServicesAsync(binding, requests, cancellationToken);
     }
 
@@ -58,6 +65,7 @@ internal sealed class DelegateRequestBatchHandler<TRequest>(
         IReadOnlyList<TRequest> requests,
         CancellationToken cancellationToken)
     {
+        // Response delegates must finish before their entries can be validated.
         await binding.Invoke(requests, null!, cancellationToken).ConfigureAwait(false);
         validateResponses?.Invoke(requests);
     }
@@ -67,6 +75,7 @@ internal sealed class DelegateRequestBatchHandler<TRequest>(
         IReadOnlyList<TRequest> requests,
         CancellationToken cancellationToken)
     {
+        // Keep injected services alive through invocation and validation; completion also waits for async disposal.
         await using var scope = scopeFactory.CreateAsyncScope();
         await binding.Invoke(requests, scope.ServiceProvider, cancellationToken).ConfigureAwait(false);
         validateResponses?.Invoke(requests);
@@ -195,6 +204,11 @@ internal sealed class DelegateRequestBatchHandler<TRequest>(
             : returnType == typeof(Task)
                 ? Expression.New(typeof(ValueTask).GetConstructor([typeof(Task)])!, call)
                 : call;
+        // Compile one uniform invoker for service injection, supported return types and custom delegate types.
+        // Service-free signatures could use direct binding, but that would add separate adapters for each
+        // return/token combination and delegate form. Keep the shared binding path to limit maintenance cost.
+        // Compilation happens only on initial binding; later batches reuse the invoker without reflection
+        // or expression compilation. The request-only ValueTask fast path skips an await wrapper, not binding.
         var invoker = Expression.Lambda<
             Func<IReadOnlyList<TRequest>, IServiceProvider, CancellationToken, ValueTask>>(
             body, requests, provider, cancellationToken).Compile();

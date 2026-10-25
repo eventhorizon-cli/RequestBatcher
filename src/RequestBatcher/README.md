@@ -352,7 +352,12 @@ services.AddRequestBatcher<PriceQuery, PriceQuote?, PriceQueryHandler>(
     });
 ```
 
-The handler must set exactly one response for every item before it returns. The example uses standard LINQ `Distinct`
+**Both typed and delegate response handlers must explicitly assign exactly one response to every entry before completing successfully.**
+After the Handler completes, the framework checks for missing assignments. An unset entry causes an `InvalidOperationException`
+and fails all requests in that Handler batch. For nullable responses, explicitly assigning `null` counts as setting a response;
+the check verifies assignment, not whether the value is null.
+
+The example uses standard LINQ `Distinct`
 to query each product ID once within the current handler invocation. `Distinct` also supports anonymous composite keys,
 value tuples, and custom equality comparers. Missing product IDs are absent from the store result and map to `null`.
 
