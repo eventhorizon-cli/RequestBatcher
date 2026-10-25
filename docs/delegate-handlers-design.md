@@ -90,6 +90,15 @@ response validation and scope disposal. Exceptions, cancellation after dispatch,
 draining and capacity release reuse the existing behavior. RequestBatcher remains
 in-process and does not recover accepted work after process failure.
 
+For request-only delegates without service parameters, the forwarding handler returns
+the invoker's original `ValueTask` directly. The consumer awaits it before completing
+requests and returning the execution slot. Response delegates retain post-invocation
+validation; delegates with services retain the asynchronous scope boundary. A batch
+cancellation-token parameter alone does not require a scope. Public completion,
+exception, cancellation and draining behavior remains unchanged, including synchronous
+delegate failures caught by the consumer. Tests cover pending Task-backed and
+source-backed operations, exactly-once consumption, failures, cancellation and draining.
+
 The delegate forwarding handler and its bound delegate are always singleton per
 pipeline, so delegate registration has no `ServiceLifetime` argument. Injected
 services retain their own DI lifetimes: singleton services are shared by the

@@ -112,6 +112,12 @@ the cached invoker. It does not measure the first-call compilation cost or prove
 that performance is identical for every workload. Benchmark processes used normal
 priority because raising priority was unavailable on this machine.
 
+## Request-only forwarding
+
+The [no-service forwarding evaluation](request-only-forwarding/README.md) measures removing an async wrapper with
+isolated invocation and public 256-request waves, including simulated 20 ms work. The measured benefit is allocation;
+it does not establish an end-to-end latency improvement.
+
 ## Observability
 
 The delegate-handler measurements do not include the built-in RequestBatcher instrumentation. See the

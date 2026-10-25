@@ -32,6 +32,7 @@ load. Run both when changing shared submission, scheduling, or response-completi
 | Queue pulling and dispatch capacity | [QueuePullBenchmarks](InMemory/QueuePullBenchmarks.cs), [DispatchCapacityBenchmarks](InMemory/DispatchCapacityBenchmarks.cs) | 4,096 requests across partition/concurrency settings; synchronous and 20 ms handlers in the dispatch benchmark. |
 | Tracing or metrics | [TracingIoOverheadBenchmarks](InMemory/TracingIoOverheadBenchmarks.cs), [MetricsIoOverheadBenchmarks](InMemory/MetricsIoOverheadBenchmarks.cs) | 1,024 requests per wave, single or groups of 32, 20 ms handlers, per-ID exactly-once validation; disabled/sampling or metric-reader configurations. These use request-only handlers. |
 | SDK sampling and trace links | [TracingStressTests](../it/RequestBatcher.Observability.IntegrationTests/TracingStressTests.cs) | 32 waves of 512 requests at 0%/100% sampling, mixed submissions, exactly-once handling and actual-batch links; also mixed-sampling policy tests. No Docker needed for this class. |
+| Request-only delegate forwarding | [DelegateRequestOnlyStressTests](../RequestBatcher.Tests/DelegateRequestOnlyStressTests.cs), [DelegateRequestOnlyBenchmarks](InMemory/DelegateRequestOnlyBenchmarks.cs), [DelegateForwardingBenchmarks](InMemory/DelegateForwardingBenchmarks.cs) | Eight producers, single/list/mixed submissions, four 2,048-request waves per case; validates every request's transformation and exactly-once handling. Benchmarks measure full-pipeline and isolated forwarding allocation. |
 | Database paths | PostgreSQL/Redis benchmarks below | Matched direct/batched operations, result or persisted-data validation; require Docker. |
 
 Run the response correctness stress test:
@@ -84,6 +85,8 @@ These benchmarks run in process without Docker. Some use simulated asynchronous 
 | [ExplicitSubmissionBenchmarks](InMemory/ExplicitSubmissionBenchmarks.cs) | Explicit groups versus mixed single/group submissions. |
 | [NamedBatchingBenchmarks](InMemory/NamedBatchingBenchmarks.cs) | Named versus unnamed pipelines, single/list submissions and singleton/scoped handlers. |
 | [DelegateHandlerBenchmarks](InMemory/DelegateHandlerBenchmarks.cs) | Typed versus cached delegate handlers, with and without scoped service injection. |
+| [DelegateRequestOnlyBenchmarks](InMemory/DelegateRequestOnlyBenchmarks.cs) | Typed singleton versus no-service delegate; 256-request single/list waves with Yield or 20 ms work and per-ID validation. |
+| [DelegateForwardingBenchmarks](InMemory/DelegateForwardingBenchmarks.cs) | Isolated typed/delegate forwarding of an incomplete operation, with exactly-once completion validation. |
 | [DelegateServiceInjectionBenchmarks](InMemory/DelegateServiceInjectionBenchmarks.cs) | Typed/delegate service injection across dependency lifetimes and ordinary/keyed services. |
 | [DelegateReturnTypeBenchmarks](InMemory/DelegateReturnTypeBenchmarks.cs) | Typed handlers versus delegates returning void, completed Task or completed ValueTask. |
 | [DelegateFirstSubmissionBenchmarks](InMemory/DelegateFirstSubmissionBenchmarks.cs) | First submission through a fresh typed/delegate pipeline; includes initial delegate binding, excludes provider creation. |

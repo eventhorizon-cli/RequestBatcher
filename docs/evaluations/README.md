@@ -21,6 +21,7 @@ Find reports by question; versions, workloads, and limitations are documented in
 
 - [named-batching](named-batching/README.md): compares named and unnamed batchers, single-item and explicit-list submission, and handler lifetimes (in-process).
 - [delegate-handlers](delegate-handlers/README.md): compares delegate and typed handlers across service injection, return types, and batch configurations (in-process).
+- [request-only delegate forwarding](delegate-handlers/request-only-forwarding/README.md): compares allocation before and after removing an async wrapper, including simulated 20 ms work.
 
 ## Completion Paths and Allocation
 
