@@ -1011,12 +1011,36 @@ and use the metrics extension. The meter records accepted requests, processed re
 and batches, batch size, and batch duration. Dimensions contain only request type and configured batcher name; payloads,
 tenant values, and partition keys are excluded. Request types use their short public name (for example, `Int32`), without
 namespaces or internal response wrappers. Identically named types share a dimension; use batcher names to distinguish
-pipelines when needed, and update request-type label filters to use short names. Metrics are emitted when a meter
-provider listens to the meter.
+pipelines when needed, and update request-type label filters to use short names. Metrics are emitted when a listener
+subscribes to the corresponding instrument in the `RequestBatcher` meter.
 
 Instrument names already include `requestbatcher.`, for example `requestbatcher.batches.processed`. The sample exports
 `requestbatcher_batches_processed_total` to Prometheus. An additional exporter namespace/prefix of `requestbatcher`
 would duplicate that prefix, so leave it unset.
+
+With a custom `System.Diagnostics.Metrics.MeterListener`, select the meter and explicitly subscribe to its instruments:
+
+```csharp
+listener.InstrumentPublished = (instrument, meterListener) =>
+{
+    if (instrument.Meter.Name == "RequestBatcher")
+    {
+        meterListener.EnableMeasurementEvents(instrument);
+    }
+};
+```
+
+- `InstrumentPublished` discovers instruments; receiving that callback or registering measurement callbacks alone does
+  not subscribe to measurements. Call `EnableMeasurementEvents` once for each desired instrument per listener, rather
+  than for each measurement. `Instrument.Enabled` becomes true while at least one listener subscribes; RequestBatcher
+  uses it to skip unobserved metric work. You can also filter `instrument.Name` to select individual metrics.
+- Register measurement callbacks for both `long` (counts and batch size) and `double` (batch duration), and call `Start()`
+  before submitting work. Keep the listener alive through batcher shutdown, and dispose it afterward.
+  Earlier measurements are not replayed when a listener subscribes.
+- Callbacks execute synchronously on the recording thread and may run concurrently. Keep production callbacks
+  lightweight and thread-safe, prevent callback exceptions from escaping, and avoid blocking I/O.
+  Copy any tags needed after the callback returns because the tag span cannot
+  be retained. A custom listener must provide its own aggregation and export.
 
 ## Sample Application
 

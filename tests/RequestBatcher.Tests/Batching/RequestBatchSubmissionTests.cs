@@ -42,6 +42,138 @@ public sealed class RequestBatchSubmissionTests
     }
 
     [Fact]
+    public async Task ExecuteAsync_PreCanceledEnumerable_DoesNotEnumerateOrDispatch()
+    {
+        var handledBatches = new ConcurrentQueue<int[]>();
+        var enumerationCount = 0;
+
+        await using var provider = CreateProvider<int>(
+            (requests, _) =>
+            {
+                handledBatches.Enqueue(requests.ToArray());
+                return ValueTask.CompletedTask;
+            },
+            options => options.BatchSize = 10);
+        var batcher = provider.GetRequiredService<IRequestBatcher<int>>();
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        IEnumerable<int> Requests()
+        {
+            Interlocked.Increment(ref enumerationCount);
+            yield return 1;
+        }
+
+        var processing = batcher.ExecuteAsync(Requests(), cancellation.Token);
+        var actual = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => processing);
+
+        Assert.Equal(cancellation.Token, actual.CancellationToken);
+        Assert.Equal(0, Volatile.Read(ref enumerationCount));
+        Assert.Empty(handledBatches);
+
+        await batcher.ExecuteAsync(2).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(new[] { 2 }, Assert.Single(handledBatches));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_EnumerationFailureAfterPartialInput_PropagatesWithoutDispatch()
+    {
+        var expected = new TestBatchException();
+        var handledBatches = new ConcurrentQueue<int[]>();
+
+        await using var provider = CreateProvider<int>(
+            (requests, _) =>
+            {
+                handledBatches.Enqueue(requests.ToArray());
+                return ValueTask.CompletedTask;
+            },
+            options => options.BatchSize = 10);
+        var batcher = provider.GetRequiredService<IRequestBatcher<int>>();
+
+        IEnumerable<int> Requests()
+        {
+            yield return 1;
+            yield return 2;
+            throw expected;
+        }
+
+        var actual = await Assert.ThrowsAsync<TestBatchException>(
+            () => batcher.ExecuteAsync(Requests()));
+
+        Assert.Same(expected, actual);
+        Assert.Empty(handledBatches);
+
+        await batcher.ExecuteAsync(3).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(new[] { 3 }, Assert.Single(handledBatches));
+        await provider.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_CancellationDuringEnumeration_ReturnsOriginalTokenWithoutDispatch()
+    {
+        var handledBatches = new ConcurrentQueue<int[]>();
+
+        await using var provider = CreateProvider<int>(
+            (requests, _) =>
+            {
+                handledBatches.Enqueue(requests.ToArray());
+                return ValueTask.CompletedTask;
+            },
+            options => options.BatchSize = 10);
+        var batcher = provider.GetRequiredService<IRequestBatcher<int>>();
+        using var cancellation = new CancellationTokenSource();
+
+        IEnumerable<int> Requests()
+        {
+            yield return 1;
+            cancellation.Cancel();
+            yield return 2;
+        }
+
+        var processing = batcher.ExecuteAsync(Requests(), cancellation.Token);
+        var actual = await Assert.ThrowsAnyAsync<OperationCanceledException>(() => processing);
+
+        Assert.Equal(cancellation.Token, actual.CancellationToken);
+        Assert.Empty(handledBatches);
+
+        cancellation.Dispose();
+        await batcher.ExecuteAsync(3).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(new[] { 3 }, Assert.Single(handledBatches));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_DisposeDuringEnumeration_RejectsBatchWithoutDispatch()
+    {
+        var handledBatches = new ConcurrentQueue<int[]>();
+
+        await using var provider = CreateProvider<int>(
+            (requests, _) =>
+            {
+                handledBatches.Enqueue(requests.ToArray());
+                return ValueTask.CompletedTask;
+            },
+            options => options.BatchSize = 10);
+        var batcher = provider.GetRequiredService<IRequestBatcher<int>>();
+        var coordinator = provider.GetRequiredService<RequestBatchCoordinator<int>>();
+        Task? stopping = null;
+
+        IEnumerable<int> Requests()
+        {
+            yield return 1;
+            stopping = coordinator.DisposeAsync().AsTask();
+            yield return 2;
+        }
+
+        var actual = await Assert.ThrowsAsync<ObjectDisposedException>(
+            () => batcher.ExecuteAsync(Requests()));
+
+        Assert.Equal(typeof(RequestBatchCoordinator<int>).FullName, actual.ObjectName);
+        Assert.Empty(handledBatches);
+        Assert.NotNull(stopping);
+        await stopping!.WaitAsync(TimeSpan.FromSeconds(5));
+    }
+
+    [Fact]
     public async Task ExecuteAsync_HandlerFails_CompletesAllRequestsAndPropagatesException()
     {
         var expected = new TestBatchException();

@@ -18,6 +18,57 @@ dotnet run --project tests/RequestBatcher.Benchmarks/RequestBatcher.Benchmarks.c
 
 Check the selected class's parameters and job settings before running. Use `--artifacts <directory>` to choose an output directory.
 
+## Pre-commit benchmarks and correctness stress tests
+
+Follow the [critical-path validation rules](../../AGENTS.md#testing-and-validation) before committing changes to
+submission, scheduling, completion, lifecycle, or observability hot paths. Select the relevant workloads below.
+BenchmarkDotNet repeatedly measures bounded waves; the larger response stress test checks correctness under concurrent
+load. Run both when changing shared submission, scheduling, or response-completion logic.
+
+| Changed path | Workloads | Checks / measurements |
+| --- | --- | --- |
+| Request/response correlation and completion | [ResponseStressTests](../RequestBatcher.Tests/ResponseStressTests.cs), [ResponseCompletionBenchmarks](InMemory/ResponseCompletionBenchmarks.cs) | Stress: single, explicit-batch, and mixed submissions, each with and without partition keys; every response value, batch response order, and exactly-once handling. Benchmarks: 256-request waves, success/failure/cancellation and explicit-response success, time and allocation. |
+| Explicit admission, shared completion, backpressure | [ExplicitSubmissionBenchmarks](InMemory/ExplicitSubmissionBenchmarks.cs), [ExplicitCompletionBenchmarks](InMemory/ExplicitCompletionBenchmarks.cs) | Mixed/group submissions; capacity waiting, partial cancellation, failure fan-out, and per-ID processing validation. |
+| Queue pulling and dispatch capacity | [QueuePullBenchmarks](InMemory/QueuePullBenchmarks.cs), [DispatchCapacityBenchmarks](InMemory/DispatchCapacityBenchmarks.cs) | 4,096 requests across partition/concurrency settings; synchronous and 20 ms handlers in the dispatch benchmark. |
+| Tracing or metrics | [TracingIoOverheadBenchmarks](InMemory/TracingIoOverheadBenchmarks.cs), [MetricsIoOverheadBenchmarks](InMemory/MetricsIoOverheadBenchmarks.cs) | 1,024 requests per wave, single or groups of 32, 20 ms handlers, per-ID exactly-once validation; disabled/sampling or metric-reader configurations. These use request-only handlers. |
+| SDK sampling and trace links | [TracingStressTests](../it/RequestBatcher.Observability.IntegrationTests/TracingStressTests.cs) | 32 waves of 512 requests at 0%/100% sampling, mixed submissions, exactly-once handling and actual-batch links; also mixed-sampling policy tests. No Docker needed for this class. |
+| Database paths | PostgreSQL/Redis benchmarks below | Matched direct/batched operations, result or persisted-data validation; require Docker. |
+
+Run the response correctness stress test:
+
+```bash
+dotnet test tests/RequestBatcher.Tests/RequestBatcher.Tests.csproj \
+  --configuration Release --filter 'FullyQualifiedName~ResponseStressTests' \
+  --logger 'console;verbosity=normal'
+```
+
+It uses eight concurrent producers, batch size 32, concurrency eight, pending capacity 256, and explicit groups alternating
+between 17 and 129 requests, with smaller final groups. Producers submit their round's operations before awaiting their
+results, allowing queue capacity to be exceeded by in-flight work. Each of six cases sends three rounds of 10,000
+distinct requests through the same pipeline: 180,000
+validated responses per target framework. The asynchronous handler assigns responses in reverse entry order; assertions
+do not assume handler execution order. The test runs in the ordinary unit-test suite on .NET 8 and .NET 10.
+Its elapsed time is test execution time, not a throughput or latency benchmark result.
+
+Run a relevant performance benchmark, for example:
+
+```bash
+dotnet run --project tests/RequestBatcher.Benchmarks/RequestBatcher.Benchmarks.csproj \
+  --configuration Release -- --filter '*ResponseCompletionBenchmarks*' \
+  --artifacts /private/tmp/requestbatcher-response-benchmarks
+```
+
+Run the SDK tracing stress class without starting containers:
+
+```bash
+dotnet test tests/it/RequestBatcher.Observability.IntegrationTests/RequestBatcher.Observability.IntegrationTests.csproj \
+  --configuration Release --filter 'FullyQualifiedName~TracingStressTests'
+```
+
+Record the workload, runtime, commands, correctness outcome, and relevant time/allocation measurements in the
+[evaluation reports](../../docs/evaluations/README.md). For optimization claims, compare the same workload against the
+baseline with the same environment. Benchmark startup/smoke success alone is insufficient evidence of an improvement.
+
 ## Batching and handler APIs
 
 These benchmarks run in process without Docker. Some use simulated asynchronous delays.

@@ -56,6 +56,234 @@ public sealed class RequestBatcherMetricsTests
     }
 
     [Theory]
+    [InlineData("requestbatcher.requests.submitted", 3)]
+    [InlineData("requestbatcher.requests.processed", 3)]
+    [InlineData("requestbatcher.batches.processed", 1)]
+    [InlineData("requestbatcher.batch.size", 3)]
+    [InlineData("requestbatcher.batch.duration", -1)]
+    public void MeterListener_SelectsOneInstrument_RecordsExpectedMeasurement(
+        string selectedInstrument,
+        double expectedValue)
+    {
+        var measurements = new ConcurrentQueue<MeasurementRecord>();
+        using var listener = new MeterListener
+        {
+            InstrumentPublished = (instrument, meterListener) =>
+            {
+                if (instrument.Meter.Name == RequestBatcherMetrics.MeterName &&
+                    instrument.Name == selectedInstrument)
+                {
+                    meterListener.EnableMeasurementEvents(instrument);
+                }
+            },
+        };
+        listener.SetMeasurementEventCallback<long>((instrument, value, tags, _) =>
+            measurements.Enqueue(new MeasurementRecord(instrument.Name, value, tags)));
+        listener.SetMeasurementEventCallback<double>((instrument, value, tags, _) =>
+            measurements.Enqueue(new MeasurementRecord(instrument.Name, value, tags)));
+        listener.Start();
+
+        RequestBatcherMetrics.RecordSubmitted("Int32", "prices", 3);
+        using (RequestBatcherMetrics.StartBatch("Int32", "prices", 3))
+        {
+        }
+
+        var measurement = Assert.Single(measurements);
+        Assert.Equal(selectedInstrument, measurement.Name);
+        if (selectedInstrument == "requestbatcher.batch.duration")
+        {
+            Assert.True(measurement.Value >= 0);
+        }
+        else
+        {
+            Assert.Equal(expectedValue, measurement.Value);
+        }
+
+        Assert.Equal("Int32", measurement.Tags["requestbatcher.request.type"]);
+        Assert.Equal("prices", measurement.Tags["requestbatcher.name"]);
+    }
+
+    [Fact]
+    public void BatchScope_WithoutEnabledInstruments_DisposeRecordsNothing()
+    {
+        var measurements = new ConcurrentQueue<MeasurementRecord>();
+        using var listener = new MeterListener
+        {
+            InstrumentPublished = static (_, _) => { },
+        };
+        listener.SetMeasurementEventCallback<long>((instrument, value, tags, _) =>
+            measurements.Enqueue(new MeasurementRecord(instrument.Name, value, tags)));
+        listener.SetMeasurementEventCallback<double>((instrument, value, tags, _) =>
+            measurements.Enqueue(new MeasurementRecord(instrument.Name, value, tags)));
+        listener.Start();
+
+        RequestBatcherMetrics.RecordSubmitted("Int32", "prices", 3);
+        using (RequestBatcherMetrics.StartBatch("Int32", "prices", 3))
+        {
+        }
+
+        Assert.Empty(measurements);
+    }
+
+    [Fact]
+    public void MeterListener_EnableDisableInstrument_ControlsMeasurements()
+    {
+        RequestBatcherMetrics.RecordSubmitted("Int32", "prices", 3);
+        var measurements = new ConcurrentQueue<MeasurementRecord>();
+        Instrument? processedRequests = null;
+        using var listener = new MeterListener
+        {
+            InstrumentPublished = (instrument, _) =>
+            {
+                if (instrument.Meter.Name == RequestBatcherMetrics.MeterName &&
+                    instrument.Name == "requestbatcher.requests.processed")
+                {
+                    processedRequests = instrument;
+                }
+            },
+        };
+        listener.SetMeasurementEventCallback<long>((instrument, value, tags, _) =>
+            measurements.Enqueue(new MeasurementRecord(instrument.Name, value, tags)));
+        listener.SetMeasurementEventCallback<double>((instrument, value, tags, _) =>
+            measurements.Enqueue(new MeasurementRecord(instrument.Name, value, tags)));
+        listener.Start();
+
+        Assert.NotNull(processedRequests);
+        var instrument = processedRequests!;
+        Assert.False(instrument.Enabled);
+        using (RequestBatcherMetrics.StartBatch("Int32", "prices", 3))
+        {
+        }
+        Assert.Empty(measurements);
+
+        listener.EnableMeasurementEvents(instrument);
+        Assert.True(instrument.Enabled);
+        using (RequestBatcherMetrics.StartBatch("Int32", "prices", 3))
+        {
+        }
+
+        var measurement = Assert.Single(measurements);
+        Assert.Equal("requestbatcher.requests.processed", measurement.Name);
+        Assert.Equal(3, measurement.Value);
+
+        listener.DisableMeasurementEvents(instrument);
+        Assert.False(instrument.Enabled);
+        using (RequestBatcherMetrics.StartBatch("Int32", "prices", 3))
+        {
+        }
+
+        Assert.Single(measurements);
+    }
+
+    [Fact]
+    public void MeterListener_OneSubscriberDisposed_KeepsOtherSubscriberEnabled()
+    {
+        RequestBatcherMetrics.RecordSubmitted("Int32", "prices", 3);
+        var firstMeasurements = new ConcurrentQueue<MeasurementRecord>();
+        var secondMeasurements = new ConcurrentQueue<MeasurementRecord>();
+        Instrument? firstInstrument = null;
+        Instrument? secondInstrument = null;
+        var first = new MeterListener
+        {
+            InstrumentPublished = (instrument, meterListener) =>
+            {
+                if (instrument.Meter.Name == RequestBatcherMetrics.MeterName &&
+                    instrument.Name == "requestbatcher.requests.processed")
+                {
+                    firstInstrument = instrument;
+                    meterListener.EnableMeasurementEvents(instrument);
+                }
+            },
+        };
+        first.SetMeasurementEventCallback<long>((instrument, value, tags, _) =>
+            firstMeasurements.Enqueue(new MeasurementRecord(instrument.Name, value, tags)));
+        var second = new MeterListener
+        {
+            InstrumentPublished = (instrument, meterListener) =>
+            {
+                if (instrument.Meter.Name == RequestBatcherMetrics.MeterName &&
+                    instrument.Name == "requestbatcher.requests.processed")
+                {
+                    secondInstrument = instrument;
+                    meterListener.EnableMeasurementEvents(instrument);
+                }
+            },
+        };
+        second.SetMeasurementEventCallback<long>((instrument, value, tags, _) =>
+            secondMeasurements.Enqueue(new MeasurementRecord(instrument.Name, value, tags)));
+
+        try
+        {
+            first.Start();
+            second.Start();
+            Assert.NotNull(firstInstrument);
+            Assert.NotNull(secondInstrument);
+            var firstTarget = firstInstrument!;
+            var secondTarget = secondInstrument!;
+            Assert.True(firstTarget.Enabled);
+
+            using (RequestBatcherMetrics.StartBatch("Int32", "prices", 3))
+            {
+            }
+
+            Assert.Single(firstMeasurements);
+            Assert.Single(secondMeasurements);
+
+            first.Dispose();
+            Assert.True(secondTarget.Enabled);
+            using (RequestBatcherMetrics.StartBatch("Int32", "prices", 3))
+            {
+            }
+
+            Assert.Single(firstMeasurements);
+            Assert.Equal(2, secondMeasurements.Count);
+
+            second.Dispose();
+            Assert.False(secondTarget.Enabled);
+        }
+        finally
+        {
+            first.Dispose();
+            second.Dispose();
+        }
+    }
+
+    [Fact]
+    public void StartBatch_NoSubscriberAtCreation_DoesNotBackfillMeasurement()
+    {
+        var measurements = new ConcurrentQueue<MeasurementRecord>();
+        Instrument? processedRequests = null;
+        using var listener = new MeterListener
+        {
+            InstrumentPublished = (instrument, _) =>
+            {
+                if (instrument.Meter.Name == RequestBatcherMetrics.MeterName &&
+                    instrument.Name == "requestbatcher.requests.processed")
+                {
+                    processedRequests = instrument;
+                }
+            },
+        };
+        listener.SetMeasurementEventCallback<long>((instrument, value, tags, _) =>
+            measurements.Enqueue(new MeasurementRecord(instrument.Name, value, tags)));
+        listener.Start();
+
+        var scope = RequestBatcherMetrics.StartBatch("Int32", "prices", 3);
+        Assert.NotNull(processedRequests);
+        var instrument = processedRequests!;
+        Assert.False(instrument.Enabled);
+        listener.EnableMeasurementEvents(instrument);
+        scope.Dispose();
+
+        Assert.Empty(measurements);
+        using (RequestBatcherMetrics.StartBatch("Int32", "prices", 3))
+        {
+        }
+
+        Assert.Single(measurements);
+    }
+
+    [Theory]
     [InlineData(typeof(int), "Int32")]
     [InlineData(typeof(RequestBatchEntry<int, string>), "Int32")]
     public void GetName_Type_ReturnsSimpleRequestTypeName(

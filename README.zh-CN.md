@@ -999,14 +999,36 @@ builder.Services.AddOpenTelemetry()
 ```
 
 Meter 会记录已接收请求、已处理请求、已处理批次数、批次大小和批次
-耗时。Metrics 只使用请求类型和配置的 batcher name 作为维度，不记录请求内容、租户值或 Partition Key；只有 meter provider 监听
-该 meter 时才会输出数据。Tracing 和内存中的待处理请求都是尽力而为，进程故障后不会恢复请求。
+耗时。Metrics 只使用请求类型和配置的 batcher name 作为维度，不记录请求内容、租户值或 Partition Key；只有监听者订阅
+`RequestBatcher` meter 中对应的指标后才会输出数据。Tracing 和内存中的待处理请求都是尽力而为，进程故障后不会恢复请求。
 
 请求类型使用公开类型的短名（例如 `Int32`），不包含命名空间或内部响应包装类型；不同命名空间的同名类型会共享此维度，
 需要区分时可配置不同的 batcher name。已有的请求类型标签过滤条件需要改用短名。
 指标名本身已经带有 `requestbatcher.`，例如 `requestbatcher.batches.processed` 在示例中导出为
 `requestbatcher_batches_processed_total`。导出端不要再添加 `requestbatcher` namespace/prefix，否则会出现
 `requestbatcher_requestbatcher_*`。
+
+自行使用 `System.Diagnostics.Metrics.MeterListener` 采集时，需要筛选 meter 并显式订阅指标：
+
+```csharp
+listener.InstrumentPublished = (instrument, meterListener) =>
+{
+    if (instrument.Meter.Name == "RequestBatcher")
+    {
+        meterListener.EnableMeasurementEvents(instrument);
+    }
+};
+```
+
+- `InstrumentPublished` 只是通知发现了指标；收到该通知或注册测量值回调，都不等于已经订阅。
+  每个监听者需要对想采集的每个指标调用一次 `EnableMeasurementEvents`，无需每条测量值调用一次。
+  指标至少有一个订阅者时，`Instrument.Enabled` 才为 `true`；RequestBatcher 据此跳过无人监听的指标工作。
+  如需只采集部分指标，可以继续按 `instrument.Name` 筛选。
+- 注册 `long`（请求数、批次数和批次大小）与 `double`（批次耗时）的测量值回调，并在提交请求前调用 `Start()`。
+  让监听者存活到 batcher 关闭完成后，再释放监听者。订阅前的测量值不会补发。
+- 回调在记录指标的线程上同步执行，也可能被多个线程并发调用。生产回调应保持轻量、线程安全，并避免异常向外传播。
+  回调应避免阻塞 I/O。如需在回调返回后使用标签，应复制所需内容，不能保存标签 span。
+  直接使用 listener 时，聚合和导出需要自行实现。
 
 ## 示例应用
 
