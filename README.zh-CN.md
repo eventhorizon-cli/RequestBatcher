@@ -344,7 +344,11 @@ services.AddRequestBatcher<PriceQuery, PriceQuote?, PriceQueryHandler>(
     });
 ```
 
-Handler 返回前，必须为每个请求设置一次返回值，不能遗漏或重复设置。示例使用标准 LINQ `Distinct`，只为当前
+**无论使用 Handler 类还是委托，带返回值的 Handler 都必须在成功结束前，为每个 Entry 显式设置且仅设置一次响应。**
+框架会在 Handler 完成后检查是否有遗漏；任何 Entry 未设置响应，都会引发 `InvalidOperationException`，
+并使该 Handler 批次中的所有请求失败。响应类型允许为空时，显式设置 `null` 也算已设置；校验检查的是是否赋值。
+
+示例使用标准 LINQ `Distinct`，只为当前
 Handler 调用中的每个不同商品 ID 查询一次存储层。`Distinct` 也支持匿名组合键、值元组和自定义相等比较器。存储层未
 返回的商品 ID 会映射为 `null`。
 
