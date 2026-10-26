@@ -81,7 +81,7 @@ RequestBatcher 基于 [BufferQueue](https://github.com/eventhorizon-cli/BufferQu
 - 调用方取消时，只需要撤销尚未分发的请求；已分发的操作应继续执行并返回实际处理结果；
 - 可以在同一处理批次内合并相关请求，且正确性不依赖 Handler 执行顺序。
 
-批量 `INSERT`、`UPDATE`、`UPSERT` 和缓存写入也可以使用，但应用需要自行处理重试幂等性、跨批次并发写入冲突和事务边界。
+批量 `INSERT`、`UPDATE`、`UPSERT` 和缓存写入也可以使用，但应用需要自行处理跨批次并发写入冲突和事务边界；涉及重试时，还需保证操作的幂等性。
 即使 Partition Key 相同，不同 Handler 批次也可能并发执行。如果一次 Handler 调用只成功一部分会造成数据不一致，
 应由 Handler 在同一个事务中完成该批更新。一次提交可能拆成多个 Handler 批次，因此每个 Handler 各自使用事务，
 并不能保证整次提交的原子性。RequestBatcher 只负责传递 Handler 的处理结果，不会回滚已经提交的数据，也无法在进程故障后恢复待处理请求。
@@ -92,7 +92,7 @@ RequestBatcher 既不是持久化后台队列，也不是事务协调器：
 
 - 已接收的请求必须在进程故障后仍可恢复。此时应使用持久化存储或可靠消息队列。
 - 操作必须随调用方事务一起提交或回滚。应将它留在原事务中。
-- 下游操作必须依赖自动重试，或副作用必须严格恰好一次（exactly-once）。RequestBatcher 不提供这些保证。
+- 下游操作必须依赖自动重试，或必须保证副作用恰好执行一次（exactly-once）。RequestBatcher 不提供这些保证。
 - 下游操作必须等待最小批量凑齐，或者依赖固定的收集窗口。RequestBatcher 会直接处理当前已排队的请求。
 - 单个调用方断开、超时或取消后，正在执行的下游操作也必须立即停止。一个处理批次可能包含来自多个调用方的
   请求，因此单个调用方的 `CancellationToken` 不会传给 Handler，也不能取消这个共享的 Handler 调用。
@@ -103,7 +103,7 @@ RequestBatcher 既不是持久化后台队列，也不是事务协调器：
 dotnet add package RequestBatcher
 ```
 
-包提供 `net8.0` 和 `net10.0` 资产，支持 .NET 8 和 .NET 10 应用。
+包支持 `net8.0` 和 `net10.0` 目标框架，可用于 .NET 8 和 .NET 10 应用。
 
 支持两种注册方式：
 
@@ -178,15 +178,15 @@ options.MaxConcurrency = 4;
 options.UsePartitionKey(query => query.ProductId, partitionCount: 8);
 ```
 
-值相同的有限整数数值键，或值相同的非 `null` 字符串键，会进入指定数量中的同一 Partition。不同键值仍可能落入
+数值键的值必须是有限整数，字符串键不能为 `null`。相同的键值会路由到同一 Partition。不同键值仍可能落入
 同一 Partition，因此键值与 Partition 不是一一对应关系。
 
 Partition 路由只决定请求进入哪个 Partition：它不会强制同一键值的全部请求进入同一个处理批次，也不会自动去重。
 RequestBatcher 不提供全局、Partition 内或 Partition Key 级别的 Handler 执行顺序保证；Partition 路由只是路由规则，
 不能用于串行化或提供互斥。
 
-字符串路由使用完整键值，共同前缀本身不会强制不同键值进入同一 Partition。具体分区归属属于
-内部实现，可能随版本变化；同一个 Batcher 实例中的相同键值仍会路由到同一 Partition。这些变化可能影响处理批次
+字符串路由使用完整键值，共同前缀本身不会强制不同键值进入同一 Partition。具体分区归属由内部实现决定，
+可能随版本变化；同一个 Batcher 实例中的相同键值仍会路由到同一 Partition。这些变化可能影响处理批次
 的组成，以及 Handler 在单个批次内能够合并的重复工作量。
 
 ### Partition 与 MaxConcurrency 的配置建议
@@ -196,7 +196,7 @@ RequestBatcher 不提供全局、Partition 内或 Partition Key 级别的 Handle
 单 Partition 仍能提供多个并发执行的 Handler 批次。
 
 **默认使用 1 个 Partition；没有明确的按 Key 路由需求和压测收益，就不要增加 Partition。** 增加 Partition 不会增加 Handler 执行名额。
-每次拉取只读取一个 Partition，把短时间集中提交的少量请求分散到多个 Partition 可能增加不满批次和下游调用。
+每次拉取只读取一个 Partition，把短时间集中提交的少量请求分散到多个 Partition 可能增加未满批次的数量和下游调用次数。
 [性能调优与压测](#性能调优与压测)中的两个独立实验测量了这种取舍。
 
 **`MaxConcurrency` 从 `1` 开始压测，吞吐或排队延迟不满足目标时再逐步提高。** 执行名额过多时，已到达的请求可能更早被
@@ -204,11 +204,11 @@ RequestBatcher 不提供全局、Partition 内或 Partition Key 级别的 Handle
 
 **较低并发有利于合并，但也可能增加尾延迟。** 尤其在 `MaxConcurrency = 1` 时，一个慢批次会占住唯一的执行名额，
 后续请求只能排队；Handler 内使用 `Task.WhenAll` 时，还要等最慢的子查询完成才能释放名额。
-压测时应同时比较实际批大小、去重后的查询量、下游调用次数和端到端 P95/P99，判断减少的下游工作量是否值得增加的等待。
-如果合并效果不错但尾延迟不达标，可以逐步尝试 `2`、`4`，并确认下游仍有容量。
+压测时应同时比较实际批大小、去重后的查询量、下游调用次数和端到端 P95/P99，判断减少的下游工作量是否值得付出额外等待。
+如果合并效果不错但尾延迟不达标，可以逐步尝试 `2`、`4`，同时确认下游能承受增加的并发调用。
 
 **Handler 并发低，不等于能处理的请求量少。** 一个 Handler 批次可以处理多个请求，内部也可以拆成小批并行调用下游，
-因此较低的 `MaxConcurrency` 仍可能支撑较高流量。实际能力取决于批大小、Handler 耗时和下游容量，
+因此较低的 `MaxConcurrency` 仍可能支撑较高流量。实际能力取决于批大小、Handler 耗时，以及下游能承受的调用量和并发度，
 见[拆分调用时，分别估算两层并发](#拆分调用时分别估算两层并发)。
 
 需要按 Key 路由时，再通过 `UsePartitionKey` 显式设置 Partition 数量。下面配置使用 8 个队列 Partition，共享
@@ -465,8 +465,8 @@ services.AddRequestBatcher<PriceQuery, PriceQuote?, PriceQueryHandler>(
 Handler 调用中的每个不同商品 ID 查询一次存储层。`Distinct` 也支持匿名组合键、值元组和自定义相等比较器。存储层未
 返回的商品 ID 会映射为 `null`。
 
-**去重只发生在当前 Handler 批次内**：它不会合并不同处理批次或不同队列 Partition 中的条目。Selector 重载会先按 Key
-为后端无序结果建立字典，再为每个条目的原始请求计算一次结果，因此重复条目会得到相同返回值。
+**去重只发生在当前 Handler 批次内**：它不会合并不同处理批次或不同队列 Partition 中的条目。示例中的 Handler 先将后端返回的
+无序结果按商品 ID 建立字典，再通过 `SetResponses` 的结果工厂为每个 Entry 查找对应结果，因此重复商品 ID 会得到相同返回值。
 
 所有返回值计算成功后才会统一赋值；结果工厂抛出异常不会留下部分赋值。引用类型结果会被共享，不会复制。
 
@@ -474,7 +474,7 @@ Handler 调用中的每个不同商品 ID 查询一次存储层。`Distinct` 也
 `entry.SetResponse(response)`，或先生成严格按原始输入顺序排列、包含重复和缺失请求位置的结果，再调用
 `entries.SetResponses(responses)`。
 
-面向 Key 的 Selector 重载适合后端无序结果；有序重载不能直接接收后端原始行。显式批量重载即使将请求拆到多个
+后端返回无序结果时，可以使用上述字典配合结果工厂回填；按顺序赋值的重载不能直接接收后端原始行。显式批量重载即使将请求拆到多个
 处理批次或队列 Partition，仍会按输入顺序返回结果。
 只有 Handler 成功完成、对应请求的返回值已设置，且 Handler 作用域成功释放后，调用方的 `Task<TResponse>` 才会成功完成。
 
@@ -572,7 +572,7 @@ Partition 路由拆成多个处理批次。
 ### 停止与释放
 
 `DisposeAsync` 会停止接收新请求，处理完已经接收的所有提交（包括仍在等待容量的提交），然后释放协调器持有的资源。
-并发或重复调用共享同一次释放操作。通过 `AddRequestBatcher` 注册时，由应用容器负责异步释放。
+并发或重复调用会共享同一次释放操作。通过 `AddRequestBatcher` 注册时，由应用容器负责异步释放。
 
 ## Named RequestBatcher 与基础类型请求
 
@@ -741,7 +741,7 @@ static async ValueTask HandlePricesAsync(
 
 该管线只绑定一个处理委托，后续传入相等的委托会复用绑定；传入不同委托会在入队前报错。
 不同的 Handler 目标即使代码内容相同，也属于不同 Handler，应使用不同的 `batcherName`。并发首次调用只会绑定一次。
-委托由管线以单例持有，服务参数在每个实际执行批次中注入，不捕获调用方的请求作用域。
+每条管线复用同一个委托，服务参数在每个实际执行批次中注入，不捕获调用方的请求作用域。
 
 首参数必须是对应的批次列表类型。其余参数默认从 DI 解析必需服务，`[FromKeyedServices(key)]` 选择 Keyed 服务；
 必须显式指定 Key，不支持继承 Key。
@@ -782,8 +782,8 @@ DI 生命周期：Singleton 在容器内共享，Scoped 在同一批次内共享
 未配置 `UsePartitionKey` 时，RequestBatcher 固定使用一个内部 Partition，避免将彼此无关的请求分散到多个队列，
 也让它们自然地保留在一起进行批量处理。
 
-配置有限整数数值键或非 `null` 字符串键以及显式 Partition 数量后，队列使用指定数量的 Partition，使相同键保持
-局部性，同时让不同键可以独立推进。`P` 只是路由细节；`H = MaxConcurrency` 始终是全局 Handler 批次并发上限。
+配置 Partition Key 和 Partition 数量后，队列使用指定数量的 Partition，将相同键值的请求放入同一 Partition。
+数值键的值必须是有限整数，字符串键不能为 `null`。`P` 只是路由细节；`H = MaxConcurrency` 始终是全局 Handler 批次并发上限。
 单个 Partition 可以连续产生多个异步 Handler 批次，因此 Partition 数量不会限制为一次只能执行一个批次。
 
 1. 调用方通过 `ExecuteAsync` 提交单个请求。
@@ -821,6 +821,35 @@ Handler 会在分发调用链上执行，直到完成或遇到尚未完成的异
 
 ## 性能调优与压测
 
+### 让 Agent 协助制定初步配置
+
+如果希望 AI Agent 帮你分析如何设置参数，可以先告诉它**你当前的流量、下游耗时和业务要求**。
+尽量使用同一接口、同一时间段的数据，分别描述日常和高峰负载，并注明是单实例还是整个集群的数值。
+这些信息可以帮助 Agent 给出**初步配置和压测方案**，随后根据实测结果调整参数。
+
+| 现有信息 | 建议提供的内容 | 帮助判断什么 |
+| --- | --- | --- |
+| 入口 HTTP QPS | 单实例平均值、高峰值、短时间波动。 | 请求是否集中到达，有多少合批机会。 |
+| 每个入口请求的项数 | 每次涉及多少商品或 ID，提供平均、P95 和最大值。 | 把 HTTP 调用量换算为实际请求项负载。 |
+| 当前下游调用方式 | 每个入口请求调用几次下游、每次处理几项、串行还是并行。 | 当前能否批量处理，以及一次入口请求会产生多少下游并发调用。 |
+| 下游 RT 和异常 | 平均、P95、P99，以及超时、错误、限流比例。 | 下游耗时、拖尾及是否已经饱和。 |
+| 下游批量能力 | 单次允许的最大项数、报文大小，不同批大小下的 RT。 | 每次下游调用适合处理多少项，再选择 `BatchSize`。 |
+| 入口端到端延迟 | 平均、P95、P99、业务延迟目标和可接受的额外等待。 | 最多能接受多长的排队时间，以及怎样评价接入后的收益。 |
+| 部署和资源情况 | Pod 数、流量是否均衡、CPU、内存、GC、连接池占用与等待。 | 按实例估算负载，识别资源瓶颈。 |
+| 重复请求和热点 | 同一短时间段内重复 ID 的比例、热点集中程度。 | 批内去重的潜在收益，以及是否值得测试按 Key 路由。 |
+
+重复率应尽量反映可能进入同一批次的请求；全天重复率不能直接代表批内去重率。
+还需说明业务是只读还是写入，是否要求顺序、是否允许去重，以及取消和失败如何处理；同时提供下游的 QPS 配额、
+最大并发和连接池限制。
+
+**最小输入：单实例高峰 QPS、每次请求项数、当前下游调用方式、下游平均/P99 RT、批量接口限制、端到端延迟目标。**
+缺失的数据直接标为未知，不要让 Agent 用猜测补齐。只有单项查询 RT 时，不能直接推断批量查询的 RT；
+可以先补测几组批大小，再估算合并是否划算。
+
+让 Agent 给出 `MaxConcurrency`、`BatchSize`、`MaxPendingRequests` 和 Partition 的配置建议，
+同时列出依据、假设和需要压测验证的项目。**这些建议不是最优配置或性能保证**；接入后仍需比较吞吐、端到端 P95/P99、
+实际批大小和下游工作量，再逐项调整参数。
+
 ### Partition 实测：单条提交
 
 **以下是单机、模拟下游耗时的测试，结果仅供参考；请结合自己的部署环境、请求分布和真实下游重新压测。**
@@ -854,7 +883,7 @@ Handler 会在分发调用链上执行，直到完成或遇到尚未完成的异
 `ExecuteAsync(requests)` 每次提交一个请求列表。每轮 96 个请求分为 8 次调用，每次提交 12 个请求；
 每轮 4,096 个请求分为 128 次调用，每次提交 32 个请求。一次调用可能拆成多个 Handler 批次，
 不同调用也可能合并到同一个 Handler 批次；Handler 每批最多 64 个请求的上限不变。
-本实验只比较自己的 1/4 个 Partition，不与单条提交图横向比较。
+本实验只比较 1 个和 4 个 Partition，不与单条提交图横向比较。
 
 ![显式批量提交在一个与四个 Partition 下的吞吐](docs/assets/partition-submission-explicit.zh-CN.svg)
 
@@ -1100,7 +1129,7 @@ Handler 不会继承调用方的 HTTP Span、日志 Scope、Baggage 或其他 `A
 #### 采样
 
 注册 Tracing 扩展后，应用的 Sampler 决定每个 `Execute` Span 是否采样。
-集成包根据进入当前 Handler 批次的请求所对应的 `Execute` Span，决定 `Handle` 是否采样：
+集成包检查当前 Handler 批次中各请求对应的 `Execute` Span，决定 `Handle` 是否采样：
 
 | 当前批次对应的 Execute Span | Handle 采样行为 |
 | --- | --- |
@@ -1115,7 +1144,7 @@ Handler 内数据库和 HTTP 子 Span 仍使用应用的 Sampler。`ParentBasedS
 
 也可以选择不安装集成包，直接注册 `AddSource("RequestBatcher")`。此时应用的 Sampler 会独立决定 `Handle`
 是否采样，因此即使 `Execute` 已采样，对应的 Handler 处理链路仍可能缺失。采样、导出及 Link 数量限制也可能导致
-关联不完整；大批次需要保留更多关联时，应调整 SK 的 Span Link 上限。0% 采样不等于完全关闭 Instrument。
+关联不完整；大批次需要保留更多关联时，应调整 SDK 的 Span Link 数量上限。0% 采样不等于完全关闭 Instrument。
 
 详细采样流程图、上下文与 Link 的实现，以及性能评估，见[可观测性设计](docs/observability-design.md)。
 
@@ -1187,7 +1216,7 @@ Handler 失败日志包含原始异常，库本身不会记录请求内容。
 
 ## 示例应用
 
-[持续读取可观测性示例](samples/RequestBatcher.Observability/README.md)通过 Docker Compose 启动 Cart、Pricing 两个 Web API、C# 流量生成器、
+[持续读取场景的可观测性示例](samples/RequestBatcher.Observability/README.md)通过 Docker Compose 启动 Cart、Pricing 两个 Web API、C# 流量生成器、
 PostgreSQL 和 Grafana OTel LGTM。生成器并发提交含 2 到 10 条商品的购物车报价，展示调用总耗时、`Handle` 指向本批次 `Execute` 的 Link、
 `Execute` 指向处理它的 `Handle` 的 Link，以及下游数据库 Span。
 

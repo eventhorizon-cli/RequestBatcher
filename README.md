@@ -498,8 +498,8 @@ to query each product ID once within the current handler invocation. `Distinct` 
 value tuples, and custom equality comparers. Missing product IDs are absent from the store result and map to `null`.
 
 **Deduplication is limited to the current handler batch:** it does not combine entries across handler batches or queue
-partitions. The selector overload evaluates the raw request for every entry after the unordered backend result has been
-indexed by key, so duplicate entries receive the same response.
+partitions. In this example, the Handler indexes the unordered backend results by product ID. The response factory passed
+to `SetResponses` looks up the result for each entry, so duplicate product IDs receive the same response.
 
 All responses are computed before assignment; a factory failure leaves unset entries unchanged. Reference-type results
 are shared, not cloned.
@@ -508,7 +508,7 @@ If deduplication is unnecessary, remove `Distinct()` and keep the same response 
 individually with `entry.SetResponse(response)`, or use the ordered `entries.SetResponses(responses)` overload after producing exactly one response per original entry in input order,
 including duplicates and missing requests.
 
-The keyed selector overload is recommended for unordered backend results; the ordered overload must receive the aligned
+For unordered backend results, use a dictionary with the response factory as shown above; the ordered overload must receive the aligned
 sequence, never raw backend rows. The explicit-group overload returns responses in input order even when RequestBatcher
 splits the requests across handler batches or queue partitions.
 The caller's `Task<TResponse>` succeeds only after the handler succeeds, its item's response has been set, and
@@ -888,6 +888,35 @@ or synchronously blocking work before that point can delay other batches even wh
 `MaxConcurrency` is an upper bound; it does not automatically parallelize synchronous handler code.
 
 ## Performance Tuning and Benchmarks
+
+### Preparing Inputs for an Agent
+
+If you want an AI Agent to help choose an initial configuration before adopting RequestBatcher, share the following
+existing-system measurements and business constraints. Use the same endpoint and time window, distinguish typical from
+peak traffic, and mark whether each value describes one instance or the whole cluster. Use the proposal as a starting
+point, then adjust it through load testing.
+
+| Existing data | What to provide | What it helps decide |
+| --- | --- | --- |
+| Entry HTTP QPS | Typical and peak QPS per instance, including short bursts | Initial per-instance load and concurrency range |
+| Request items per entry | Mean, P95, and maximum item count per entry | `BatchSize` and downstream fan-out assumptions |
+| Downstream calls per entry | Calls per incoming request, items per call, and whether calls are sequential or parallel | Handler fan-out shape and child-call capacity |
+| Downstream RT and limits | Mean, P95, P99 RT, plus errors, timeouts, and rate-limit behavior | `MaxConcurrency` headroom and failure constraints |
+| Downstream batch capability | Supported items per call, payload limits, and RT at representative batch sizes | Downstream sub-batch size and `BatchSize` starting point |
+| End-to-end latency target | Current mean, P95, P99, target values, and allowed additional queueing time | Queueing budget and concurrency/throughput tradeoffs |
+| Pod and resource state | Pod count, traffic balance, CPU, memory, GC, connection-pool wait, and other saturation signals | Per-pod concurrency and partition strategy |
+| Same-window duplication and hot keys | Duplicate-ID ratio and hot-key distribution during the same window; do not substitute an all-day duplicate rate | Whether deduplication or partition-key routing is useful |
+
+Also state the business semantics: read versus write behavior, ordering requirements, deduplication rules, cancellation
+and failure handling, and downstream QPS, concurrency, or connection-pool limits. Mark missing values as `unknown`; a single-item RT
+does not establish a batch RT, so use a small targeted test when batch behavior is unknown.
+
+**Minimum useful input:** per-instance peak QPS, items per entry, downstream call pattern, downstream mean/P99 RT,
+batch limits, and the end-to-end latency target.
+
+An Agent can use these inputs to propose initial `MaxConcurrency`, `BatchSize`, `MaxPendingRequests`, and partition
+settings, together with assumptions and measurements still needed. The proposal is not an optimum or a performance
+guarantee; adjust it with correctness and load tests in the target environment.
 
 ### Partition Measurements: Single Submissions
 

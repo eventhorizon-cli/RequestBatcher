@@ -166,6 +166,10 @@ After deduplication, query directly if the items fit in one downstream call. Oth
 `3–10` times the desired downstream batch size is a tuning starting point; validate it against downstream capacity.
 See [Estimating Handler and Downstream Concurrency Separately](https://github.com/eventhorizon-cli/RequestBatcher#estimating-handler-and-downstream-concurrency-separately).
 
+Before tuning, collect the existing system's per-instance peak QPS, request-item counts, downstream RT and batch limits,
+and latency target; see [Preparing Inputs for an Agent](https://github.com/eventhorizon-cli/RequestBatcher#preparing-inputs-for-an-agent).
+These inputs support an initial configuration proposal, not a performance guarantee.
+
 ### Configuration Reference
 
 | Option | Default | Behavior |
