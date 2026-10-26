@@ -1,0 +1,37 @@
+%% 语义契约：一个 MaxConcurrency=1 的 Handler 批次，将 120 个无重复请求拆成四个并行的 30 项下游调用。
+%% Handler 等待四个调用全部完成，再将结果回填到 120 个原始响应。
+%% 理想计时：每批 120 项，4 次查询并行，约 20 ms 完成。
+%% 1 秒包含 50 个 20 ms，即每秒约完成 50 批；50 批/秒 * 120 项/批 = 6,000 项/秒。
+%% 这不是压测结果，前提是请求持续到达、下游支持 4 个调用，并忽略其他开销。
+flowchart LR
+    Input["120 个请求<br/>无重复"] --> Split
+
+    subgraph Batch["1 个 Handler 批次<br/>MaxConcurrency = 1"]
+        Split["Chunk(30)<br/>4 个 30 项子批次"]
+        Q1["下游查询 1<br/>30 项 · 约 20 ms"]
+        Q2["下游查询 2<br/>30 项 · 约 20 ms"]
+        Q3["下游查询 3<br/>30 项 · 约 20 ms"]
+        Q4["下游查询 4<br/>30 项 · 约 20 ms"]
+        Await["等待<br/>Task.WhenAll"]
+        Map["回填结果到<br/>120 个响应"]
+        Split --> Q1
+        Split --> Q2
+        Split --> Q3
+        Split --> Q4
+        Q1 --> Await
+        Q2 --> Await
+        Q3 --> Await
+        Q4 --> Await
+        Await --> Map
+    end
+
+    classDef input fill:#eaf2ff,stroke:#3567a7,color:#1d3b66,stroke-width:1.5px
+    classDef core fill:#edf1f5,stroke:#596773,color:#303b44,stroke-width:1.5px
+    classDef downstream fill:#fff4d6,stroke:#8a6a1d,color:#4d3b0e,stroke-width:1.5px
+    classDef wait fill:#f3effa,stroke:#75529b,color:#422d59,stroke-width:1.5px
+    classDef output fill:#eaf2ff,stroke:#3567a7,color:#1d3b66,stroke-width:1.5px
+    class Input input
+    class Split core
+    class Q1,Q2,Q3,Q4 downstream
+    class Await wait
+    class Map output

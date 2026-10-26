@@ -15,6 +15,10 @@ RequestBatcher combines requests that are already queued, limits handler-batch c
 invokes the application handler with a batch. It is intended for database, cache, and API operations that support
 processing multiple items together.
 
+**RequestBatcher does not wait to fill a batch or add a fixed collection window.** When an execution slot is available,
+it takes the requests already queued and dispatches them. Requests still queue when all slots are occupied;
+normal scheduling and downstream execution also take time.
+
 ![Request coalescing illustration](docs/assets/request-batcher-request-coalescing.svg)
 
 Separate concurrent requests can be combined into one batch before a downstream batch operation. The illustration is
@@ -36,8 +40,6 @@ not guaranteed to arrive in one batch.
 
 ## How Requests Are Batched: Opportunistic Merging
 
-The illustration above shows how requests may be combined. This section explains how those handler batches are formed.
-
 RequestBatcher uses [BufferQueue](https://github.com/eventhorizon-cli/BufferQueue) to combine queued requests within a
 .NET process and pass them to an application handler. The current dependency is
 [BufferQueue 2.1.0](https://www.nuget.org/packages/BufferQueue/2.1.0); applications do not register or configure it
@@ -53,12 +55,20 @@ await their individual results.
 After dispatching a batch, the loop continues. If another slot is available, it can pull and dispatch the next batch
 without waiting for the previous batch to finish. Each batch holds one slot until its processing completes.
 
-**It waits for the next push notification only when none of the assigned partitions has data.**
+**With a free execution slot and no data in any partition, it waits for a data notification. When all slots are occupied,
+it waits for an executing batch to complete.**
 
 There is no periodic polling or fixed collection window. With a free slot, waiting mainly comes from wake-up and
 scheduling; when all slots are occupied, requests must wait for capacity to execute. `BatchSize` limits the number of
 requests per handler call: a batch may contain just one request at low traffic or several requests already queued in the
 same partition during a burst.
+
+**A lower `MaxConcurrency` may let requests accumulate while they wait for an execution slot**; once a slot is released,
+the requests already queued can merge. **This queueing comes from concurrency control, not an added collection delay.**
+Even with `MaxConcurrency = 1`, **a free slot and one queued request allow that request to run without waiting for `BatchSize` items.**
+See [Configuring Partitions and MaxConcurrency](#configuring-partitions-and-maxconcurrency) for configuration tradeoffs, and
+[Estimating Handler and Downstream Concurrency Separately](#estimating-handler-and-downstream-concurrency-separately)
+for the low-concurrency throughput estimate and internal batching example.
 
 ![Opportunistic merging flow](docs/assets/request-batcher-opportunistic-merging.svg)
 
@@ -114,43 +124,161 @@ dotnet add package RequestBatcher
 
 The package supports .NET 8 and .NET 10 applications through `net8.0` and `net10.0` assets.
 
-Register the response-enabled handler and batcher with `AddRequestBatcher` at startup. The handler depends on your
-application's `IPriceStore` implementation. At the call site, resolve `IRequestBatcher<PriceQuery, PriceQuote?>` from
-the same DI container or inject it into an application service's constructor.
+Two registration styles are available:
+
+- **Handler type**: use `AddRequestBatcher` to register a Handler type with an explicit lifetime and keep processing logic in a separate class.
+- **Delegate Handler**: use `AddDelegateRequestBatcher`, then pass a static delegate to `ExecuteAsync`; services are injected through its parameters. See [Delegate Handlers](#delegate-handlers).
+
+For primitive request types such as `int` or `string`, prefer [Named RequestBatcher](#named-requestbatcher-instances-and-primitive-requests) to distinguish operations that share the same request type.
+
+### Quickstart
+
+In an ASP.NET Core empty project (`dotnet new web`), install the package above and replace `Program.cs` with this
+complete example. It uses an in-memory catalog and the default single partition; no database is required.
 
 ```csharp
 using Microsoft.Extensions.DependencyInjection;
 using RequestBatcher;
 
-// At startup: register the store and response-enabled batcher.
-services.AddScoped<IPriceStore, PriceStore>();
-services.AddRequestBatcher<PriceQuery, PriceQuote?, PriceQueryHandler>(
+var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddRequestBatcher<PriceLookup, decimal?, CatalogHandler>(ServiceLifetime.Singleton);
+
+var app = builder.Build();
+app.MapGet("/prices/{productId:long}", async (
+    long productId,
+    IRequestBatcher<PriceLookup, decimal?> batcher,
+    CancellationToken cancellationToken) =>
+{
+    var price = await batcher.ExecuteAsync(new PriceLookup(productId), cancellationToken);
+    return price is { } value ? Results.Ok(value) : Results.NotFound();
+});
+app.Run();
+
+public sealed record PriceLookup(long ProductId);
+
+public sealed class CatalogHandler : IRequestBatchHandler<PriceLookup, decimal?>
+{
+    private static readonly Dictionary<long, decimal> Prices = new() { [101] = 17.90m };
+
+    public ValueTask HandleAsync(
+        IReadOnlyList<RequestBatchEntry<PriceLookup, decimal?>> entries,
+        CancellationToken cancellationToken = default)
+    {
+        foreach (var entry in entries)
+        {
+            entry.SetResponse(Prices.TryGetValue(entry.Request.ProductId, out var price) ? price : null);
+        }
+
+        return ValueTask.CompletedTask;
+    }
+}
+```
+
+Run `dotnet run --urls http://localhost:5080`, then request `GET http://localhost:5080/prices/101` for `17.90`;
+an unknown product returns `404`. The handler receives a list even though each caller submits one request.
+Concurrent callers may share a handler batch. In your application, replace the catalog lookup with the downstream batch
+operation; see the [typed PostgreSQL sample](samples/RequestBatcher.Deduplication) or
+[delegate PostgreSQL sample](samples/RequestBatcher.Delegates) for complete database-backed applications.
+
+**A response Handler must assign exactly one response to every entry before completing successfully.** An explicit
+`null` is a valid response. Missing assignments fail the entire Handler batch. Callers await the actual Handler
+outcome. See [Processing Semantics](#processing-semantics) for failure and cancellation.
+
+`AddRequestBatcher` registers the handler, coordinator, and internal BufferQueue topic in the application's existing
+`IServiceCollection`. The application does not configure BufferQueue directly, and RequestBatcher never builds a
+nested service provider.
+
+Scoped and transient handlers are resolved once per handler batch in an asynchronous scope. A singleton handler is
+reused across batches and must be thread-safe when `MaxConcurrency > 1`.
+
+### Partition-Key Routing
+
+A partition key is an optional routing rule for related requests:
+
+```csharp
+options.MaxConcurrency = 4;
+options.UsePartitionKey(query => query.ProductId, partitionCount: 8);
+```
+
+Equal finite, integer-valued numeric keys or equal non-null string keys are routed to the same queue partition among the
+configured partition count when it is greater than one. A count of one disables keyed routing and skips the selector;
+counts below one are rejected.
+Different keys can still share a partition, so keys and partitions are not one-to-one.
+
+Partition routing does not force all requests for one key into the same handler batch, and it does not deduplicate
+requests. RequestBatcher provides no global, partition-local, or partition-key handler execution ordering guarantee;
+partition routing is not a serialization or mutual-exclusion mechanism.
+
+String routing considers the complete key, so a shared prefix alone does not force different keys into one partition.
+Exact partition assignments are internal and may change
+between versions; equal keys still route together within a batcher instance. Such changes can affect batch composition
+and the amount of duplicate work merged inside a handler batch.
+
+### Configuring Partitions and MaxConcurrency
+
+**`UsePartitionKey(selector, partitionCount: 1)` behaves the same at runtime as leaving `UsePartitionKey` unconfigured.**
+Setting the count to `1` clears any previously configured key and skips the selector. Counts below `1`
+throw `ArgumentOutOfRangeException`; the selector must still be non-null.
+A single partition can still supply several concurrent Handler batches.
+
+**Use one partition by default; add partitions only for a clear keyed-routing need with measured benefits.** More partitions do not add Handler
+execution slots. Each pull reads only one partition, so splitting a small burst can increase partially filled
+batches and downstream calls. The independent experiments in
+[Performance Tuning and Benchmarks](#performance-tuning-and-benchmarks) measure this tradeoff.
+
+**Start load testing with `MaxConcurrency = 1`, then increase it gradually if throughput or queueing latency misses your target.**
+Too many execution slots can pull requests earlier into smaller batches, reducing merging and deduplication opportunities;
+too few can increase queueing. Prefer the smallest value that meets your throughput and latency requirements.
+
+**Lower concurrency can improve merging but also increase tail latency.** With `MaxConcurrency = 1`, a slow batch
+occupies the only execution slot while later requests queue. A Handler using `Task.WhenAll` must wait for its slowest
+child query before releasing that slot. Compare actual batch sizes, distinct items queried, downstream call counts,
+and end-to-end P95/P99 to decide whether reduced downstream work justifies the extra waiting.
+If merging is effective but tail latency misses the target, try `2`, then `4`, while checking downstream capacity.
+
+**Low Handler concurrency does not necessarily mean low request throughput.** Each Handler batch processes multiple requests
+and may split them into parallel downstream calls, so a low `MaxConcurrency` can still sustain substantial traffic.
+Actual capacity depends on batch size, Handler duration, and downstream capacity; see
+[Estimating Handler and Downstream Concurrency Separately](#estimating-handler-and-downstream-concurrency-separately).
+
+When keyed routing is needed, set the partition count explicitly through `UsePartitionKey`. This configuration uses
+eight queue partitions sharing four handler execution slots:
+
+```csharp
+builder.Services.AddRequestBatcher<ProductQueryItem, ProductBatchHandler>(
     ServiceLifetime.Scoped,
     options =>
     {
-        // Four concurrent handler batches, shared by all eight queue partitions.
+        // Per-pod handler-batch limit. Six pods x four slots = at most 24 handler batches cluster-wide.
         options.MaxConcurrency = 4;
         options.BatchSize = 100;
         options.MaxPendingRequests = 5_000;
-        // Equal product IDs route to the same partition; separate batches can still run concurrently.
-        options.UsePartitionKey(query => query.ProductId, partitionCount: 8);
-    });
 
-// At the call site: resolve the typed response interface from the application's service provider.
-var batcher = serviceProvider.GetRequiredService<IRequestBatcher<PriceQuery, PriceQuote?>>();
-var quote = await batcher.ExecuteAsync(new PriceQuery(ProductId: 101));
+        // Routing/locality only. Eight queue partitions are independent of the four execution slots.
+        options.UsePartitionKey(item => item.ProductId, partitionCount: 8);
+    });
 ```
 
-Use `Microsoft.Extensions.DependencyInjection` and `RequestBatcher`. The [Request/Response Batching](#requestresponse-batching)
-section below defines `PriceQuery`, `PriceQuote`, `PriceQueryHandler`, and the `IPriceStore` dependency. In application
-services, constructor-inject `IRequestBatcher<PriceQuery, PriceQuote?>` instead of resolving it manually.
+`partitionCount` controls how requests are distributed across queues; equal keys always route to the same partition.
+`MaxConcurrency` limits concurrent handler batches for one registered batcher, with all partitions sharing those slots.
+A single partition can also supply several concurrent batches.
+
+### Configuration Reference
+
+| Option | Default | Behavior |
+| --- | ---: | --- |
+| `BatchSize` | `128` | Maximum requests passed to one handler call. |
+| `MaxConcurrency` | `1` | Maximum concurrent handler batches. It is independent of the keyed partition count. |
+| `MaxPendingRequests` | `8192` | Internal BufferQueue capacity for requests that have not yet been pulled for execution. |
+| `FullMode` | `Wait` | `Wait` waits for capacity and splits explicit groups larger than capacity into slices. `Fail` rejects the whole submission without admitting any item unless it fits immediately. |
+| `UsePartitionKey(selector, partitionCount)` | Not set (one partition) | Requires `partitionCount >= 1`; `1` disables keyed routing without invoking the selector, and larger counts route equal keys to one partition. |
+
+No ordering is guaranteed for handler execution, including when `MaxConcurrency = 1`.
 
 ## APIs
 
-The response wrapper is `RequestBatchEntry<TRequest, TResponse>`. When upgrading code that used
-`RequestBatchItem<TRequest, TResponse>`, update that type and its extension class name to `RequestBatchEntry`
-and `RequestBatchEntryExtensions`, then rebuild all consumers. This is a source and binary breaking change;
-response assignment and completion behavior are unchanged.
+Use `IRequestBatcher<TRequest>` for completion only, or `IRequestBatcher<TRequest, TResponse>` for a result per request.
+Response handlers receive `RequestBatchEntry<TRequest, TResponse>` entries containing the request and its response slot.
 
 ### Request-Only API
 
@@ -386,6 +514,22 @@ splits the requests across handler batches or queue partitions.
 The caller's `Task<TResponse>` succeeds only after the handler succeeds, its item's response has been set, and
 the handler scope has been disposed successfully.
 
+### Example: Merging Repeated Queries
+
+Several `PriceQuery` requests in one batch may refer to the same `ProductId`. The handler deduplicates product IDs,
+issues one batch query, and maps results by `ProductId` to every original request, including duplicates. Response
+assignment does not depend on database row order.
+
+Routing by `ProductId` puts equal product IDs in one partition, but does not guarantee the same batch.
+**Deduplication applies only within the current handler batch**; separate batches may query the same product again.
+It is not a cache across batches.
+
+The runnable [PostgreSQL Web API sample](samples/RequestBatcher.Deduplication) uses primitive `int` IDs in its named
+`"price"` pipeline. Its `PriceQueryHandler` deduplicates IDs with `Distinct()`, queries PostgreSQL, and maps rows by
+product ID with `entries.SetResponses(id => pricesById.GetValueOrDefault(id)?.Price)`. Callers receive `decimal?`
+prices, with `null` for missing products. Both single-ID and list submissions use this handler; list results retain
+input order and duplicates even when requests span several handler batches.
+
 ## Explicit Group Submission
 
 When the caller already has multiple requests, it can submit them with one call:
@@ -423,6 +567,57 @@ invocation.
 | Completion | The returned `Task` represents this request's actual handler outcome. | The returned `Task` waits for every item in the submission. |
 | Failure | A handler failure fails every request in that handler batch. | Some items may succeed before another handler batch fails. The group `Task` faults, but successful work is not rolled back. |
 | Cancellation | Cancellation removes the request only before dispatch. | The same token applies to every item; undispatched items can be canceled while dispatched items continue to their actual outcome. |
+
+## Processing Semantics
+
+### Completion and Failure
+
+- A successful handler call marks every request in that handler batch as successful. An explicit submission's task
+  waits for all its requests, including those assigned to other handler batches.
+- If the handler throws a non-cancellation exception, every request in that handler batch fails with the original
+  exception.
+- Response tasks represent a handler `OperationCanceledException` as cancellation. A single response preserves its
+  cancellation token and throws `TaskCanceledException` when awaited; the original cancellation exception instance,
+  message, and derived type are not preserved.
+- RequestBatcher does not retry a failed handler.
+- The batch overload waits for the whole submitted group and faults if any handler call involved in that submission
+  fails.
+- If several handler calls fail for one explicit group, `await` throws one original exception following normal `Task`
+  semantics. All distinct exception instances remain available through `Task.Exception.InnerExceptions`; one handler
+  exception fanned out to several requests is recorded once.
+
+### Caller Cancellation
+
+Caller cancellation can remove a request only before handler dispatch. Once the handler starts, RequestBatcher reports
+the real handler outcome instead of changing the caller's `Task` to canceled. This prevents cancellation from hiding a
+side effect that may already have happened.
+
+The token passed to the handler belongs to RequestBatcher's processing lifetime, not to an individual caller. One
+caller's cancellation therefore cannot cancel work for the other requests in the same batch.
+
+For an explicit group, the caller token is applied to every item. Cancellation can therefore leave a mix of canceled
+items and items that were already dispatched. The returned `Task` still waits for all items; it faults if any item
+faults, otherwise it is canceled when at least one item was canceled. Completed side effects are not rolled back.
+
+### Capacity and Backpressure
+
+`MaxPendingRequests` sets the bounded BufferQueue capacity for requests that remain queued. A batch is auto-committed
+when the dispatch loop pulls it, before its handler starts. Therefore, up to `MaxConcurrency * BatchSize` pulled
+requests can be executing in addition to queued capacity. It is not a limit on the size of an explicit submission or
+on the number of callers waiting for capacity:
+
+- `FullMode = Wait` waits asynchronously for enough capacity and honors caller cancellation while waiting.
+- In `Wait` mode, a group no larger than the capacity is admitted atomically. A larger group is split into consecutive
+  capacity-sized slices. Cancellation can leave already dispatched requests running while undispatched requests are
+  canceled.
+- `FullMode = Fail` requires the whole submission to fit immediately. Otherwise, including when a group is larger than
+  the capacity, it returns a faulted `Task` with `RequestBatchQueueFullException` without admitting any item.
+
+### Shutdown and Disposal
+
+`DisposeAsync` stops accepting new requests, drains every accepted submission (including submissions waiting for
+capacity), then releases coordinator-owned resources. Concurrent and repeated disposal calls share the same operation.
+When registered through `AddRequestBatcher`, the application container owns async disposal.
 
 ## Named RequestBatcher Instances and Primitive Requests
 
@@ -531,14 +726,7 @@ mapping. At the call site, use a static lambda, static anonymous method, static 
 group. When the logic grows or needs to be reused and tested independently, use a separate `IRequestBatchHandler`
 class.
 
-**Delegate handlers are optimized for repeated execution**: signature inspection and expression-tree compilation of a
-strongly typed invoker happen once on first binding. Subsequent submissions use a reference-equality fast path, and
-dispatched batches reuse the cached invoker without reflection, `DynamicInvoke` or argument arrays. This automatic
-binding mode requires dynamic code and is not supported for NativeAOT or trimming.
-
-In-memory benchmarks using the same configuration show individual-submission means for delegate and typed handlers
-differing by about 1%, with similar allocations and no clear steady-state regression. These measurements exclude the
-initial compilation cost; see the [delegate-handler performance comparison](docs/evaluations/delegate-handlers/README.md).
+Delegate binding requires dynamic code and is not supported for NativeAOT or trimming.
 
 Use `AddDelegateRequestBatcher` to declare the request/response contract and options, then supply a static handler
 target at the call site:
@@ -640,69 +828,12 @@ binding and delegate identity, but cannot reliably distinguish static-lambda sou
 lambda. Ordinary typed-handler calls are unaffected, and consumers can disable the analyzers. See the
 [delegate-handler design](docs/delegate-handlers-design.md).
 
+Measured time and allocations are recorded in the
+[delegate-handler performance comparison](docs/evaluations/delegate-handlers/README.md).
+
 The standalone [delegate PostgreSQL sample](samples/RequestBatcher.Delegates) uses delegate handlers for both price updates and
 `POST /prices/query` list lookups. Each static lambda injects a keyed scoped `PriceStore` per handler batch.
 The [typed-handler sample](samples/RequestBatcher.Deduplication) provides the original handler-class examples separately.
-
-## Processing Semantics
-
-### Completion and Failure
-
-- A successful handler call marks every request in that handler batch as successful. An explicit submission's task
-  waits for all its requests, including those assigned to other handler batches.
-- If the handler throws a non-cancellation exception, every request in that handler batch fails with the original
-  exception.
-- Response tasks represent a handler `OperationCanceledException` as cancellation. A single response preserves its
-  cancellation token and throws `TaskCanceledException` when awaited; the original cancellation exception instance,
-  message, and derived type are not preserved.
-- RequestBatcher does not retry a failed handler.
-- The batch overload waits for the whole submitted group and faults if any handler call involved in that submission
-  fails.
-- If several handler calls fail for one explicit group, `await` throws one original exception following normal `Task`
-  semantics. All distinct exception instances remain available through `Task.Exception.InnerExceptions`; one handler
-  exception fanned out to several requests is recorded once.
-
-### Caller Cancellation
-
-Caller cancellation can remove a request only before handler dispatch. Once the handler starts, RequestBatcher reports
-the real handler outcome instead of changing the caller's `Task` to canceled. This prevents cancellation from hiding a
-side effect that may already have happened.
-
-The token passed to the handler belongs to RequestBatcher's processing lifetime, not to an individual caller. One
-caller's cancellation therefore cannot cancel work for the other requests in the same batch.
-
-For an explicit group, the caller token is applied to every item. Cancellation can therefore leave a mix of canceled
-items and items that were already dispatched. The returned `Task` still waits for all items; it faults if any item
-faults, otherwise it is canceled when at least one item was canceled. Completed side effects are not rolled back.
-
-### Capacity and Backpressure
-
-`MaxPendingRequests` sets the bounded BufferQueue capacity for requests that remain queued. A batch is auto-committed
-when the dispatch loop pulls it, before its handler starts. Therefore, up to `MaxConcurrency * BatchSize` pulled
-requests can be executing in addition to queued capacity. It is not a limit on the size of an explicit submission or
-on the number of callers waiting for capacity:
-
-- `FullMode = Wait` waits asynchronously for enough capacity and honors caller cancellation while waiting.
-- In `Wait` mode, a group no larger than the capacity is admitted atomically. A larger group is split into consecutive
-  capacity-sized slices. Cancellation can leave already dispatched requests running while undispatched requests are
-  canceled.
-- `FullMode = Fail` requires the whole submission to fit immediately. Otherwise, including when a group is larger than
-  the capacity, it returns a faulted `Task` with `RequestBatchQueueFullException` without admitting any item.
-
-### Shutdown and Disposal
-
-`DisposeAsync` stops accepting new requests, drains every accepted submission (including submissions waiting for
-capacity), then releases coordinator-owned resources. Concurrent and repeated disposal calls share the same operation.
-When registered through `AddRequestBatcher`, the application container owns async disposal.
-
-## Dependency Injection
-
-`AddRequestBatcher` registers the handler, coordinator, and internal BufferQueue topic in the application's existing
-`IServiceCollection`. The application does not configure BufferQueue directly, and RequestBatcher never builds a
-nested service provider.
-
-Scoped and transient handlers are resolved once per handler batch in an asynchronous scope. A singleton handler is
-reused across batches and must be thread-safe when `MaxConcurrency > 1`.
 
 ## Request Processing Flow
 
@@ -747,51 +878,16 @@ pulling a queue batch, then starts its handler and returns to waiting for anothe
 requests remain in BufferQueue. As soon as any one handler batch completes, its slot becomes free and the loop can pull
 the next batch while the other handlers keep running. It does not wait for all currently running batches to finish.
 
-## Configuration
+## Routing Rules and Dispatch
 
-| Option | Default | Behavior |
-| --- | ---: | --- |
-| `BatchSize` | `128` | Maximum requests passed to one handler call. |
-| `MaxConcurrency` | `1` | Maximum concurrent handler batches. It is independent of the keyed partition count. |
-| `MaxPendingRequests` | `8192` | Internal BufferQueue capacity for requests that have not yet been pulled for execution. |
-| `FullMode` | `Wait` | Waits for capacity; `Fail` rejects immediately when capacity is unavailable. |
-| `UsePartitionKey(selector, partitionCount)` | Not set (one partition) | Requires `partitionCount >= 1`; `1` disables keyed routing without invoking the selector, and larger counts route equal keys to one partition. |
+When keyed routing is enabled, the queue rotates pull opportunities among readable partitions. This does not promise
+equal handler execution time or fairness between individual keys.
 
-No ordering is guaranteed for handler execution, including when `MaxConcurrency = 1`.
+A handler runs on the dispatch call path until it completes or reaches an incomplete asynchronous wait. CPU-heavy
+or synchronously blocking work before that point can delay other batches even when execution slots remain free.
+`MaxConcurrency` is an upper bound; it does not automatically parallelize synchronous handler code.
 
-### Partition Count and Concurrency
-
-**`UsePartitionKey(selector, partitionCount: 1)` behaves the same at runtime as leaving `UsePartitionKey` unconfigured.**
-Setting the count to `1` clears any previously configured key and skips the selector. Counts below `1`
-throw `ArgumentOutOfRangeException`; the selector must still be non-null.
-A single partition can still supply several concurrent handler batches. Increase `MaxConcurrency` when you need more
-downstream concurrency.
-
-**One partition is the preferred default when keyed routing is not needed.** More partitions do not add Handler
-execution slots. Each pull reads only one partition, so splitting a small burst can increase partially filled
-batches and downstream calls. The independent experiments below measure this tradeoff with the current implementation.
-
-When keyed routing is needed, set the partition count explicitly through `UsePartitionKey`. This configuration uses
-eight queue partitions sharing four handler execution slots:
-
-```csharp
-builder.Services.AddRequestBatcher<ProductQueryItem, ProductBatchHandler>(
-    ServiceLifetime.Scoped,
-    options =>
-    {
-        // Per-pod handler-batch limit. Six pods x four slots = at most 24 handler batches cluster-wide.
-        options.MaxConcurrency = 4;
-        options.BatchSize = 100;
-        options.MaxPendingRequests = 5_000;
-
-        // Routing/locality only. Eight queue partitions are independent of the four execution slots.
-        options.UsePartitionKey(item => item.ProductId, partitionCount: 8);
-    });
-```
-
-`partitionCount` controls how requests are distributed across queues; equal keys always route to the same partition.
-`MaxConcurrency` limits concurrent handler batches for one registered batcher, with all partitions sharing those slots.
-A single partition can also supply several concurrent batches.
+## Performance Tuning and Benchmarks
 
 ### Partition Measurements: Single Submissions
 
@@ -907,8 +1003,93 @@ affect merging, so start load testing with fewer partitions.
 
 ### Estimating Handler and Downstream Concurrency Separately
 
-**`MaxConcurrency` limits concurrent handler batches, not the downstream calls within each handler.** In this example,
-handler-batch QPS is 480. Estimate handler concurrency using the mean duration of the whole handler, including all child
+**`MaxConcurrency` limits concurrent Handler batches for one registered batcher, not the downstream calls within each batch.**
+Start load testing at `MaxConcurrency = 1` and increase it as needed, for example by testing `2–4`. A `BatchSize`
+of roughly `3–10` times the desired downstream sub-batch size `S` is another tuning starting point.
+
+Inside the Handler, deduplicate when appropriate, split the resulting items into sub-batches of at most `S`,
+run those downstream calls in parallel, await all of them, and map the results back to every original request. The actual
+number of child calls is `ceil(U / S)`, where `U` is the post-deduplication item count: low traffic creates fewer calls
+without waiting to fill a full batch, while backlog allows more small sub-batches to run concurrently.
+**Downstream call counts can therefore adapt to actual batch size while Handler concurrency stays low.**
+
+**`MaxConcurrency = 1` means one Handler batch at a time, not one request or one downstream call at a time.**
+Assume sustained load, 120 actual requests for distinct products in each Handler batch, and a downstream that supports
+four concurrent queries taking about 20 ms each. `Chunk(30)` splits the 120 requests into four parallel queries,
+and `Task.WhenAll` waits for the slowest. Temporarily ignoring scheduling, deduplication, and response-mapping overhead,
+this means **one batch of 120 requests completes every 20 ms (0.02 seconds)**.
+
+**One second contains fifty 20 ms intervals.** Each interval completes one batch of 120 requests,
+so about 50 batches finish each second, with 120 items per batch:
+**`50 batches/s × 120 items/batch = 6,000 items/s`**.
+
+This explains why low Handler concurrency can support high throughput; **it does not mean one slot is sufficient for every workload**.
+
+![One Handler batch fans out into four concurrent downstream queries](docs/assets/request-batcher-single-slot-fanout.svg)
+
+This is an idealized estimate under sustained load, not a measured result. More generally,
+`item throughput ≈ MaxConcurrency × actual mean batch size / mean Handler seconds`.
+Use actual batch size and complete Handler duration, not the configured maximum `BatchSize`.
+Increase `MaxConcurrency` gradually if throughput or queueing latency misses your target, checking downstream saturation as well.
+
+The concrete sequence is **`Distinct → Chunk → start async queries → Task.WhenAll → assign responses`**.
+This replacement Handler uses `PriceQuery`, `PriceQuote`, and `IPriceStore` from
+[Request/Response Batching](#requestresponse-batching). Each downstream query receives at most 30 distinct products:
+
+```csharp
+public sealed class ChunkedPriceQueryHandler(IPriceStore store)
+    : IRequestBatchHandler<PriceQuery, PriceQuote?>
+{
+    public async ValueTask HandleAsync(
+        IReadOnlyList<RequestBatchEntry<PriceQuery, PriceQuote?>> entries,
+        CancellationToken cancellationToken = default)
+    {
+        const int downstreamBatchSize = 30;
+        var ids = entries
+            .Select(entry => entry.Request.ProductId)
+            .Distinct()
+            .ToArray();
+
+        IEnumerable<PriceQuote> prices;
+        if (ids.Length <= downstreamBatchSize)
+        {
+            prices = await store.FindAsync(ids, cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            var queries = ids
+                .Chunk(downstreamBatchSize)
+                .Select(async chunk => await store.FindAsync(chunk, cancellationToken).ConfigureAwait(false))
+                .ToArray();
+            var results = await Task.WhenAll(queries).ConfigureAwait(false);
+            prices = results.SelectMany(rows => rows);
+        }
+
+        var pricesById = prices.ToDictionary(row => row.ProductId);
+        entries.SetResponses(request => pricesById.GetValueOrDefault(request.ProductId));
+    }
+}
+```
+
+**Check the deduplicated count first: up to 30 items use one direct query; only larger sets use `Chunk(30)` and `Task.WhenAll`.**
+The single-query path avoids chunk arrays, a query Task array, and an extra `WhenAll` wait.
+Count the products actually queried, not the original requests: 120 requests that deduplicate to 20 products need just one query.
+
+`Chunk(30)` splits the IDs already available without waiting to fill a chunk. In the split path, `ToArray()` enumerates the queries
+and starts each asynchronous call; `Task.WhenAll` waits for all of them. **It does not throttle concurrency,
+and asynchronous I/O does not need a `Task.Run` wrapper.** After all queries succeed, mapping by product ID assigns a
+response to every original entry, including duplicates and an explicit `null` for missing products.
+If any query fails, the Handler fails after all started queries finish, failing its entire Handler batch.
+
+The `IPriceStore` implementation must support concurrent calls. For example, these queries must not share an EF Core
+`DbContext`; the store should provide an independent context or connection for each query.
+
+These values are tuning starting points, not benchmark conclusions. If each sub-batch makes one downstream call and all
+Handler slots fan out fully, one batcher's upper bound is `C * ceil(B / S)` child calls at once (`C = MaxConcurrency`,
+`B = BatchSize`); this is not a strict QPS limit. Across Handlers, batchers, or pods, use a shared rate or concurrency
+budget when the downstream service needs a hard limit.
+
+Returning to the earlier product-query example, Handler-batch QPS is 480. Estimate Handler concurrency using the mean duration of the whole Handler, including all child
 queries, response mapping, and scope disposal, rather than a single downstream call's RT:
 
 ```text
@@ -943,64 +1124,6 @@ QPS alone do not determine the best configuration.
 
 Size `MaxPendingRequests`, the queue capacity, from `items/second per batcher × acceptable queue time`, then verify
 admission latency and memory use under bursts.
-
-## Partition-Key Routing
-
-A partition key is an optional routing rule for related requests:
-
-```csharp
-options.MaxConcurrency = 4;
-options.UsePartitionKey(query => query.ProductId, partitionCount: 8);
-```
-
-Equal finite, integer-valued numeric keys or equal non-null string keys are routed to the same queue partition among the
-configured partition count when it is greater than one. A count of one disables keyed routing and skips the selector;
-counts below one are rejected.
-Different keys can still share a partition, so keys and partitions are not one-to-one.
-
-Partition routing does not force all requests for one key into the same handler batch, and it does not deduplicate
-requests. It does not provide an execution-order or mutual-exclusion boundary.
-
-### Example: Merging Repeated Queries
-
-Several `PriceQuery` requests in one batch may refer to the same `ProductId`. The handler deduplicates product IDs,
-issues one batch query, and maps results by `ProductId` to every original request, including duplicates. Response
-assignment does not depend on database row order.
-
-Routing by `ProductId` puts equal product IDs in one partition, but does not guarantee the same batch.
-**Deduplication applies only within the current handler batch**; separate batches may query the same product again.
-It is not a cache across batches.
-
-The runnable [PostgreSQL Web API sample](samples/RequestBatcher.Deduplication) uses primitive `int` IDs in its named
-`"price"` pipeline. Its `PriceQueryHandler` deduplicates IDs with `Distinct()`, queries PostgreSQL, and maps rows by
-product ID with `entries.SetResponses(id => pricesById.GetValueOrDefault(id)?.Price)`. Callers receive `decimal?`
-prices, with `null` for missing products. Both single-ID and list submissions use this handler; list results retain
-input order and duplicates even when requests span several handler batches.
-
-## Routing Rules and Dispatch
-
-`MaxConcurrency` is the global maximum number of concurrent handler batches. Without a partition key, the queue has one
-internal partition. With a numeric or string partition key, it has the explicit number of partitions supplied to
-`UsePartitionKey`, and one `BatchDispatchLoop` pulls from all of them. The count is fixed at registration and is
-independent of CPU count.
-
-| Configuration | Request routing | Dispatch behavior |
-| --- | --- | --- |
-| No `UsePartitionKey`, or `partitionCount: 1` | Every request uses one queue partition, avoiding queue fragmentation for unrelated requests. | Batches use the shared global execution slots; one partition can supply multiple asynchronous batches. |
-| `UsePartitionKey(selector, partitionCount)` with count > 1 | A finite integer numeric key or non-null string key routes equal values to one of the configured partitions; different keys can share a partition. | Equal keys can still be dispatched in separate handler batches at the same time. |
-
-RequestBatcher provides no global, partition-local, or partition-key ordering guarantee. A partition key controls only
-queue routing; it is not a serialization mechanism.
-
-When keyed routing is enabled, the queue rotates pull opportunities among readable partitions. This does not promise
-equal handler execution time or fairness between individual keys. String routing considers the complete key, so a shared
-prefix alone does not force different keys into one partition. Exact partition assignments are internal and may change
-between versions; equal keys still route together within a batcher instance. Such changes can affect batch composition
-and the amount of duplicate work merged inside a handler batch.
-
-A handler runs on the dispatch call path until it completes or reaches an incomplete asynchronous wait. CPU-heavy
-or synchronously blocking work before that point can delay other batches even when execution slots remain free.
-`MaxConcurrency` is an upper bound; it does not automatically parallelize synchronous handler code.
 
 ## Observability
 
@@ -1181,6 +1304,13 @@ handler-class version. The delegate sample has its own HTTP and database ports; 
 [README](samples/RequestBatcher.Delegates/README.md) for startup and curl commands.
 
 Maintainers can publish packages independently using the [release workflow](docs/package-release-design.md).
+
+## Upgrade Notes
+
+The response wrapper is `RequestBatchEntry<TRequest, TResponse>`. When upgrading code that used
+`RequestBatchItem<TRequest, TResponse>`, update that type and its extension class name to `RequestBatchEntry`
+and `RequestBatchEntryExtensions`, then rebuild all consumers. This is a source and binary breaking change;
+response assignment and completion behavior are unchanged.
 
 ## License
 

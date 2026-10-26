@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="610" viewBox="0 0 1440 610">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto" markerUnits="strokeWidth">
+      <path d="M0,0 L10,4 L0,8 Z" fill="#748397"/>
+    </marker>
+  </defs>
+  <rect width="1440" height="610" fill="#ffffff"/>
+  <g font-family="Arial, PingFang SC, Microsoft YaHei, sans-serif" text-anchor="middle" fill="#233247">
+    <rect x="260" y="38" width="930" height="420" rx="10" fill="#f5f1fb" stroke="#75529b" stroke-width="2"/>
+    <text x="290" y="72" text-anchor="start" font-size="22" font-weight="600">1 个 Handler 批次</text>
+    <text x="1160" y="72" text-anchor="end" font-size="18" fill="#5d4a78">MaxConcurrency = 1</text>
+
+    <rect x="24" y="184" width="196" height="76" rx="8" fill="#eaf2ff" stroke="#3567a7" stroke-width="1.5"/>
+    <text x="122" y="216" font-size="20" font-weight="600">120 个请求</text>
+    <text x="122" y="242" font-size="17">无重复</text>
+
+    <rect x="300" y="184" width="190" height="76" rx="8" fill="#edf1f5" stroke="#596773" stroke-width="1.5"/>
+    <text x="395" y="216" font-size="19" font-weight="600">Chunk(30)</text>
+    <text x="395" y="242" font-size="17">4 个 30 项子批次</text>
+
+    <g fill="#fff4d6" stroke="#8a6a1d" stroke-width="1.5">
+      <rect x="625" y="88" width="190" height="62" rx="8"/>
+      <rect x="625" y="168" width="190" height="62" rx="8"/>
+      <rect x="625" y="248" width="190" height="62" rx="8"/>
+      <rect x="625" y="328" width="190" height="62" rx="8"/>
+    </g>
+    <text x="720" y="114" font-size="18" font-weight="600">下游查询 1</text>
+    <text x="720" y="137" font-size="16">30 项 · 约 20 ms</text>
+    <text x="720" y="194" font-size="18" font-weight="600">下游查询 2</text>
+    <text x="720" y="217" font-size="16">30 项 · 约 20 ms</text>
+    <text x="720" y="274" font-size="18" font-weight="600">下游查询 3</text>
+    <text x="720" y="297" font-size="16">30 项 · 约 20 ms</text>
+    <text x="720" y="354" font-size="18" font-weight="600">下游查询 4</text>
+    <text x="720" y="377" font-size="16">30 项 · 约 20 ms</text>
+
+    <rect x="870" y="184" width="142" height="76" rx="8" fill="#f3effa" stroke="#75529b" stroke-width="1.5"/>
+    <text x="941" y="216" font-size="18" font-weight="600">等待</text>
+    <text x="941" y="242" font-size="17">Task.WhenAll</text>
+
+    <rect x="1038" y="184" width="126" height="76" rx="8" fill="#eaf2ff" stroke="#3567a7" stroke-width="1.5"/>
+    <text x="1101" y="216" font-size="18" font-weight="600">回填结果</text>
+    <text x="1101" y="242" font-size="17">120 个响应</text>
+
+    <g fill="none" stroke="#748397" stroke-width="2" marker-end="url(#arrow)">
+      <path d="M220 222 H300"/>
+      <path d="M490 222 H570 V119 H625"/>
+      <path d="M490 222 H570 V199 H625"/>
+      <path d="M490 222 H570 V279 H625"/>
+      <path d="M490 222 H570 V359 H625"/>
+      <path d="M815 119 H845 V203 H870"/>
+      <path d="M815 199 H870"/>
+      <path d="M815 279 H845 V225 H870"/>
+      <path d="M815 359 H835 V241 H870"/>
+      <path d="M1012 222 H1038"/>
+    </g>
+
+    <text x="720" y="428" font-size="17" fill="#5d4a78">4 个下游查询属于同一个 Handler 批次，并行执行。</text>
+    <text x="720" y="492" font-size="17">理想估算：每批 120 项，4 次查询并行，约 20 ms 完成。</text>
+    <text x="720" y="517" font-size="17">1 秒包含 50 个 20 ms，即每秒约完成 50 批。</text>
+    <text x="720" y="542" font-size="17">50 批/秒 × 120 项/批 = 6,000 项/秒；不是压测结论。</text>
+    <text x="720" y="567" font-size="17">前提是请求持续到达、下游支持 4 个并发调用，并忽略其他开销。</text>
+  </g>
+</svg>
