@@ -1,0 +1,37 @@
+%% Semantic contract: one Handler batch with MaxConcurrency=1 fans out 120 unique items into four parallel 30-item calls.
+%% The Handler awaits all four calls, then maps results back to all 120 responses.
+%% Idealized timing: 120 items per batch; four queries run in parallel and finish in about 20 ms.
+%% One second contains fifty 20 ms intervals: about 50 batches/s; 50 batches/s * 120 items/batch = 6,000 items/s.
+%% This is not a benchmark result and ignores other overhead under sustained demand with four downstream calls available.
+flowchart LR
+    Input["120 requests<br/>no duplicates"] --> Split
+
+    subgraph Batch["One Handler batch<br/>MaxConcurrency = 1"]
+        Split["Chunk(30)<br/>4 chunks of 30"]
+        Q1["Downstream query 1<br/>30 items · about 20 ms"]
+        Q2["Downstream query 2<br/>30 items · about 20 ms"]
+        Q3["Downstream query 3<br/>30 items · about 20 ms"]
+        Q4["Downstream query 4<br/>30 items · about 20 ms"]
+        Await["Await<br/>Task.WhenAll"]
+        Map["Map results to<br/>120 responses"]
+        Split --> Q1
+        Split --> Q2
+        Split --> Q3
+        Split --> Q4
+        Q1 --> Await
+        Q2 --> Await
+        Q3 --> Await
+        Q4 --> Await
+        Await --> Map
+    end
+
+    classDef input fill:#eaf2ff,stroke:#3567a7,color:#1d3b66,stroke-width:1.5px
+    classDef core fill:#edf1f5,stroke:#596773,color:#303b44,stroke-width:1.5px
+    classDef downstream fill:#fff4d6,stroke:#8a6a1d,color:#4d3b0e,stroke-width:1.5px
+    classDef wait fill:#f3effa,stroke:#75529b,color:#422d59,stroke-width:1.5px
+    classDef output fill:#eaf2ff,stroke:#3567a7,color:#1d3b66,stroke-width:1.5px
+    class Input input
+    class Split core
+    class Q1,Q2,Q3,Q4 downstream
+    class Await wait
+    class Map output

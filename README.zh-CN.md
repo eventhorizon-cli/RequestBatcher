@@ -14,6 +14,8 @@ RequestBatcher 是一个运行在进程内的 .NET 批处理库，**原生支持
 RequestBatcher 会合并已经排队的请求，限制 Handler 批次并发数和队列容量，再将批次交给应用的 Handler 处理。
 它适用于支持一次处理多个数据项的数据库、缓存和下游 API。
 
+**它不会为了凑满 `BatchSize` 额外等待，也没有固定的收集窗口。** 执行名额全部占用时，新请求仍需排队。
+
 ![请求合并示意图](docs/assets/request-batcher-request-coalescing.zh-CN.svg)
 
 多个独立的并发请求可以先合并为一个批次，再执行一次下游批量操作。图示仅用于说明：只有已经在同一 Partition 中排队的请求
@@ -34,8 +36,6 @@ RequestBatcher 会合并已经排队的请求，限制 Handler 批次并发数�
 
 ## 请求如何合并：机会式合并
 
-上面的示意图展示了请求可能如何合并。本节说明这种批次是如何形成的。
-
 RequestBatcher 基于 [BufferQueue](https://github.com/eventhorizon-cli/BufferQueue)，将 .NET 进程内已经排队的并发请求
 合并为批次，交给应用的 Handler 处理。当前依赖 [BufferQueue 2.1.0](https://www.nuget.org/packages/BufferQueue/2.1.0)，
 应用无需单独注册或配置它。
@@ -49,10 +49,16 @@ RequestBatcher 基于 [BufferQueue](https://github.com/eventhorizon-cli/BufferQu
 调度循环分发一个批次后会继续运行。只要还有空闲名额，就可以继续拉取和分发下一批，无需等待刚分发的批次完成。
 每一批独占一个执行名额，处理结束后归还。
 
-**只有所有分配的 Partition 都没有数据时，才等待下一次通知。**
+**有空闲执行名额，但所有 Partition 都没有数据时，才等待新数据通知；执行名额用满时，则等待正在执行的批次完成。**
 
 这个过程不依赖定时轮询，也没有固定的收集窗口。有空闲名额时，等待主要来自唤醒和调度；名额占满时，请求仍需排队。
 `BatchSize` 只限制每批的最大数量：低流量时一批可能只有一个请求，请求短时间集中到达时则可能合并同一 Partition 中的多个请求。
+
+**较低的 `MaxConcurrency` 可能让请求在等待执行名额期间自然积累**；名额释放后，再将当时已经排队的请求合并处理。
+**这是并发控制带来的排队，不是为了凑批额外等待。** 即使 `MaxConcurrency = 1`，
+**有空闲名额且队列中只有一个请求时，也会处理这个请求，不会等到 `BatchSize` 个请求到齐。**
+参数取舍见[Partition 与 MaxConcurrency 的配置建议](#partition-与-maxconcurrency-的配置建议)；低并发下的吞吐估算和内部拆批示例见
+[拆分调用时，分别估算两层并发](#拆分调用时分别估算两层并发)。
 
 ![机会式合并流程图](docs/assets/request-batcher-opportunistic-merging.zh-CN.svg)
 
@@ -75,7 +81,7 @@ RequestBatcher 基于 [BufferQueue](https://github.com/eventhorizon-cli/BufferQu
 - 调用方取消时，只需要撤销尚未分发的请求；已分发的操作应继续执行并返回实际处理结果；
 - 可以在同一处理批次内合并相关请求，且正确性不依赖 Handler 执行顺序。
 
-批量 `INSERT`、`UPDATE`、`UPSERT` 和缓存写入也可以使用，但应用需要自行处理重试幂等性、跨批次并发写入冲突和事务边界。
+批量 `INSERT`、`UPDATE`、`UPSERT` 和缓存写入也可以使用，但应用需要自行处理跨批次并发写入冲突和事务边界；涉及重试时，还需保证操作的幂等性。
 即使 Partition Key 相同，不同 Handler 批次也可能并发执行。如果一次 Handler 调用只成功一部分会造成数据不一致，
 应由 Handler 在同一个事务中完成该批更新。一次提交可能拆成多个 Handler 批次，因此每个 Handler 各自使用事务，
 并不能保证整次提交的原子性。RequestBatcher 只负责传递 Handler 的处理结果，不会回滚已经提交的数据，也无法在进程故障后恢复待处理请求。
@@ -86,7 +92,7 @@ RequestBatcher 既不是持久化后台队列，也不是事务协调器：
 
 - 已接收的请求必须在进程故障后仍可恢复。此时应使用持久化存储或可靠消息队列。
 - 操作必须随调用方事务一起提交或回滚。应将它留在原事务中。
-- 下游操作必须依赖自动重试，或副作用必须严格恰好一次（exactly-once）。RequestBatcher 不提供这些保证。
+- 下游操作必须依赖自动重试，或必须保证副作用恰好执行一次（exactly-once）。RequestBatcher 不提供这些保证。
 - 下游操作必须等待最小批量凑齐，或者依赖固定的收集窗口。RequestBatcher 会直接处理当前已排队的请求。
 - 单个调用方断开、超时或取消后，正在执行的下游操作也必须立即停止。一个处理批次可能包含来自多个调用方的
   请求，因此单个调用方的 `CancellationToken` 不会传给 Handler，也不能取消这个共享的 Handler 调用。
@@ -97,44 +103,151 @@ RequestBatcher 既不是持久化后台队列，也不是事务协调器：
 dotnet add package RequestBatcher
 ```
 
-包提供 `net8.0` 和 `net10.0` 资产，支持 .NET 8 和 .NET 10 应用。
+包支持 `net8.0` 和 `net10.0` 目标框架，可用于 .NET 8 和 .NET 10 应用。
 
-启动时通过 `AddRequestBatcher` 注册带返回值的 Handler 和批处理服务。Handler 依赖应用自己的 `IPriceStore` 实现；调用时从
-同一个 DI 容器获取 `IRequestBatcher<PriceQuery, PriceQuote?>`，或在应用服务的构造函数中注入它。
+支持两种注册方式：
+
+- **Handler 类型**：使用 `AddRequestBatcher` 注册 Handler 类型并指定生命周期，适合将处理逻辑放在独立类中。
+- **委托 Handler**：使用 `AddDelegateRequestBatcher` 注册，在 `ExecuteAsync` 时传入静态委托，所需服务通过参数注入。详见[委托 Handler](#委托-handler)。
+
+使用 `int`、`string` 等基础类型作为请求时，建议使用 [Named RequestBatcher](#named-requestbatcher-与基础类型请求)，通过名称区分使用相同请求类型的不同业务。
+
+### 快速开始
+
+在 ASP.NET Core 空项目（`dotnet new web`）中安装上面的包，然后用下面完整示例替换 `Program.cs`。示例使用内存中的
+商品目录和默认的单 Partition，不需要数据库。
 
 ```csharp
 using Microsoft.Extensions.DependencyInjection;
 using RequestBatcher;
 
-// 应用启动时，注册存储服务和带返回值的批处理服务。
-services.AddScoped<IPriceStore, PriceStore>();
-services.AddRequestBatcher<PriceQuery, PriceQuote?, PriceQueryHandler>(
+var builder = WebApplication.CreateBuilder(args);
+builder.Services.AddRequestBatcher<PriceLookup, decimal?, CatalogHandler>(ServiceLifetime.Singleton);
+
+var app = builder.Build();
+app.MapGet("/prices/{productId:long}", async (
+    long productId,
+    IRequestBatcher<PriceLookup, decimal?> batcher,
+    CancellationToken cancellationToken) =>
+{
+    var price = await batcher.ExecuteAsync(new PriceLookup(productId), cancellationToken);
+    return price is { } value ? Results.Ok(value) : Results.NotFound();
+});
+app.Run();
+
+public sealed record PriceLookup(long ProductId);
+
+public sealed class CatalogHandler : IRequestBatchHandler<PriceLookup, decimal?>
+{
+    private static readonly Dictionary<long, decimal> Prices = new() { [101] = 17.90m };
+
+    public ValueTask HandleAsync(
+        IReadOnlyList<RequestBatchEntry<PriceLookup, decimal?>> entries,
+        CancellationToken cancellationToken = default)
+    {
+        foreach (var entry in entries)
+        {
+            entry.SetResponse(Prices.TryGetValue(entry.Request.ProductId, out var price) ? price : null);
+        }
+
+        return ValueTask.CompletedTask;
+    }
+}
+```
+
+运行 `dotnet run --urls http://localhost:5080`，然后请求 `GET http://localhost:5080/prices/101`，会得到 `17.90`；
+未知商品返回 `404`。即使每个调用方只提交一个请求，Handler 仍会收到一个列表；并发调用方可能共享同一个处理批次。
+实际应用可以将内存目录替换为下游批量操作，参见[Handler 类的 PostgreSQL 示例](samples/RequestBatcher.Deduplication)或
+[委托 PostgreSQL 示例](samples/RequestBatcher.Delegates)。
+
+**带返回值的 Handler 必须在成功完成前，为每个 Entry 显式设置且仅设置一次响应。** 显式设置 `null` 也是有效响应。
+遗漏赋值会使整个 Handler 批次失败。提交返回的 Task 会等待实际处理结果；失败和取消行为见[处理语义](#处理语义)。
+
+`AddRequestBatcher` 会将 Handler、协调器和内部 BufferQueue Topic 注册到现有的 `IServiceCollection` 中。应用无需
+直接配置 BufferQueue，RequestBatcher 也不会创建嵌套的 Service Provider。
+
+`Scoped` 和 `Transient` Handler 会在每个处理批次专属的异步作用域中解析一次。`Singleton` Handler 会跨批次
+复用；当 `MaxConcurrency > 1` 时，它必须保证线程安全。
+
+### Partition Key 路由
+
+Partition Key 是一项可选的路由规则，用于将相关请求路由到同一 Partition：
+
+```csharp
+options.MaxConcurrency = 4;
+options.UsePartitionKey(query => query.ProductId, partitionCount: 8);
+```
+
+数值键的值必须是有限整数，字符串键不能为 `null`。相同的键值会路由到同一 Partition。不同键值仍可能落入
+同一 Partition，因此键值与 Partition 不是一一对应关系。
+
+Partition 路由只决定请求进入哪个 Partition：它不会强制同一键值的全部请求进入同一个处理批次，也不会自动去重。
+RequestBatcher 不提供全局、Partition 内或 Partition Key 级别的 Handler 执行顺序保证；Partition 路由只是路由规则，
+不能用于串行化或提供互斥。
+
+字符串路由使用完整键值，共同前缀本身不会强制不同键值进入同一 Partition。具体分区归属由内部实现决定，
+可能随版本变化；同一个 Batcher 实例中的相同键值仍会路由到同一 Partition。这些变化可能影响处理批次
+的组成，以及 Handler 在单个批次内能够合并的重复工作量。
+
+### Partition 与 MaxConcurrency 的配置建议
+
+**`UsePartitionKey(selector, partitionCount: 1)` 与不配置 `UsePartitionKey` 的运行行为相同。**
+设置为 `1` 会清除已配置的 Key 路由且不调用选择器；小于 `1` 会抛出 `ArgumentOutOfRangeException`，选择器仍不能为 `null`。
+单 Partition 仍能提供多个并发执行的 Handler 批次。
+
+**默认使用 1 个 Partition；没有明确的按 Key 路由需求和压测收益，就不要增加 Partition。** 增加 Partition 不会增加 Handler 执行名额。
+每次拉取只读取一个 Partition，把短时间集中提交的少量请求分散到多个 Partition 可能增加未满批次的数量和下游调用次数。
+[性能调优与压测](#性能调优与压测)中的两个独立实验测量了这种取舍。
+
+**`MaxConcurrency` 从 `1` 开始压测，吞吐或排队延迟不满足目标时再逐步提高。** 执行名额过多时，已到达的请求可能更早被
+取走，形成更多小批次，减少合并和去重的机会；过低则可能增加排队。应选择能满足吞吐和延迟目标的较小值。
+
+**较低并发有利于合并，但也可能增加尾延迟。** 尤其在 `MaxConcurrency = 1` 时，一个慢批次会占住唯一的执行名额，
+后续请求只能排队；Handler 内使用 `Task.WhenAll` 时，还要等最慢的子查询完成才能释放名额。
+压测时应同时比较实际批大小、去重后的查询量、下游调用次数和端到端 P95/P99，判断减少的下游工作量是否值得付出额外等待。
+如果合并效果不错但尾延迟不达标，可以逐步尝试 `2`、`4`，同时确认下游能承受增加的并发调用。
+
+**Handler 并发低，不等于能处理的请求量少。** 一个 Handler 批次可以处理多个请求，内部也可以拆成小批并行调用下游，
+因此较低的 `MaxConcurrency` 仍可能支撑较高流量。实际能力取决于批大小、Handler 耗时，以及下游能承受的调用量和并发度，
+见[拆分调用时，分别估算两层并发](#拆分调用时分别估算两层并发)。
+
+需要按 Key 路由时，再通过 `UsePartitionKey` 显式设置 Partition 数量。下面配置使用 8 个队列 Partition，共享
+4 个 Handler 执行名额：
+
+```csharp
+builder.Services.AddRequestBatcher<ProductQueryItem, ProductBatchHandler>(
     ServiceLifetime.Scoped,
     options =>
     {
-        // 4 个 Handler 批次并发执行名额，由 8 个队列 Partition 共享。
+        // 单 Pod 的 Handler 批次并发上限。6 个 Pod x 4 个名额 = 集群最多 24 个 Handler 批次并发。
         options.MaxConcurrency = 4;
         options.BatchSize = 100;
         options.MaxPendingRequests = 5_000;
-        // 相同的商品 ID 路由到同一 Partition；不同批次仍可能并发执行。
-        options.UsePartitionKey(query => query.ProductId, partitionCount: 8);
-    });
 
-// 调用处从应用自己的 Service Provider 获取带返回值的泛型接口。
-var batcher = serviceProvider.GetRequiredService<IRequestBatcher<PriceQuery, PriceQuote?>>();
-var quote = await batcher.ExecuteAsync(new PriceQuery(ProductId: 101));
+        // 只负责路由和局部性。8 个队列 Partition 与 4 个执行名额相互独立。
+        options.UsePartitionKey(item => item.ProductId, partitionCount: 8);
+    });
 ```
 
-代码示例需要引入 `Microsoft.Extensions.DependencyInjection` 和 `RequestBatcher` 命名空间。下方[带返回值批处理](#带返回值批处理)定义了
-`PriceQuery`、`PriceQuote`、`PriceQueryHandler` 以及 `IPriceStore` 依赖。应用服务中推荐通过构造函数注入
-`IRequestBatcher<PriceQuery, PriceQuote?>`。
+`partitionCount` 决定请求分布在哪些队列中，相同键值始终路由到同一 Partition。`MaxConcurrency` 限制同一个
+批处理服务中同时执行的 Handler 批次数，所有 Partition 共享这些名额。同一 Partition 也可以同时执行多个批次。
+
+### 参数说明
+
+| 选项 | 默认值 | 行为 |
+| --- | ---: | --- |
+| `BatchSize` | `128` | 单次 Handler 调用包含的请求数量上限。 |
+| `MaxConcurrency` | `1` | Handler 批次最大并发数；它始终是 Handler 并发上限，与按键路由的 Partition 数量相互独立。 |
+| `MaxPendingRequests` | `8192` | 内部 BufferQueue 中尚未被拉取执行的请求容量上限。 |
+| `FullMode` | `Wait` | `Wait` 在容量不足时等待；超过容量的显式提交按输入顺序分段。`Fail` 要求整组立即容纳，否则整组失败且一个请求也不会入队。 |
+| `UsePartitionKey(selector, partitionCount)` | 未配置（单 Partition） | `partitionCount` 至少为 1；设为 1 时关闭按 Key 路由且不调用选择器，大于 1 时将相同键值的请求路由到同一 Partition。 |
+
+Handler 执行不保证顺序，包括 `MaxConcurrency = 1` 的情况。
 
 ## API 概览
 
-响应包装类型统一命名为 `RequestBatchEntry<TRequest, TResponse>`。升级已有代码时，将
-`RequestBatchItem<TRequest, TResponse>` 和 `RequestBatchItemExtensions` 分别改为
-`RequestBatchEntry<TRequest, TResponse>` 和 `RequestBatchEntryExtensions`，并重新编译所有调用方。
-这是源码与二进制不兼容的变更；响应赋值与完成行为保持一致。
+响应包装类型为 `RequestBatchEntry<TRequest, TResponse>`。它包含原始请求和响应槽位；带返回值的 Handler
+需要为每个 Entry 设置一个结果。
 
 ### 无返回值 API
 
@@ -352,8 +465,8 @@ services.AddRequestBatcher<PriceQuery, PriceQuote?, PriceQueryHandler>(
 Handler 调用中的每个不同商品 ID 查询一次存储层。`Distinct` 也支持匿名组合键、值元组和自定义相等比较器。存储层未
 返回的商品 ID 会映射为 `null`。
 
-**去重只发生在当前 Handler 批次内**：它不会合并不同处理批次或不同队列 Partition 中的条目。Selector 重载会先按 Key
-为后端无序结果建立字典，再为每个条目的原始请求计算一次结果，因此重复条目会得到相同返回值。
+**去重只发生在当前 Handler 批次内**：它不会合并不同处理批次或不同队列 Partition 中的条目。示例中的 Handler 先将后端返回的
+无序结果按商品 ID 建立字典，再通过 `SetResponses` 的结果工厂为每个 Entry 查找对应结果，因此重复商品 ID 会得到相同返回值。
 
 所有返回值计算成功后才会统一赋值；结果工厂抛出异常不会留下部分赋值。引用类型结果会被共享，不会复制。
 
@@ -361,9 +474,22 @@ Handler 调用中的每个不同商品 ID 查询一次存储层。`Distinct` 也
 `entry.SetResponse(response)`，或先生成严格按原始输入顺序排列、包含重复和缺失请求位置的结果，再调用
 `entries.SetResponses(responses)`。
 
-面向 Key 的 Selector 重载适合后端无序结果；有序重载不能直接接收后端原始行。显式批量重载即使将请求拆到多个
+后端返回无序结果时，可以使用上述字典配合结果工厂回填；按顺序赋值的重载不能直接接收后端原始行。显式批量重载即使将请求拆到多个
 处理批次或队列 Partition，仍会按输入顺序返回结果。
 只有 Handler 成功完成、对应请求的返回值已设置，且 Handler 作用域成功释放后，调用方的 `Task<TResponse>` 才会成功完成。
+
+### 示例：合并重复查询请求
+
+同一批次中的多个 `PriceQuery` 可能查询相同的 `ProductId`。Handler 先对商品 ID 去重，再执行一次批量查询，
+最后按 `ProductId` 将结果回填给每个原始请求，包括重复请求。回填不依赖数据库返回顺序。
+
+按 `ProductId` 路由会让相同商品的请求进入同一 Partition，但不保证进入同一批次。
+**去重只作用于当前 Handler 批次**；不同批次仍可能查询同一个商品，这不是跨批次缓存。
+
+可运行的 [PostgreSQL Web API 示例](samples/RequestBatcher.Deduplication)使用命名的 `int` 价格查询管线展示了完整流程：
+`PriceQueryHandler` 将当前批次的 `int` ID 扩展为 `long`，使用 `Distinct()` 去重并查询 PostgreSQL，建立商品 ID 到
+结果的字典，再通过 `entries.SetResponses(id => pricesById.GetValueOrDefault(id)?.Price)` 回填结果；商品不存在时返回
+`null`。去重只发生在当前 Handler 批次内。
 
 ## 显式批量提交
 
@@ -401,6 +527,52 @@ Partition 路由拆成多个处理批次。
 | 完成 | 返回的 `Task` 表示这个请求的实际处理结果。 | 返回的 `Task` 等待本次提交中的每个请求。 |
 | 失败 | 这次 Handler 调用失败时，该处理批次中的所有请求都会失败。 | 部分请求可能已经成功，其他处理批次仍可能失败；整组 `Task` 会失败，但不会回滚已经成功的操作。 |
 | 取消 | 只能取消尚未交给 Handler 的请求。 | 同一个 `CancellationToken` 用于整组中的每个请求；尚未分发的请求可以取消，已分发的请求继续返回实际结果。 |
+
+## 处理语义
+
+### 完成与失败
+
+- Handler 正常完成时，该处理批次中的所有请求均记为成功。一次显式批量提交的 `Task` 仍需等待本次提交中的全部请求，
+  包括分配到其他 Handler 批次的请求。
+- Handler 抛出非取消异常时，该处理批次中的所有请求均以原始异常失败。
+- 带返回值的单条请求遇到 Handler 抛出的 `OperationCanceledException` 时，返回的 Task 为取消状态。
+  等待该 Task 会抛出带原始 Token 的 `TaskCanceledException`，不保留原取消异常的实例、消息和派生类型。
+- RequestBatcher 不会自动重试失败的 Handler。
+- 显式批量重载会等待本次提交中的所有请求；只要涉及的某次 Handler 调用失败，最终 `Task` 就会失败。
+- 一次显式批量提交可能跨越多个 Handler 调用。如果其中多次调用失败，`await` 会按普通 `Task` 语义抛出其中一个
+  原始异常；所有不同的异常实例都可以从 `Task.Exception.InnerExceptions` 读取。同一次 Handler 异常即使影响
+  多个请求，也只记录一次。
+
+### 调用方取消
+
+调用方取消只能移除尚未交给 Handler 的请求。一旦 Handler 开始执行，RequestBatcher 会返回实际处理结果，而不会
+将调用方的 `Task` 改成已取消。这样可以避免取消状态掩盖已经发生的副作用。
+
+传给 Handler 的 `CancellationToken` 属于 RequestBatcher 自身的处理生命周期，不属于任何一个调用方。因此，
+一个调用方取消不会中止同一批中的其他请求。
+
+显式批量提交会将调用方传入的同一个 `CancellationToken` 应用于组内每个请求。因此取消后可能同时存在“尚未
+分发而取消”的请求和“已经分发并继续执行”的请求。返回的 `Task` 仍会等待全部请求；其中存在失败时最终状态为
+失败，否则只要有请求被取消，最终状态就是取消。已经完成的副作用不会回滚。
+
+### 容量与背压
+
+`MaxPendingRequests` 是内部 BufferQueue 中仍处于排队状态的请求容量上限。分发循环拉取批次时会自动提交消费进度，
+随后才启动 Handler。因此，除了排队容量外，最多还有 `MaxConcurrency * BatchSize` 个已拉取请求正在执行。它不限制
+一次显式提交的请求数量，也不限制正在等待容量的调用方数量：
+
+- `FullMode = Wait` 在队列空间不足时异步等待，并支持调用方在等待期间取消。
+- `Wait` 模式下，一组请求的数量不超过 `MaxPendingRequests` 时，会等到队列能容纳整组请求后一起入队；超过时，
+  按输入顺序分段，每段最多 `MaxPendingRequests` 个请求，等待队列腾出足够空间后依次入队。
+  中途取消时，已分发的请求仍会继续处理，尚未分发的请求会被取消。
+- `FullMode = Fail` 在队列剩余空间不足以容纳本次提交的全部请求时，立即拒绝整次提交，包括请求总数超过
+  `MaxPendingRequests` 的情况。此时返回的 `Task` 会失败，异常为 `RequestBatchQueueFullException`，本次提交的请求
+  均不会入队。
+
+### 停止与释放
+
+`DisposeAsync` 会停止接收新请求，处理完已经接收的所有提交（包括仍在等待容量的提交），然后释放协调器持有的资源。
+并发或重复调用会共享同一次释放操作。通过 `AddRequestBatcher` 注册时，由应用容器负责异步释放。
 
 ## Named RequestBatcher 与基础类型请求
 
@@ -503,13 +675,7 @@ public sealed class PricesController : ControllerBase
 静态匿名方法、静态局部函数或静态方法组，可以将请求提交与处理逻辑放在一起，便于结合调用上下文阅读和修改。
 处理逻辑较复杂，或需要多处复用、独立组织测试时，更适合使用单独的 `IRequestBatchHandler` 类。
 
-**委托 Handler 已针对稳定调用做过性能优化**：签名检查和通过表达式树编译强类型调用器只发生在首次绑定；
-后续提交优先通过引用比较校验委托，批次执行复用缓存的调用器，不进行反射调用、`DynamicInvoke` 或参数数组构造。
-自动绑定依赖动态代码，不支持 NativeAOT 或裁剪。
-
-现有相同配置的内存 Benchmark 中，委托与传统 Handler 的逐条提交均值相差约 1%，内存分配接近，
-未观察到明显的稳定调用性能退化。该结果不包含首次绑定的编译开销，具体配置和结果见
-[性能对比](docs/evaluations/delegate-handlers/README.md)。
+委托 Handler 的自动绑定依赖动态代码，不支持 NativeAOT 或裁剪。
 
 **Handler 必须使用静态实现，不捕获局部变量或实例状态**。Lambda、匿名方法和局部函数要显式加 `static`，
 方法组应指向普通或泛型静态方法；所需服务通过参数注入。
@@ -575,7 +741,7 @@ static async ValueTask HandlePricesAsync(
 
 该管线只绑定一个处理委托，后续传入相等的委托会复用绑定；传入不同委托会在入队前报错。
 不同的 Handler 目标即使代码内容相同，也属于不同 Handler，应使用不同的 `batcherName`。并发首次调用只会绑定一次。
-委托由管线以单例持有，服务参数在每个实际执行批次中注入，不捕获调用方的请求作用域。
+每条管线复用同一个委托，服务参数在每个实际执行批次中注入，不捕获调用方的请求作用域。
 
 首参数必须是对应的批次列表类型。其余参数默认从 DI 解析必需服务，`[FromKeyedServices(key)]` 选择 Keyed 服务；
 必须显式指定 Key，不支持继承 Key。
@@ -599,65 +765,12 @@ DI 生命周期：Singleton 在容器内共享，Scoped 在同一批次内共享
 委托经过参数、属性或工厂传递后，Analyzer 可能无法确定它的目标。这类写法仍然允许使用，
 调用方应保证最终传入的是静态实现。运行时会验证实际签名、服务绑定和委托是否与已绑定的委托一致，
 但无法可靠区分源码中的静态 Lambda 与不捕获变量的普通 Lambda。
-原有 Handler 调用不受影响，使用方也可以禁用 Analyzer。详见[委托 Handler 设计](docs/delegate-handlers-design.md)。
+原有 Handler 调用不受影响，使用方也可以禁用 Analyzer。详见[委托 Handler 设计](docs/delegate-handlers-design.md)和
+[性能对比](docs/evaluations/delegate-handlers/README.md)。
 
 [独立的委托版 PostgreSQL 示例](samples/RequestBatcher.Delegates)使用委托 Handler 完成价格写入和
 `POST /prices/query` 列表查询，每个静态 Lambda 都从批次 Scope 注入 Keyed Scoped `PriceStore`。
 [原有示例](samples/RequestBatcher.Deduplication)继续单独展示 Handler 类的写法。
-
-## 处理语义
-
-### 完成与失败
-
-- Handler 正常完成时，该处理批次中的所有请求均记为成功。一次显式批量提交的 `Task` 仍需等待本次提交中的全部请求，
-  包括分配到其他 Handler 批次的请求。
-- Handler 抛出非取消异常时，该处理批次中的所有请求均以原始异常失败。
-- 带返回值的单条请求遇到 Handler 抛出的 `OperationCanceledException` 时，返回的 Task 为取消状态。
-  等待该 Task 会抛出带原始 Token 的 `TaskCanceledException`，不保留原取消异常的实例、消息和派生类型。
-- RequestBatcher 不会自动重试失败的 Handler。
-- 显式批量重载会等待本次提交中的所有请求；只要涉及的某次 Handler 调用失败，最终 `Task` 就会失败。
-- 一次显式批量提交可能跨越多个 Handler 调用。如果其中多次调用失败，`await` 会按普通 `Task` 语义抛出其中一个
-  原始异常；所有不同的异常实例都可以从 `Task.Exception.InnerExceptions` 读取。同一次 Handler 异常即使影响
-  多个请求，也只记录一次。
-
-### 调用方取消
-
-调用方取消只能移除尚未交给 Handler 的请求。一旦 Handler 开始执行，RequestBatcher 会返回实际处理结果，而不会
-将调用方的 `Task` 改成已取消。这样可以避免取消状态掩盖已经发生的副作用。
-
-传给 Handler 的 `CancellationToken` 属于 RequestBatcher 自身的处理生命周期，不属于任何一个调用方。因此，
-一个调用方取消不会中止同一批中的其他请求。
-
-显式批量提交会将调用方传入的同一个 `CancellationToken` 应用于组内每个请求。因此取消后可能同时存在“尚未
-分发而取消”的请求和“已经分发并继续执行”的请求。返回的 `Task` 仍会等待全部请求；其中存在失败时最终状态为
-失败，否则只要有请求被取消，最终状态就是取消。已经完成的副作用不会回滚。
-
-### 容量与背压
-
-`MaxPendingRequests` 是内部 BufferQueue 中仍处于排队状态的请求容量上限。分发循环拉取批次时会自动提交消费进度，
-随后才启动 Handler。因此，除了排队容量外，最多还有 `MaxConcurrency * BatchSize` 个已拉取请求正在执行。它不限制
-一次显式提交的请求数量，也不限制正在等待容量的调用方数量：
-
-- `FullMode = Wait` 在队列空间不足时异步等待，并支持调用方在等待期间取消。
-- `Wait` 模式下，一组请求的数量不超过 `MaxPendingRequests` 时，会等到队列能容纳整组请求后一起入队；超过时，
-  按输入顺序分段，每段最多 `MaxPendingRequests` 个请求，等待队列腾出足够空间后依次入队。
-  中途取消时，已分发的请求仍会继续处理，尚未分发的请求会被取消。
-- `FullMode = Fail` 在队列剩余空间不足以容纳本次提交的全部请求时，立即拒绝整次提交，包括请求总数超过
-  `MaxPendingRequests` 的情况。此时返回的 `Task` 会失败，异常为 `RequestBatchQueueFullException`，本次提交的请求
-  均不会入队。
-
-### 停止与释放
-
-`DisposeAsync` 会停止接收新请求，处理完已经接收的所有提交（包括仍在等待容量的提交），然后释放协调器持有的资源。
-并发或重复调用共享同一次释放操作。通过 `AddRequestBatcher` 注册时，由应用容器负责异步释放。
-
-## 依赖注入
-
-`AddRequestBatcher` 会将 Handler、协调器和内部 BufferQueue Topic 注册到现有的 `IServiceCollection` 中。应用无需
-直接配置 BufferQueue，RequestBatcher 也不会创建嵌套的 Service Provider。
-
-`Scoped` 和 `Transient` Handler 会在每个处理批次专属的异步作用域中解析一次。`Singleton` Handler 会跨批次
-复用；当 `MaxConcurrency > 1` 时，它必须保证线程安全。
 
 ## 请求处理流程
 
@@ -669,8 +782,8 @@ DI 生命周期：Singleton 在容器内共享，Scoped 在同一批次内共享
 未配置 `UsePartitionKey` 时，RequestBatcher 固定使用一个内部 Partition，避免将彼此无关的请求分散到多个队列，
 也让它们自然地保留在一起进行批量处理。
 
-配置有限整数数值键或非 `null` 字符串键以及显式 Partition 数量后，队列使用指定数量的 Partition，使相同键保持
-局部性，同时让不同键可以独立推进。`P` 只是路由细节；`H = MaxConcurrency` 始终是全局 Handler 批次并发上限。
+配置 Partition Key 和 Partition 数量后，队列使用指定数量的 Partition，将相同键值的请求放入同一 Partition。
+数值键的值必须是有限整数，字符串键不能为 `null`。`P` 只是路由细节；`H = MaxConcurrency` 始终是全局 Handler 批次并发上限。
 单个 Partition 可以连续产生多个异步 Handler 批次，因此 Partition 数量不会限制为一次只能执行一个批次。
 
 1. 调用方通过 `ExecuteAsync` 提交单个请求。
@@ -698,48 +811,44 @@ DI 生命周期：Singleton 在容器内共享，Scoped 在同一批次内共享
 而不是批次内某个请求单独完成时释放。任一正在执行的 Handler 批次完成后，其名额会立即归还，调度循环随即可以
 拉取并启动下一批；无需等待其他正在执行的批次全部完成。
 
-## 配置
+## 路由规则与调度
 
-| 选项 | 默认值 | 行为 |
-| --- | ---: | --- |
-| `BatchSize` | `128` | 单次 Handler 调用包含的请求数量上限。 |
-| `MaxConcurrency` | `1` | Handler 批次最大并发数；它始终是 Handler 并发上限，与按键路由的 Partition 数量相互独立。 |
-| `MaxPendingRequests` | `8192` | 内部 BufferQueue 中尚未被拉取执行的请求容量上限。 |
-| `FullMode` | `Wait` | 队列空间不足时，`Wait` 等待空位，`Fail` 立即拒绝本次提交。 |
-| `UsePartitionKey(selector, partitionCount)` | 未配置（单 Partition） | `partitionCount` 至少为 1；设为 1 时关闭按 Key 路由且不调用选择器，大于 1 时将相同键值的请求路由到同一 Partition。 |
+启用按 Key 路由时，队列会在有数据的 Partition 之间轮转拉取机会，但不保证 Handler 执行时间相等，也不保证不同
+键值之间公平。
 
-Handler 执行不保证顺序，包括 `MaxConcurrency = 1` 的情况。
+Handler 会在分发调用链上执行，直到完成或遇到尚未完成的异步等待。在此之前的 CPU 密集计算或同步阻塞会
+推迟其他批次的分发，即使仍有空闲执行名额。`MaxConcurrency` 是并发上限，不会自动将同步 Handler 代码并行化。
 
-### Partition 数量与并发数
+## 性能调优与压测
 
-**`UsePartitionKey(selector, partitionCount: 1)` 与不配置 `UsePartitionKey` 的运行行为相同。**
-设置为 `1` 会清除已配置的 Key 路由且不调用选择器；小于 `1` 会抛出 `ArgumentOutOfRangeException`，选择器仍不能为 `null`。
-单 Partition 仍能连续提供多个并发执行的 Handler 批次。需要提高下游并发时，应调整 `MaxConcurrency`。
+### 让 Agent 协助制定初步配置
 
-**没有按 Key 路由的需求时，单 Partition 是更合适的默认选择。** 增加 Partition 不会增加 Handler 执行名额。
-每次拉取只读取一个 Partition，把短时间集中提交的少量请求分散到多个 Partition 可能增加不满批次和下游调用。下面的两个独立实验
-使用当前实现测量这种取舍。
+如果希望 AI Agent 帮你分析如何设置参数，可以先告诉它**你当前的流量、下游耗时和业务要求**。
+尽量使用同一接口、同一时间段的数据，分别描述日常和高峰负载，并注明是单实例还是整个集群的数值。
+这些信息可以帮助 Agent 给出**初步配置和压测方案**，随后根据实测结果调整参数。
 
-需要按 Key 路由时，再通过 `UsePartitionKey` 显式设置 Partition 数量。下面配置使用 8 个队列 Partition，共享
-4 个 Handler 执行名额：
+| 现有信息 | 建议提供的内容 | 帮助判断什么 |
+| --- | --- | --- |
+| 入口 HTTP QPS | 单实例平均值、高峰值、短时间波动。 | 请求是否集中到达，有多少合批机会。 |
+| 每个入口请求的项数 | 每次涉及多少商品或 ID，提供平均、P95 和最大值。 | 把 HTTP 调用量换算为实际请求项负载。 |
+| 当前下游调用方式 | 每个入口请求调用几次下游、每次处理几项、串行还是并行。 | 当前能否批量处理，以及一次入口请求会产生多少下游并发调用。 |
+| 下游 RT 和异常 | 平均、P95、P99，以及超时、错误、限流比例。 | 下游耗时、拖尾及是否已经饱和。 |
+| 下游批量能力 | 单次允许的最大项数、报文大小，不同批大小下的 RT。 | 每次下游调用适合处理多少项，再选择 `BatchSize`。 |
+| 入口端到端延迟 | 平均、P95、P99、业务延迟目标和可接受的额外等待。 | 最多能接受多长的排队时间，以及怎样评价接入后的收益。 |
+| 部署和资源情况 | Pod 数、流量是否均衡、CPU、内存、GC、连接池占用与等待。 | 按实例估算负载，识别资源瓶颈。 |
+| 重复请求和热点 | 同一短时间段内重复 ID 的比例、热点集中程度。 | 批内去重的潜在收益，以及是否值得测试按 Key 路由。 |
 
-```csharp
-builder.Services.AddRequestBatcher<ProductQueryItem, ProductBatchHandler>(
-    ServiceLifetime.Scoped,
-    options =>
-    {
-        // 单 Pod 的 Handler 批次并发上限。6 个 Pod x 4 个名额 = 集群最多 24 个 Handler 批次并发。
-        options.MaxConcurrency = 4;
-        options.BatchSize = 100;
-        options.MaxPendingRequests = 5_000;
+重复率应尽量反映可能进入同一批次的请求；全天重复率不能直接代表批内去重率。
+还需说明业务是只读还是写入，是否要求顺序、是否允许去重，以及取消和失败如何处理；同时提供下游的 QPS 配额、
+最大并发和连接池限制。
 
-        // 只负责路由和局部性。8 个队列 Partition 与 4 个执行名额相互独立。
-        options.UsePartitionKey(item => item.ProductId, partitionCount: 8);
-    });
-```
+**最小输入：单实例高峰 QPS、每次请求项数、当前下游调用方式、下游平均/P99 RT、批量接口限制、端到端延迟目标。**
+缺失的数据直接标为未知，不要让 Agent 用猜测补齐。只有单项查询 RT 时，不能直接推断批量查询的 RT；
+可以先补测几组批大小，再估算合并是否划算。
 
-`partitionCount` 决定请求分布在哪些队列中，相同键值始终路由到同一 Partition。`MaxConcurrency` 限制同一个
-批处理服务中同时执行的 Handler 批次数，所有 Partition 共享这些名额。同一 Partition 也可以同时执行多个批次。
+让 Agent 给出 `MaxConcurrency`、`BatchSize`、`MaxPendingRequests` 和 Partition 的配置建议，
+同时列出依据、假设和需要压测验证的项目。**这些建议不是最优配置或性能保证**；接入后仍需比较吞吐、端到端 P95/P99、
+实际批大小和下游工作量，再逐项调整参数。
 
 ### Partition 实测：单条提交
 
@@ -774,7 +883,7 @@ builder.Services.AddRequestBatcher<ProductQueryItem, ProductBatchHandler>(
 `ExecuteAsync(requests)` 每次提交一个请求列表。每轮 96 个请求分为 8 次调用，每次提交 12 个请求；
 每轮 4,096 个请求分为 128 次调用，每次提交 32 个请求。一次调用可能拆成多个 Handler 批次，
 不同调用也可能合并到同一个 Handler 批次；Handler 每批最多 64 个请求的上限不变。
-本实验只比较自己的 1/4 个 Partition，不与单条提交图横向比较。
+本实验只比较 1 个和 4 个 Partition，不与单条提交图横向比较。
 
 ![显式批量提交在一个与四个 Partition 下的吞吐](docs/assets/partition-submission-explicit.zh-CN.svg)
 
@@ -844,8 +953,88 @@ Partition 数量和消费速度都会影响合并效果，应从较少的 Partit
 
 ### 拆分调用时，分别估算两层并发
 
-**`MaxConcurrency` 限制 Handler 批次并发，不直接限制 Handler 内部的下游调用并发。** 上述示例中的 Handler 批次 QPS
-为 480；估算其并发时，应使用整个 Handler 的平均耗时，包括等待所有子查询、结果回填和作用域释放，而不是单次下游 RT：
+**`MaxConcurrency` 只限制 Batcher 同时执行的 Handler 批次数，不直接限制 Handler 内部的下游调用并发。**
+可以从 `MaxConcurrency = 1` 开始压测，按需逐步提高，例如测试 `2–4`；将 `BatchSize` 设为期望每次下游批量调用项数
+`S` 的 `3–10` 倍，作为另一组调优起点。这些范围是待验证的配置思路，不是实测最优值。
+
+Handler 内先按业务需要去重，再按每组最多 `S` 项拆分并行查询，等待全部查询完成后，为每个原始请求回填结果。
+若去重后有 `U` 项，就产生 `ceil(U / S)` 个子调用：请求少时调用少，不等待凑满；积压较多时，一个 Handler 可以并行处理
+更多小批次。**这样即使 Handler 并发保持较低，下游调用数也能随实际批大小变化，为不同流量提供弹性。**
+
+**`MaxConcurrency = 1` 表示同时执行一个 Handler 批次，不是一次只能处理一个请求或发起一个下游调用。**
+假设持续有请求可合批，每个 Handler 实际收到 120 个请求且没有重复商品；下游支持 4 次并行查询，每次约 20 ms。
+把 120 个请求按 `Chunk(30)` 拆成 4 次查询并行执行，`Task.WhenAll` 等待最慢的一次完成。
+暂时忽略调度、去重和回填等其他开销，就相当于**每 20 ms（0.02 秒）完成一批 120 个请求**。
+
+**1 秒包含 50 个 20 ms**。每 20 ms 完成一批 120 个请求，所以每秒约能完成 50 批，
+即 **`50 批/秒 × 120 项/批 = 6,000 项/秒`**。
+
+这说明较低的 Handler 并发也可能支撑较高请求量，**并不保证 `1` 对所有业务都足够**。
+
+![一个 Handler 批次拆成四次并行下游查询](docs/assets/request-batcher-single-slot-fanout.zh-CN.svg)
+
+这是持续有请求可合批时的理想估算，不是实测结果。一般可用
+`请求项吞吐 ≈ MaxConcurrency × 实际平均批大小 ÷ Handler 平均耗时（秒）` 估算；
+应使用实际批大小和完整 Handler 耗时，不能把配置的 `BatchSize` 当作每批实际数量。
+如果吞吐不足或排队延迟超过目标，再逐步提高 `MaxConcurrency`，同时观察下游是否已成为瓶颈。
+
+具体可以按 **`Distinct → Chunk → 发起异步查询 → Task.WhenAll → 回填响应`** 实现。
+下面复用[带返回值批处理](#带返回值批处理)中的 `PriceQuery`、`PriceQuote` 和 `IPriceStore`，
+将 Handler 替换为 `ChunkedPriceQueryHandler`；每次下游查询最多包含 30 个不同的商品：
+
+```csharp
+public sealed class ChunkedPriceQueryHandler(IPriceStore store)
+    : IRequestBatchHandler<PriceQuery, PriceQuote?>
+{
+    public async ValueTask HandleAsync(
+        IReadOnlyList<RequestBatchEntry<PriceQuery, PriceQuote?>> entries,
+        CancellationToken cancellationToken = default)
+    {
+        const int downstreamBatchSize = 30;
+        var ids = entries
+            .Select(entry => entry.Request.ProductId)
+            .Distinct()
+            .ToArray();
+
+        IEnumerable<PriceQuote> prices;
+        if (ids.Length <= downstreamBatchSize)
+        {
+            prices = await store.FindAsync(ids, cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            var queries = ids
+                .Chunk(downstreamBatchSize)
+                .Select(async chunk => await store.FindAsync(chunk, cancellationToken).ConfigureAwait(false))
+                .ToArray();
+            var results = await Task.WhenAll(queries).ConfigureAwait(false);
+            prices = results.SelectMany(rows => rows);
+        }
+
+        var pricesById = prices.ToDictionary(row => row.ProductId);
+        entries.SetResponses(request => pricesById.GetValueOrDefault(request.ProductId));
+    }
+}
+```
+
+**先判断去重后的数量：不超过 30 项就直接查询一次，超过时才使用 `Chunk(30)` 和 `Task.WhenAll`。**
+这样单次调用就能处理完的批次无需创建分块数组、查询 Task 数组或额外的 `WhenAll` 等待。
+判断的是实际要查询的商品数，不是原始请求数；例如 120 个请求去重后只有 20 个商品，也只需一次查询。
+
+`Chunk(30)` 只拆分当前已有的 ID，不等待凑满。拆批分支中的 `ToArray()` 枚举查询并发起各个异步调用，
+`Task.WhenAll` 等待它们全部结束；**它不会自动限制并发，也不需要再用 `Task.Run` 包装异步 I/O**。
+所有查询成功后，按商品 ID 回填每个原始请求，重复请求同样得到响应，未找到的商品显式返回 `null`。
+任一查询失败时，Handler 会在所有已发起查询结束后失败，整个 Handler 批次失败。
+
+这里要求 `IPriceStore` 支持并发调用；例如不能让这些查询并发使用同一个 EF Core `DbContext`，
+应由存储实现为每个查询提供独立的上下文或连接。
+
+如果每个小批只发起一次下游调用，且小批全部并行执行，单个 Batcher 的下游并发上界为
+`MaxConcurrency × ceil(BatchSize / S)`；这不是 QPS 限制。需要严格控制下游压力时，应设置跨 Handler 共享的并发或速率限制，
+并合计多个 Batcher、多个 Pod 的调用量。
+
+回到前面的商品查询示例，Handler 批次 QPS 为 480。估算其并发时，应使用整个 Handler 的平均耗时，
+包括等待所有子查询、结果回填和作用域释放，而不是单次下游 RT：
 
 ```text
 单 Pod MaxConcurrency ≈ ceil(Handler 批次 QPS × Handler 平均耗时 / Pod 数量 × 安全系数)
@@ -874,56 +1063,6 @@ Partition 数量和消费速度都会影响合并效果，应从较少的 Partit
 
 `MaxPendingRequests` 控制队列容量，可按 `单个批处理服务的请求项数/秒 × 可接受排队时间` 估算，
 再用短时间大量到达的请求验证接收延迟和内存占用。
-
-## Partition Key 路由
-
-Partition Key 是一项可选的路由规则，用于将相关请求路由到同一 Partition：
-
-```csharp
-options.MaxConcurrency = 4;
-options.UsePartitionKey(query => query.ProductId, partitionCount: 8);
-```
-
-值相同的有限整数数值键，或值相同的非 `null` 字符串键，会进入指定数量中的同一 Partition。不同键值仍可能落入
-同一 Partition，因此键值与 Partition 不是一一对应关系。`partitionCount` 至少为 1，设为 1 时关闭按 Key 路由。
-
-Partition 路由只决定请求进入哪个 Partition：它不会强制同一键值的全部请求进入同一个处理批次，也不会自动去重。
-它提供了一个路由边界，不提供执行顺序或互斥保证。
-
-### 示例：合并重复查询请求
-
-同一批次中的多个 `PriceQuery` 可能查询相同的 `ProductId`。Handler 先对商品 ID 去重，再执行一次批量查询，
-最后按 `ProductId` 将结果回填给每个原始请求，包括重复请求。回填不依赖数据库返回顺序。
-
-按 `ProductId` 路由会让相同商品的请求进入同一 Partition，但不保证进入同一批次。
-**去重只作用于当前 Handler 批次**；不同批次仍可能查询同一个商品，这不是跨批次缓存。
-
-可运行的 [PostgreSQL Web API 示例](samples/RequestBatcher.Deduplication)使用命名的 `int` 价格查询管线展示了完整流程：
-`PriceQueryHandler` 将当前批次的 `int` ID 扩展为 `long`，使用 `Distinct()` 去重并查询 PostgreSQL，建立商品 ID 到
-结果的字典，再通过 `entries.SetResponses(id => pricesById.GetValueOrDefault(id)?.Price)` 回填结果；商品不存在时返回
-`null`。去重只发生在当前 Handler 批次内。
-
-## 路由规则与调度
-
-`MaxConcurrency` 是全局并发 Handler 批次数上限。未配置 Partition Key 时，内部队列固定使用一个 Partition；配置
-数值或字符串 Partition Key 时，Partition 数量由 `UsePartitionKey` 的 `partitionCount` 指定，由一个
-`BatchDispatchLoop` 从所有 Partition 拉取。Partition 数量在注册时确定，且不受 CPU 数量限制。
-
-| 配置 | 请求如何路由 | 调度行为 |
-| --- | --- | --- |
-| 未配置 `UsePartitionKey`，或 `partitionCount: 1` | 所有请求进入同一个 Partition，不调用 Key 选择器，避免将无关请求分散到多个队列。 | 批次共享全局执行名额；单个 Partition 可以连续提供多个异步批次。 |
-| 配置 `UsePartitionKey(selector, partitionCount)`，且数量大于 1 | 有限整数数值键或非 `null` 字符串键将相同值路由到指定 Partition；不同键仍可能共享 Partition。 | 相同键值的不同 Handler 批次仍可同时分发执行。 |
-
-RequestBatcher 不提供全局、Partition 内或 Partition Key 级别的 Handler 执行顺序保证。Partition Key 只决定队列
-路由，不能用于串行化处理。
-
-启用按键路由时，队列会在有数据的 Partition 之间轮转拉取机会，但不保证 Handler 执行时间相等，也不保证不同
-键值之间公平。字符串路由使用完整键值，共同前缀本身不会强制不同键值进入同一 Partition。具体分区归属属于
-内部实现，可能随版本变化；同一个 Batcher 实例中的相同键值仍会路由到同一 Partition。这些变化可能影响处理批次
-的组成，以及 Handler 在单个批次内能够合并的重复工作量。
-
-Handler 会在分发调用链上执行，直到完成或遇到尚未完成的异步等待。在此之前的 CPU 密集计算或同步阻塞会
-推迟其他批次的分发，即使仍有空闲执行名额。`MaxConcurrency` 是并发上限，不会自动将同步 Handler 代码并行化。
 
 ## 可观测性
 
@@ -990,7 +1129,7 @@ Handler 不会继承调用方的 HTTP Span、日志 Scope、Baggage 或其他 `A
 #### 采样
 
 注册 Tracing 扩展后，应用的 Sampler 决定每个 `Execute` Span 是否采样。
-集成包根据进入当前 Handler 批次的请求所对应的 `Execute` Span，决定 `Handle` 是否采样：
+集成包检查当前 Handler 批次中各请求对应的 `Execute` Span，决定 `Handle` 是否采样：
 
 | 当前批次对应的 Execute Span | Handle 采样行为 |
 | --- | --- |
@@ -1005,7 +1144,7 @@ Handler 内数据库和 HTTP 子 Span 仍使用应用的 Sampler。`ParentBasedS
 
 也可以选择不安装集成包，直接注册 `AddSource("RequestBatcher")`。此时应用的 Sampler 会独立决定 `Handle`
 是否采样，因此即使 `Execute` 已采样，对应的 Handler 处理链路仍可能缺失。采样、导出及 Link 数量限制也可能导致
-关联不完整；大批次需要保留更多关联时，应调整 SDK 的 Span Link 上限。0% 采样不等于完全关闭 Instrument。
+关联不完整；大批次需要保留更多关联时，应调整 SDK 的 Span Link 数量上限。0% 采样不等于完全关闭 Instrument。
 
 详细采样流程图、上下文与 Link 的实现，以及性能评估，见[可观测性设计](docs/observability-design.md)。
 
@@ -1077,7 +1216,7 @@ Handler 失败日志包含原始异常，库本身不会记录请求内容。
 
 ## 示例应用
 
-[持续读取可观测性示例](samples/RequestBatcher.Observability/README.md)通过 Docker Compose 启动 Cart、Pricing 两个 Web API、C# 流量生成器、
+[持续读取场景的可观测性示例](samples/RequestBatcher.Observability/README.md)通过 Docker Compose 启动 Cart、Pricing 两个 Web API、C# 流量生成器、
 PostgreSQL 和 Grafana OTel LGTM。生成器并发提交含 2 到 10 条商品的购物车报价，展示调用总耗时、`Handle` 指向本批次 `Execute` 的 Link、
 `Execute` 指向处理它的 `Handle` 的 Link，以及下游数据库 Span。
 
@@ -1100,6 +1239,13 @@ PostgreSQL 和 Grafana OTel LGTM。生成器并发提交含 2 到 10 条商品�
 [README](samples/RequestBatcher.Delegates/README.md)。
 
 维护者可按[发布流程](docs/package-release-design.md)独立发布两个包。
+
+## 升级说明
+
+响应包装类型统一命名为 `RequestBatchEntry<TRequest, TResponse>`。升级已有代码时，将
+`RequestBatchItem<TRequest, TResponse>` 和 `RequestBatchItemExtensions` 分别改为
+`RequestBatchEntry<TRequest, TResponse>` 和 `RequestBatchEntryExtensions`，并重新编译所有调用方。
+这是源码与二进制不兼容的变更；响应赋值与完成行为保持一致。
 
 ## 许可证
 
