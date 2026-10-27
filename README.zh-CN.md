@@ -101,6 +101,11 @@ RequestBatcher 既不是持久化后台队列，也不是事务协调器：
 - 单个调用方断开、超时或取消后，正在执行的下游操作也必须立即停止。一个处理批次可能包含来自多个调用方的
   请求，因此单个调用方的 `CancellationToken` 不会传给 Handler，也不能取消这个共享的 Handler 调用。
 
+**Redis 场景不一定适合。** StackExchange.Redis 已支持流水线和连接复用，合批节省的开销未必能抵消
+RequestBatcher 的入队、调度和结果分发成本；`BatchSize`、`MaxConcurrency` 等参数设置不当，还可能降低吞吐、
+增加尾延迟。若调用方已有一组 Key，可优先直接使用 `MGET`/`MSET`；合并零散请求前，应与直接使用 Redis 客户端
+的方式对比吞吐、P95/P99 延迟和内存分配，再决定是否引入。
+
 ## 安装与 DI 注册
 
 ```bash

@@ -121,6 +121,12 @@ RequestBatcher is not a durable background queue or a transaction coordinator:
   One handler batch can contain requests from several callers, so caller cancellation tokens are not forwarded to the
   handler and cannot cancel the shared handler call.
 
+**Redis workloads are not necessarily a good fit.** StackExchange.Redis already supports pipelining and connection
+multiplexing, so batching savings may not offset RequestBatcher's queueing, scheduling, and result dispatch costs.
+Poorly chosen `BatchSize`, `MaxConcurrency`, or other settings can also reduce throughput and increase tail latency.
+If the caller already has a set of keys, consider using `MGET`/`MSET` directly. Before introducing RequestBatcher to
+combine individual requests, compare throughput, P95/P99 latency, and memory allocations against direct Redis client use.
+
 ## Installation and DI Registration
 
 ```bash
