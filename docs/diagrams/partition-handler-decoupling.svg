@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1400" height="560" viewBox="0 0 1400 560" role="img" aria-labelledby="title description">
+<defs>
+  <marker id="arrow" markerWidth="10" markerHeight="10" refX="10" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M 0 0 L 10 5 L 0 10 Z" fill="#596773"/></marker>
+  <style>text{font-family:Arial,'PingFang SC','Microsoft YaHei',sans-serif;fill:#303b44;text-anchor:middle;font-size:22px}.edge{fill:none;stroke:#596773;stroke-width:2;marker-end:url(#arrow)}.control{stroke-dasharray:6 5}.heading{font-weight:600}.label{font-size:20px}</style>
+</defs>
+<rect width="1400" height="560" fill="#ffffff"/>
+<title id="title">Partition ownership and Handler concurrency</title>
+<desc id="description">One consumer owns all P partitions in the group. One dispatch loop acquires an execution slot before pulling and starting a batch. At most H Handler batches run concurrently; each completed batch returns its slot.</desc>
+<!-- Contract: queue -> dispatch -> handlers is request flow; handlers -> slots -> dispatch is slot control. P and H are independent; P may equal 1. The loop reserves a slot before pulling. No per-partition Handler assignment or ordering is implied. -->
+<path class="edge" d="M 340 190 H 500"/>
+<path class="edge" d="M 920 190 H 1080"/>
+<path class="edge control" d="M 1220 300 V 460 H 920"/>
+<path class="edge control" d="M 710 410 V 300"/>
+<rect x="40" y="80" width="300" height="220" fill="#fff4d6" stroke="#8a6a1d" stroke-width="2"/>
+<rect x="500" y="80" width="420" height="220" fill="#edf1f5" stroke="#596773" stroke-width="2"/>
+<rect x="1080" y="80" width="280" height="220" fill="#f4edfb" stroke="#75529b" stroke-width="2"/>
+<rect x="500" y="410" width="420" height="100" fill="#edf1f5" stroke="#596773" stroke-width="2"/>
+<text x="190" y="133" class="heading">P queue partitions</text>
+<text x="190" y="180" class="">P may be 1</text>
+<text x="190" y="220" class="">Requests wait here</text>
+<text x="190" y="260" class="">One consumer owns all P</text>
+<text x="710" y="126" class="heading">One pull consumer</text>
+<text x="710" y="158" class="heading">BatchDispatchLoop</text>
+<text x="710" y="200" class="">1. Wait for an execution slot</text>
+<text x="710" y="238" class="">2. Pull from one partition</text>
+<text x="710" y="276" class="">3. Start one Handler batch</text>
+<text x="1220" y="133" class="heading">Handler batches</text>
+<text x="1220" y="180" class="">H = MaxConcurrency</text>
+<text x="1220" y="220" class="">At most H active batches</text>
+<text x="1220" y="260" class="">One slot per batch</text>
+<text x="710" y="449" class="heading">Shared execution slots</text>
+<text x="710" y="484" class="">Across all P partitions</text>
+<text x="420" y="160" class="label">Pull a batch</text>
+<text x="1000" y="160" class="label">Dispatch</text>
+<text x="865" y="346" class="label">Free slot</text>
+<text x="865" y="376" class="label">permits next pull</text>
+<text x="1090" y="375" class="label">Batch completes</text>
+<text x="1090" y="405" class="label">and returns its slot</text>
+</svg>

@@ -45,6 +45,11 @@ RequestBatcher uses [BufferQueue](https://github.com/eventhorizon-cli/BufferQueu
 [BufferQueue 2.1.0](https://www.nuget.org/packages/BufferQueue/2.1.0); applications do not register or configure it
 separately.
 
+Within a consumer group, BufferQueue assigns each partition to one consumer, which owns pulling and consumption
+progress. RequestBatcher uses one pull loop to dispatch batches and `MaxConcurrency` to bound concurrent handler
+batches, decoupling partition count from processing concurrency. **This is a scheduling choice for in-process request
+batching, not a BufferQueue design defect.** See the [internal dispatch design](docs/batch-dispatch-redesign.md#topology).
+
 This is **opportunistic batching**: writing a request to BufferQueue sends a push notification that wakes an idle
 consumer. It first acquires one execution slot, then pulls up to `BatchSize` requests (default: 128) from one partition
 and dispatches that batch. If fewer requests are available, it takes those immediately without waiting to fill the batch.
@@ -589,8 +594,10 @@ RequestBatcher snapshots the sequence and submits it as one producer operation. 
 `MaxPendingRequests` is admitted atomically; a larger group is admitted as consecutive capacity-sized slices as
 capacity becomes available. In `Fail` mode, the whole group must fit immediately.
 
-The returned `Task` waits for every request from the submission. **One submission does not force one handler call:** the
-sequence may still be split by `BatchSize` or partition routing.
+The returned `Task` waits for every request from the submission. **Even with one partition, an explicit submission can
+be split into multiple handler batches; it does not guarantee one handler call.** Each handler batch contains at most
+`BatchSize` requests available when the queue is pulled, without preserving caller grouping boundaries. With multiple
+partitions, per-item routing can also split the submission.
 
 > **An explicit group is not a partition boundary.** With more than one partition, RequestBatcher routes every item
 > independently; it does not send the whole submission to one partition. The group stays in one partition when no

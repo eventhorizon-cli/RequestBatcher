@@ -1,5 +1,7 @@
 # Parallel Batch Dispatch Redesign
 
+**English** | [简体中文](batch-dispatch-redesign.zh-CN.md)
+
 ## Scope
 
 This document defines the current queue topology, dispatch flow, lifecycle, and
@@ -33,6 +35,17 @@ finishes every accepted request exactly once from the handler result, caller
 cancellation before dispatch, or an infrastructure failure.
 
 ## Topology
+
+Within a BufferQueue consumer group, each partition belongs to one consumer, which owns pulling and consumption
+progress. RequestBatcher keeps that ownership model and uses one pull consumer for all its partitions. A separate
+execution window limits concurrent Handler batches through `MaxConcurrency`, so one partition can supply several
+concurrent batches. This is a scheduling choice for in-process request batching, not a BufferQueue design defect.
+
+![Partition ownership and Handler concurrency](diagrams/partition-handler-decoupling.svg)
+
+Solid arrows show request flow; dashed arrows show execution-slot control. `P` is the queue partition count and
+`H = MaxConcurrency` is the maximum number of active Handler batches. The loop acquires a slot before pulling;
+each completed batch returns its slot independently. The diagram omits cancellation and shutdown paths.
 
 At service registration, RequestBatcher resolves a fixed partition count:
 
@@ -88,6 +101,10 @@ behavior remain unchanged.
 
 `BatchSize` remains the BufferQueue pull batch size and the maximum number of
 items passed to one handler invocation. It is not multiplied by `H`.
+
+Even with one partition, an explicit submission can span multiple Handler batches: pulls take at most `BatchSize`
+currently queued requests and do not preserve caller grouping boundaries. Single-partition routing therefore does
+not guarantee one Handler call or one reverse trace link per explicit submission.
 
 ## Queue Dependency Contract
 

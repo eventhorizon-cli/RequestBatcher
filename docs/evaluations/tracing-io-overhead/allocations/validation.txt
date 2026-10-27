@@ -1,6 +1,0 @@
-Allocation probe: Mode=Disabled, Waves=500, Requests=512000, AllocatedBytes=148948768, BytesPerWave=297897.54, BytesPerRequest=290.92
-Tracing I/O validation: Benchmark=SingleSubmissionsAsync, ListenerMode=Disabled, Waves=510, MeanActualRoundTripMilliseconds=104.129, MeanHandlerDelayMilliseconds=21.054, MeanBatchCalls=36.012, MeanItems=1024.000, MeanItemsPerBatch=28.435, SamplingDecisions=0, SampledSpans=0, ObservedSamplingPercent=0.000
-Allocation probe: Mode=Sample0, Waves=500, Requests=512000, AllocatedBytes=699458056, BytesPerWave=1398916.11, BytesPerRequest=1366.13
-Tracing I/O validation: Benchmark=SingleSubmissionsAsync, ListenerMode=Sample0, Waves=510, MeanActualRoundTripMilliseconds=105.871, MeanHandlerDelayMilliseconds=20.965, MeanBatchCalls=37.492, MeanItems=1024.000, MeanItemsPerBatch=27.312, SamplingDecisions=541361, SampledSpans=0, ObservedSamplingPercent=0.000
-Allocation probe: Mode=Sample100, Waves=500, Requests=512000, AllocatedBytes=864819848, BytesPerWave=1729639.70, BytesPerRequest=1689.10
-Tracing I/O validation: Benchmark=SingleSubmissionsAsync, ListenerMode=Sample100, Waves=510, MeanActualRoundTripMilliseconds=105.573, MeanHandlerDelayMilliseconds=20.953, MeanBatchCalls=37.116, MeanItems=1024.000, MeanItemsPerBatch=27.589, SamplingDecisions=541169, SampledSpans=541169, ObservedSamplingPercent=100.000

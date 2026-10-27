@@ -11,6 +11,12 @@ and bounds queued capacity. It is useful when a database, cache, or downstream A
 
 ## How Requests Are Batched: Opportunistic Merging
 
+Within a consumer group, BufferQueue assigns each partition to one consumer, which owns pulling and consumption
+progress. RequestBatcher uses one pull loop to dispatch batches and `MaxConcurrency` to bound concurrent handler
+batches, decoupling partition count from processing concurrency. **This is a scheduling choice for in-process request
+batching, not a BufferQueue design defect.** See the
+[internal dispatch design](https://github.com/eventhorizon-cli/RequestBatcher/blob/main/docs/batch-dispatch-redesign.md#topology).
+
 **RequestBatcher does not wait to fill a batch or add a fixed collection window.** When an execution slot is available,
 it dispatches up to `BatchSize` requests already queued in one partition. Requests still queue when all slots are occupied;
 normal scheduling and downstream execution also take time. Single-request callers can share a batch, and one explicit
@@ -234,6 +240,10 @@ These inputs support an initial configuration proposal, not a performance guaran
 RequestBatcher forms handler batches opportunistically from requests currently queued in one partition. It does not add a
 collection delay. Therefore, a low-traffic batch may contain one request, and one explicit `ExecuteAsync(requests)` call
 may be split by `BatchSize` or partition routing. Separate submissions can share a handler batch.
+
+**Even with one partition, an explicit submission can be split into multiple handler batches; it does not guarantee
+one handler call.** Each handler batch contains at most `BatchSize` requests available when the queue is pulled,
+without preserving caller grouping boundaries.
 
 ### Handler Execution Context
 

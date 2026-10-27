@@ -40,6 +40,10 @@ RequestBatcher 基于 [BufferQueue](https://github.com/eventhorizon-cli/BufferQu
 合并为批次，交给应用的 Handler 处理。当前依赖 [BufferQueue 2.1.0](https://www.nuget.org/packages/BufferQueue/2.1.0)，
 应用无需单独注册或配置它。
 
+BufferQueue 在同一消费组内将每个 Partition 分配给一个 Consumer，由它负责拉取和推进消费进度。
+RequestBatcher 用单个拉取消费循环分发批次，再由 `MaxConcurrency` 控制 Handler 批次并发，使 Partition 数量与处理并发度解耦。
+**这不是 BufferQueue 的设计缺陷，而是 RequestBatcher 针对进程内请求合批场景采用的调度方式。** 详见[内部调度设计](docs/batch-dispatch-redesign.zh-CN.md#队列拓扑)。
+
 这种批次处理可以理解为**机会式攒批（Opportunistic Batching）**：请求写入 BufferQueue 后会发出通知，唤醒空闲的消费流程。
 消费流程先占用一个执行名额，再通过拉取 API 从一个 Partition 拉取最多 `BatchSize` 条请求（默认 128 条），随后分发这一批。
 如果当前不足一批，就直接取出已有请求，不额外等待凑满。
@@ -549,8 +553,8 @@ RequestBatcher 会先为请求序列创建快照，再统一提交给内部队�
 `MaxPendingRequests` 个请求，等待队列腾出足够空间后依次入队。`Fail` 模式下，如果队列剩余空间不足以容纳整组
 请求，就立即拒绝整组请求。
 
-返回的 `Task` 会等待本次提交中的所有请求。**一次提交不等于一次 Handler 调用**：请求仍可能按 `BatchSize` 或
-Partition 路由拆成多个处理批次。
+返回的 `Task` 会等待本次提交中的所有请求。**即使只有一个 Partition，一次批量提交也不保证只调用一次 Handler，仍可能被拆成多个处理批次。**
+Handler 每次最多处理 `BatchSize` 个请求，并按拉取时队列中的请求组批，不保留调用方的分组边界；配置多个 Partition 时，还可能因逐项路由而拆批。
 
 > **显式批量提交不是 Partition 边界。** 配置多个 Partition 后，RequestBatcher 会逐项路由，并不会将整次提交
 > 强制放入同一 Partition。未配置 Partition Key，或每项请求计算出相同的 Partition Key 时，整组请求才会落在同一个
