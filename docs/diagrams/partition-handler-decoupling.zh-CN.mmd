@@ -1,0 +1,8 @@
+%% Semantic contract: P and H are independent; each group partition has one consumer owner.
+%% One loop acquires a slot before pulling; each handler batch returns its own slot.
+%% Cancellation and shutdown paths are omitted. The SVG is the layout source.
+flowchart LR
+    queue["P 个队列 Partition；P 可以为 1"] -->|拉取一批| dispatch["一个拉取 Consumer + BatchDispatchLoop"]
+    dispatch -->|启动一批| handlers["最多 H 个 Handler 批次并发执行"]
+    handlers -.->|完成后归还名额| slots["共享执行名额；H = MaxConcurrency"]
+    slots -.->|取得名额后才能拉取| dispatch

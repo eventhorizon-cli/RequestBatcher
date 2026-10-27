@@ -100,7 +100,7 @@ These benchmarks run in process without Docker. Some use simulated asynchronous 
 | [BatchCompletionBenchmarks](InMemory/BatchCompletionBenchmarks.cs) | Per-request TCS plus WhenAll versus shared batch completion. |
 | [RequestCompletionBenchmarks](InMemory/RequestCompletionBenchmarks.cs) | Internal pending-request success, failure and cancellation, without the full queue pipeline. |
 | [PendingRequestAllocationBenchmarks](InMemory/PendingRequestAllocationBenchmarks.cs) | One completed pending request, with and without a cancellable caller token. |
-| [TracingCompletionBenchmarks](InMemory/TracingCompletionBenchmarks.cs) | Task, ValueTask, and callback tracing completion bridges with all 1,024 sources pending at registration; see the [evaluation](../../docs/evaluations/tracing-io-overhead/completion-optimization.md). |
+| [TracingCompletionBenchmarks](InMemory/TracingCompletionBenchmarks.cs) | Task, ValueTask, and callback tracing completion bridges, comparing 1,024 pending sources per measured invocation. |
 | [ResponseCompletionBenchmarks](InMemory/ResponseCompletionBenchmarks.cs) | Public response success, failure and pre-dispatch cancellation, with request-only and explicit-submission controls. |
 | [ExplicitCompletionBenchmarks](InMemory/ExplicitCompletionBenchmarks.cs) | Public explicit-submission success, failure, partial cancellation, capacity waiting and mixed submissions. |
 | [BatchErrorAggregationBenchmarks](InMemory/BatchErrorAggregationBenchmarks.cs) | Shared completion accounting for success, repeated exception references and distinct exceptions, sequentially and concurrently. |
@@ -134,7 +134,7 @@ links, sampling, and performance boundaries.
 | Source / filter class | Comparison |
 | --- | --- |
 | [ObservabilityOverheadBenchmarks](InMemory/ObservabilityOverheadBenchmarks.cs) | Disabled, metrics-only, and tracing-plus-metrics OpenTelemetry providers around 256 named async pricing requests with a 20 ms handler delay. |
-| [TracingIoOverheadBenchmarks](InMemory/TracingIoOverheadBenchmarks.cs) | Published versions and source snapshots, with tracing disabled or SDK sampling at 0%, 1%, 10%, and 100%, for single and explicit submissions with 20 ms simulated downstream calls. See the [comparison runner and original report](../../docs/evaluations/tracing-io-overhead/README.md), [shared completion results](../../docs/evaluations/tracing-io-overhead/shared-completion.md), [BufferQueue 2.1.0 comparison](../../docs/evaluations/bufferqueue-2.1.0/README.md), and [sampling-aware links](../../docs/evaluations/tracing-io-overhead/sampled-links.md). |
+| [TracingIoOverheadBenchmarks](InMemory/TracingIoOverheadBenchmarks.cs) | Published versions and source snapshots, with tracing disabled or SDK sampling at 0%, 1%, 10%, and 100%, for single and explicit submissions with 20 ms simulated downstream calls. See the [current measurement and reproduction guide](../../docs/evaluations/tracing-io-overhead/README.md) and the [single-partition .NET 10 allocation baseline](../../docs/evaluations/tracing-io-overhead/single-partition-net10.md). |
 | [MetricsIoOverheadBenchmarks](InMemory/MetricsIoOverheadBenchmarks.cs) | Metrics disabled, SDK aggregation only, and periodic collection every 1,000 ms or 100 ms, with tracing disabled and 20 ms simulated downstream calls. See the [metrics evaluation](../../docs/evaluations/metrics-io-overhead/README.md). |
 
 The corresponding [observability overhead evaluation](../../docs/evaluations/observability-overhead/README.md) records the

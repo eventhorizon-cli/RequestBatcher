@@ -30,10 +30,9 @@ All corresponding elapsed-time confidence intervals overlap. The 100 ms explicit
 more variable actual handler waits, so the data does not establish a consistent latency regression or an ordering of
 collection intervals. Do not extrapolate the small differences into an exact per-instrument CPU cost.
 
-Metrics allocation is much smaller than the tracing increases measured in the [tracing evaluation](../tracing-io-overhead/optimization.md).
 The metrics implementation records numeric counters/histograms with a stack-local `TagList` and a value-type batch
-scope; it does not create per-submission Activities or tracing completion tasks. This explains the different allocation
-shape, without implying that SDK aggregation, synchronization, or export is free. Provider startup and initial storage
+scope; it does not create per-submission Activities or tracing completion tasks. SDK aggregation, synchronization,
+and export can still incur costs. Provider startup and initial storage
 are outside the steady-state measurement; high-cardinality tags and real OTLP exporters are outside this workload.
 
 All eight cases completed, with two launches and 69 validated waves per launch: 1,104 waves and 1,130,496 request
@@ -48,7 +47,7 @@ Evidence: [raw results](results.csv), [validation output](validation.txt), and
 
 ## Workload
 
-Use the same workload as the [tracing I/O evaluation](../tracing-io-overhead/README.md): 1,024 unique integers per
+Use the same workload shape as the [tracing evaluation guide](../tracing-io-overhead/README.md): 1,024 unique integers per
 wave, batch size 32, handler concurrency 8, capacity 1,024, and a singleton handler awaiting a 20 ms delay per batch.
 Compare single submissions with 32 explicit groups of 32. Use one named batcher to exercise both request-type and
 batcher-name tags, identically across modes. Record actual handler delay and batch occupancy because timer scheduling
