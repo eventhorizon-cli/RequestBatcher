@@ -63,6 +63,11 @@ scheduling; when all slots are occupied, requests must wait for capacity to exec
 requests per handler call: a batch may contain just one request at low traffic or several requests already queued in the
 same partition during a burst.
 
+Calling `ExecuteAsync` in a loop and awaiting each call before submitting the next gives RequestBatcher no concurrent
+work from that caller to merge. To observe actual batching, submit a bounded number of requests concurrently and inspect
+the resulting handler batch sizes. Concurrent submissions can share a batch, but they do not guarantee one batch or a
+full `BatchSize`.
+
 **A lower `MaxConcurrency` may let requests accumulate while they wait for an execution slot**; once a slot is released,
 the requests already queued can merge. **This queueing comes from concurrency control, not an added collection delay.**
 Even with `MaxConcurrency = 1`, **a free slot and one queued request allow that request to run without waiting for `BatchSize` items.**
@@ -124,10 +129,12 @@ dotnet add package RequestBatcher
 
 The package supports .NET 8 and .NET 10 applications through `net8.0` and `net10.0` assets.
 
+The current version does not support NativeAOT publishing or trimming.
+
 Two registration styles are available:
 
 - **Handler type**: use `AddRequestBatcher` to register a Handler type with an explicit lifetime and keep processing logic in a separate class.
-- **Delegate Handler**: use `AddDelegateRequestBatcher`, then pass a static delegate to `ExecuteAsync`; services are injected through its parameters. See [Delegate Handlers](#delegate-handlers).
+- **Delegate Handler**: use `AddDelegateRequestBatcher`, then pass a static delegate to `ExecuteAsync`; services are injected through its parameters. **Delegate binding is not supported for NativeAOT or trimming.** See [Delegate Handlers](#delegate-handlers).
 
 For primitive request types such as `int` or `string`, prefer [Named RequestBatcher](#named-requestbatcher-instances-and-primitive-requests) to distinguish operations that share the same request type.
 
@@ -164,10 +171,13 @@ public sealed class CatalogHandler : IRequestBatchHandler<PriceLookup, decimal?>
         IReadOnlyList<RequestBatchEntry<PriceLookup, decimal?>> entries,
         CancellationToken cancellationToken = default)
     {
-        foreach (var entry in entries)
-        {
-            entry.SetResponse(Prices.TryGetValue(entry.Request.ProductId, out var price) ? price : null);
-        }
+        entries.SetResponses(request => Prices.TryGetValue(request.ProductId, out var price) ? price : null);
+
+        // Alternatively, replace the call above with per-entry assignment.
+        // foreach (var entry in entries)
+        // {
+        //     entry.SetResponse(Prices.TryGetValue(entry.Request.ProductId, out var price) ? price : null);
+        // }
 
         return ValueTask.CompletedTask;
     }
@@ -182,7 +192,7 @@ operation; see the [typed PostgreSQL sample](samples/RequestBatcher.Deduplicatio
 
 **A response Handler must assign exactly one response to every entry before completing successfully.** An explicit
 `null` is a valid response. Missing assignments fail the entire Handler batch. Callers await the actual Handler
-outcome. See [Processing Semantics](#processing-semantics) for failure and cancellation.
+outcome. See [Completion and Failure](#completion-and-failure) for failure and cancellation.
 
 `AddRequestBatcher` registers the handler, coordinator, and internal BufferQueue topic in the application's existing
 `IServiceCollection`. The application does not configure BufferQueue directly, and RequestBatcher never builds a
@@ -190,6 +200,9 @@ nested service provider.
 
 Scoped and transient handlers are resolved once per handler batch in an asynchronous scope. A singleton handler is
 reused across batches and must be thread-safe when `MaxConcurrency > 1`.
+
+Handler execution uses an independent batch context and a DI scope separate from the HTTP request scope; pass needed
+business data explicitly in the request. See [Handler Execution Context](#handler-execution-context).
 
 ### Partition-Key Routing
 
@@ -334,6 +347,34 @@ public interface IRequestBatchHandler<TRequest, TResponse>
 
 RequestBatcher awaits each handler's `ValueTask` once and never returns it to a caller. Synchronously completing
 handlers can therefore avoid a `Task` allocation, while asynchronous I/O can use `async ValueTask`.
+
+### Response Assignment APIs
+
+Response handlers assign one response to each `RequestBatchEntry<TRequest, TResponse>`. The following signatures omit implementation details:
+
+```csharp
+public sealed class RequestBatchEntry<TRequest, TResponse>
+{
+    public TRequest Request { get; }
+    public void SetResponse(TResponse response);
+}
+
+public static class RequestBatchEntryExtensions
+{
+    public static void SetResponses<TRequest, TResponse>(
+        this IReadOnlyList<RequestBatchEntry<TRequest, TResponse>> entries,
+        Func<TRequest, TResponse> responseFactory);
+
+    public static void SetResponses<TRequest, TResponse>(
+        this IReadOnlyList<RequestBatchEntry<TRequest, TResponse>> entries,
+        IEnumerable<TResponse> responses);
+}
+```
+
+Use one assignment approach per handler batch. `SetResponse` assigns an individual entry. The factory overload evaluates
+the factory in entry order and creates every response before assigning any entry. The sequence overload requires exactly
+one response per entry and assigns them in entry order. Assigning `null` is valid for nullable response types; every entry
+must be assigned exactly once before the handler returns successfully.
 
 ## Request-Only Batching
 
@@ -568,57 +609,6 @@ invocation.
 | Failure | A handler failure fails every request in that handler batch. | Some items may succeed before another handler batch fails. The group `Task` faults, but successful work is not rolled back. |
 | Cancellation | Cancellation removes the request only before dispatch. | The same token applies to every item; undispatched items can be canceled while dispatched items continue to their actual outcome. |
 
-## Processing Semantics
-
-### Completion and Failure
-
-- A successful handler call marks every request in that handler batch as successful. An explicit submission's task
-  waits for all its requests, including those assigned to other handler batches.
-- If the handler throws a non-cancellation exception, every request in that handler batch fails with the original
-  exception.
-- Response tasks represent a handler `OperationCanceledException` as cancellation. A single response preserves its
-  cancellation token and throws `TaskCanceledException` when awaited; the original cancellation exception instance,
-  message, and derived type are not preserved.
-- RequestBatcher does not retry a failed handler.
-- The batch overload waits for the whole submitted group and faults if any handler call involved in that submission
-  fails.
-- If several handler calls fail for one explicit group, `await` throws one original exception following normal `Task`
-  semantics. All distinct exception instances remain available through `Task.Exception.InnerExceptions`; one handler
-  exception fanned out to several requests is recorded once.
-
-### Caller Cancellation
-
-Caller cancellation can remove a request only before handler dispatch. Once the handler starts, RequestBatcher reports
-the real handler outcome instead of changing the caller's `Task` to canceled. This prevents cancellation from hiding a
-side effect that may already have happened.
-
-The token passed to the handler belongs to RequestBatcher's processing lifetime, not to an individual caller. One
-caller's cancellation therefore cannot cancel work for the other requests in the same batch.
-
-For an explicit group, the caller token is applied to every item. Cancellation can therefore leave a mix of canceled
-items and items that were already dispatched. The returned `Task` still waits for all items; it faults if any item
-faults, otherwise it is canceled when at least one item was canceled. Completed side effects are not rolled back.
-
-### Capacity and Backpressure
-
-`MaxPendingRequests` sets the bounded BufferQueue capacity for requests that remain queued. A batch is auto-committed
-when the dispatch loop pulls it, before its handler starts. Therefore, up to `MaxConcurrency * BatchSize` pulled
-requests can be executing in addition to queued capacity. It is not a limit on the size of an explicit submission or
-on the number of callers waiting for capacity:
-
-- `FullMode = Wait` waits asynchronously for enough capacity and honors caller cancellation while waiting.
-- In `Wait` mode, a group no larger than the capacity is admitted atomically. A larger group is split into consecutive
-  capacity-sized slices. Cancellation can leave already dispatched requests running while undispatched requests are
-  canceled.
-- `FullMode = Fail` requires the whole submission to fit immediately. Otherwise, including when a group is larger than
-  the capacity, it returns a faulted `Task` with `RequestBatchQueueFullException` without admitting any item.
-
-### Shutdown and Disposal
-
-`DisposeAsync` stops accepting new requests, drains every accepted submission (including submissions waiting for
-capacity), then releases coordinator-owned resources. Concurrent and repeated disposal calls share the same operation.
-When registered through `AddRequestBatcher`, the application container owns async disposal.
-
 ## Named RequestBatcher Instances and Primitive Requests
 
 A request can be a primitive ID. Use the `batcherName` overload when several operations accept the same request type:
@@ -837,39 +827,90 @@ The [typed-handler sample](samples/RequestBatcher.Deduplication) provides the or
 
 ## Request Processing Flow
 
-**The internal queue's partition count is not the handler concurrency level.** Partitions organize queueing and routing;
-the global `MaxConcurrency` setting limits the number of handler batches that can execute at once.
+1. A caller submits one request through `ExecuteAsync(request)` or an explicit group through `ExecuteAsync(requests)`.
+2. RequestBatcher admits the submission according to the configured capacity policy and routes each item to an in-memory partition.
+3. The internal `BatchDispatchLoop` acquires a free handler slot, pulls up to `BatchSize` requests already queued in
+   one partition, and automatically commits the queue's consumption progress.
+4. Requests canceled before dispatch are skipped; the remaining requests are passed to the handler. Requests from
+   different submissions can share one handler call.
+5. The handler outcome completes the corresponding request tasks; an explicit group's `Task` waits for every item.
 
-Multiple batches from one partition can execute concurrently, and all partitions share the same execution slots.
-
-Without `UsePartitionKey`, RequestBatcher uses one internal queue partition. This avoids fragmenting unrelated requests
-across queues and leaves them together for natural batching.
-
-When `UsePartitionKey` is configured with a finite integer numeric key or a non-null string key and an explicit partition
-count greater than one, the queue uses that many partitions so equal keys retain locality while different keys can
-progress independently.
-`P` is a routing detail; `H = MaxConcurrency` remains the global handler-batch concurrency limit. A single partition can
-continuously produce multiple asynchronous handler batches, so partitions do not impose a one-batch-at-a-time limit.
-
-1. A caller submits one request through `ExecuteAsync`.
-2. RequestBatcher admits the request according to the configured capacity and routes it to an in-memory partition.
-3. The internal `BatchDispatchLoop` acquires a free handler slot, then pulls and auto-commits up to `BatchSize`
-   requests that are already queued.
-4. The handler outcome completes the `Task` returned to every caller represented in that handler batch.
-
-`BatchSize` is an upper bound, not a minimum. RequestBatcher does not hold the first request for a fixed batching
-window, so low traffic may produce single-request batches while concurrent traffic naturally produces larger batches.
+An explicit submission can span multiple handler batches. RequestBatcher does not wait to fill `BatchSize` or use a
+fixed collection window. When a handler slot is available, it processes the requests already queued, even just one.
 
 ![RequestBatcher architecture](docs/assets/request-batcher-architecture.svg)
 
 The architecture diagram shows the coordinator, the in-memory partition queue, and the separate `Task` completion
 path for each accepted request.
 
-### Dispatch Scheduling
+### Capacity and Backpressure
 
-Here, `H = MaxConcurrency` is the maximum number of handler batches running at once. Without a partition key there is
-one internal queue partition; with a numeric or string partition key, `P` is the explicit count supplied to
-`UsePartitionKey`.
+`MaxPendingRequests` sets the bounded BufferQueue capacity for requests that remain queued. A batch is auto-committed
+when the dispatch loop pulls it, before its handler starts. Therefore, up to `MaxConcurrency * BatchSize` pulled
+requests can be executing in addition to queued capacity. It is not a limit on the size of an explicit submission or
+on the number of callers waiting for capacity:
+
+- `FullMode = Wait` waits asynchronously for enough capacity and honors caller cancellation while waiting.
+- In `Wait` mode, a group no larger than the capacity is admitted atomically. A larger group is split into consecutive
+  capacity-sized slices. Cancellation can leave already dispatched requests running while undispatched requests are
+  canceled.
+- `FullMode = Fail` requires the whole submission to fit immediately. Otherwise, including when a group is larger than
+  the capacity, it returns a faulted `Task` with `RequestBatchQueueFullException` without admitting any item.
+
+The default is `FullMode = Wait`. `MaxPendingRequests` bounds queued requests, not the number of callers or submissions
+waiting for capacity, and it is not a process-wide memory limit. Asynchronous waiting does not hold a thread, but each
+pending request and its completion state still consumes memory. Apply an ingress concurrency or rate limit when total
+waiting work must be bounded.
+
+Replace the Quickstart `MapGet` block with the following example to add a cancellation timer while preserving the HTTP
+request's cancellation signal. Keep the remaining Quickstart code; its registration uses the default `Wait` mode:
+
+```csharp
+app.MapGet("/prices/{productId:long}", async Task<IResult> (
+    long productId,
+    IRequestBatcher<PriceLookup, decimal?> batcher,
+    CancellationToken requestCancellation) =>
+{
+    using var admissionCancellation = CancellationTokenSource.CreateLinkedTokenSource(requestCancellation);
+    admissionCancellation.CancelAfter(TimeSpan.FromMilliseconds(200));
+
+    try
+    {
+        var price = await batcher.ExecuteAsync(new PriceLookup(productId), admissionCancellation.Token);
+        return price is { } value ? Results.Ok(value) : Results.NotFound();
+    }
+    catch (RequestBatchQueueFullException)
+    {
+        return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+    }
+});
+```
+
+The `RequestBatchQueueFullException` branch applies when the batcher uses `FullMode = Fail`; the default is `Wait`. To
+enable that branch, replace the Quickstart registration with:
+
+```csharp
+builder.Services.AddRequestBatcher<PriceLookup, decimal?, CatalogHandler>(
+    ServiceLifetime.Singleton,
+    options => options.FullMode = RequestBatchFullMode.Fail);
+```
+
+The 200 ms timer is illustrative: it starts before `ExecuteAsync` and can cancel capacity waits and undispatched requests.
+**It does not guarantee that `ExecuteAsync` returns within 200 ms.** After dispatch, the caller still waits for the actual
+handler outcome. Cancellation exceptions propagate for the application to handle; a handler cancellation must not be
+automatically classified as an admission timeout.
+
+### Routing and Dispatch
+
+**The internal queue's partition count is not the handler concurrency level.** Partitions organize queueing and routing;
+all partitions share `MaxConcurrency` handler slots. Multiple batches from one partition can also execute concurrently.
+
+Without `UsePartitionKey`, or with `partitionCount: 1`, the queue uses one partition and does not route by key.
+With a larger count, equal keys route to the same partition. Supported keys are finite integer-valued numeric keys
+and non-null string keys. Equal keys can still span multiple handler batches; routing does not deduplicate requests
+or guarantee handler execution order.
+
+In the diagram, `P` is the internal partition count and `H = MaxConcurrency` is the handler-batch concurrency limit.
 
 ![Internal dispatch scheduling](docs/assets/request-batcher-dispatch-scheduling.svg)
 
@@ -878,14 +919,79 @@ pulling a queue batch, then starts its handler and returns to waiting for anothe
 requests remain in BufferQueue. As soon as any one handler batch completes, its slot becomes free and the loop can pull
 the next batch while the other handlers keep running. It does not wait for all currently running batches to finish.
 
-## Routing Rules and Dispatch
-
 When keyed routing is enabled, the queue rotates pull opportunities among readable partitions. This does not promise
 equal handler execution time or fairness between individual keys.
 
 A handler runs on the dispatch call path until it completes or reaches an incomplete asynchronous wait. CPU-heavy
 or synchronously blocking work before that point can delay other batches even when execution slots remain free.
 `MaxConcurrency` is an upper bound; it does not automatically parallelize synchronous handler code.
+
+### Handler Execution Context
+
+A Handler batch can combine requests from multiple callers, and the Handler runs in its own batch execution context.
+Do not rely on access to an originating request's `HttpContext` through `IHttpContextAccessor`, or on caller ambient
+state such as `AsyncLocal` values, `ILogger.BeginScope` scopes, `Activity.Current`, or `Baggage`. The Handler's DI scope
+is also separate from the HTTP request scope: a scoped dependency does not reuse the originating request-scoped
+instance or state initialized there.
+
+Read values the Handler needs before submission, such as currency, language, or a business correlation ID, and carry
+them as immutable request data. Do not pass an `HttpContext`, request service provider, or request-scoped service
+instance to preserve caller context. RequestBatcher tracing connects `Execute` and `Handle` spans with links; those
+links do not restore caller ambient context. Activities created inside a Handler still use the Handler batch span as
+their parent.
+
+### Completion and Failure
+
+- A successful handler call marks every request in that handler batch as successful. An explicit submission's task
+  waits for all its requests, including those assigned to other handler batches.
+- If the handler throws a non-cancellation exception, every request in that handler batch fails with the original
+  exception.
+- Response tasks represent a handler `OperationCanceledException` as cancellation. A single response preserves its
+  cancellation token and throws `TaskCanceledException` when awaited; the original cancellation exception instance,
+  message, and derived type are not preserved.
+- RequestBatcher does not retry a failed handler.
+- The batch overload waits for the whole submitted group and faults if any handler call involved in that submission
+  fails.
+- If several handler calls fail for one explicit group, `await` throws one original exception following normal `Task`
+  semantics. All distinct exception instances remain available through `Task.Exception.InnerExceptions`; one handler
+  exception fanned out to several requests is recorded once.
+
+### Caller Cancellation
+
+Caller cancellation can remove a request only before handler dispatch. Once the handler starts, RequestBatcher reports
+the real handler outcome instead of changing the caller's `Task` to canceled. This prevents cancellation from hiding a
+side effect that may already have happened.
+
+The token passed to the handler belongs to RequestBatcher's processing lifetime, not to an individual caller. One
+caller's cancellation therefore cannot cancel work for the other requests in the same batch.
+
+If all callers cancel after a batch has been dispatched, the batch still runs and its tasks report the actual handler
+outcome. Use the Handler's own downstream timeout or cancellation policy when the database or API call must stop; caller
+cancellation is not a shared downstream timeout.
+
+For example, replace the `store.FindAsync` call in the earlier `PriceQueryHandler` with:
+
+```csharp
+using var batchTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+batchTimeout.CancelAfter(TimeSpan.FromSeconds(2));
+var prices = await store.FindAsync(keys, batchTimeout.Token).ConfigureAwait(false);
+```
+
+This links to the Handler's batch token; two seconds is only an example. The store must forward the token to a downstream
+operation that supports cancellation. A timer cannot forcibly stop an operation that ignores cancellation; configure
+client or database command timeouts as appropriate. If the Handler propagates `OperationCanceledException`, response tasks
+become canceled as described in [Completion and Failure](#completion-and-failure).
+
+For an explicit group, the caller token is applied to every item. Cancellation can therefore leave a mix of canceled
+items and items that were already dispatched. The returned `Task` still waits for all items; it faults if any item
+faults, otherwise it is canceled when at least one item was canceled. Completed side effects are not rolled back.
+
+### Shutdown and Disposal
+
+`DisposeAsync` stops accepting new requests, drains every accepted submission (including submissions waiting for
+capacity) before canceling the consumer, then releases coordinator-owned resources. A stalled downstream call can keep
+disposal waiting. Concurrent and repeated disposal calls share the same operation.
+When registered through `AddRequestBatcher`, the application container owns async disposal.
 
 ## Performance Tuning and Benchmarks
 
@@ -1212,8 +1318,9 @@ Named instances append the registered name, for example `RequestBatcher.Execute 
 - `requestbatcher.batch.submission.count`: how many distinct `ExecuteAsync` submissions contributed to that batch.
   Several items from one submission count once within each batch.
 
-Handlers do not inherit the caller's HTTP span, logging scope, baggage, or other `AsyncLocal` values. Pass required
-business data explicitly in requests. Activities created inside a Handler follow its batch span normally.
+Handlers run in the independent batch execution context described in [Handler Execution Context](#handler-execution-context).
+Pass required business data explicitly in requests. Execute/Handle span links connect the traces without restoring
+caller ambient context; Activities created inside a Handler follow its batch span normally.
 
 ![RequestBatcher observability model](docs/diagrams/observability.svg)
 

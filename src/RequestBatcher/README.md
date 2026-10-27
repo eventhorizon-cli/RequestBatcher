@@ -21,6 +21,10 @@ queueing, not an added collection delay: **even with one slot, a lone queued req
 See [Configuring Partitions and MaxConcurrency](#configuring-partitions-and-maxconcurrency) for configuration tradeoffs,
 and the [low-concurrency throughput estimate and downstream batching example](https://github.com/eventhorizon-cli/RequestBatcher#estimating-handler-and-downstream-concurrency-separately).
 
+Calling `ExecuteAsync` in a loop and awaiting each call before submitting the next gives RequestBatcher no concurrent
+work from that caller to merge. Use a bounded number of concurrent submissions when measuring actual handler batch sizes;
+concurrency can share a batch, but does not guarantee one batch or a full `BatchSize`.
+
 ## When to Use It
 
 **Prefer independent read-only queries**, such as database lookups, cache multi-gets, and
@@ -39,10 +43,14 @@ caller disconnects.
 dotnet add package RequestBatcher
 ```
 
-The package supports .NET 8 and .NET 10. Two registration styles are available:
+The package supports .NET 8 and .NET 10.
+
+The current version does not support NativeAOT publishing or trimming.
+
+Two registration styles are available:
 
 - **Handler type**: `AddRequestBatcher` registers a separate Handler class with an explicit `ServiceLifetime`.
-- **Delegate Handler**: `AddDelegateRequestBatcher` registers a pipeline whose static Handler delegate is supplied to `ExecuteAsync`; services are injected through its parameters. See [Delegate Handlers](#delegate-handlers).
+- **Delegate Handler**: `AddDelegateRequestBatcher` registers a pipeline whose static Handler delegate is supplied to `ExecuteAsync`; services are injected through its parameters. **Delegate binding is not supported for NativeAOT or trimming.** See [Delegate Handlers](#delegate-handlers).
 
 For primitive request types such as `int` or `string`, prefer [Named RequestBatcher](#named-batchers-and-primitive-requests)
 to distinguish operations that share the same request type.
@@ -58,6 +66,9 @@ services.AddRequestBatcher<TRequest, TResponse, THandler>(ServiceLifetime.Scoped
 `IServiceCollection`. The application does not register or configure BufferQueue separately. Scoped and transient typed
 handlers are resolved in an async scope once per handler batch; singleton handlers are reused and must be thread-safe
 when `MaxConcurrency > 1`.
+
+Handler execution uses an independent batch context and a DI scope separate from the HTTP request scope; pass needed
+business data explicitly in the request. See [Handler Execution Context](#handler-execution-context).
 
 ### Quickstart
 
@@ -92,10 +103,13 @@ public sealed class CatalogHandler : IRequestBatchHandler<PriceLookup, decimal?>
         IReadOnlyList<RequestBatchEntry<PriceLookup, decimal?>> entries,
         CancellationToken cancellationToken = default)
     {
-        foreach (var entry in entries)
-        {
-            entry.SetResponse(Prices.TryGetValue(entry.Request.ProductId, out var price) ? price : null);
-        }
+        entries.SetResponses(request => Prices.TryGetValue(request.ProductId, out var price) ? price : null);
+
+        // Alternatively, replace the call above with per-entry assignment.
+        // foreach (var entry in entries)
+        // {
+        //     entry.SetResponse(Prices.TryGetValue(entry.Request.ProductId, out var price) ? price : null);
+        // }
 
         return ValueTask.CompletedTask;
     }
@@ -112,6 +126,34 @@ uses `ExecuteAsync(request)`; an explicit group uses `ExecuteAsync(requests)` an
 For request-only processing, implement `IRequestBatchHandler<TRequest>` with an
 `IReadOnlyList<TRequest>` parameter and register it with the first overload. A successful handler call completes every
 request in that handler batch.
+
+### Response Assignment APIs
+
+Response handlers assign one response to each `RequestBatchEntry<TRequest, TResponse>`. The following signatures omit implementation details:
+
+```csharp
+public sealed class RequestBatchEntry<TRequest, TResponse>
+{
+    public TRequest Request { get; }
+    public void SetResponse(TResponse response);
+}
+
+public static class RequestBatchEntryExtensions
+{
+    public static void SetResponses<TRequest, TResponse>(
+        this IReadOnlyList<RequestBatchEntry<TRequest, TResponse>> entries,
+        Func<TRequest, TResponse> responseFactory);
+
+    public static void SetResponses<TRequest, TResponse>(
+        this IReadOnlyList<RequestBatchEntry<TRequest, TResponse>> entries,
+        IEnumerable<TResponse> responses);
+}
+```
+
+Use one assignment approach per handler batch. `SetResponse` assigns an individual entry. The factory overload evaluates
+the factory in entry order and creates every response before assigning any entry. The sequence overload requires exactly
+one response per entry and assigns them in entry order. Assigning `null` is valid for nullable response types; every entry
+must be assigned exactly once before the handler returns successfully.
 
 ### Delegate Handlers
 
@@ -186,6 +228,22 @@ RequestBatcher forms handler batches opportunistically from requests currently q
 collection delay. Therefore, a low-traffic batch may contain one request, and one explicit `ExecuteAsync(requests)` call
 may be split by `BatchSize` or partition routing. Separate submissions can share a handler batch.
 
+### Handler Execution Context
+
+A Handler batch can combine requests from multiple callers, and the Handler runs in its own batch execution context.
+Do not rely on access to an originating request's `HttpContext` through `IHttpContextAccessor`, or on caller ambient
+state such as `AsyncLocal` values, `ILogger.BeginScope` scopes, `Activity.Current`, or `Baggage`. The Handler's DI scope
+is also separate from the HTTP request scope: a scoped dependency does not reuse the originating request-scoped
+instance or state initialized there.
+
+Read values the Handler needs before submission, such as currency, language, or a business correlation ID, and carry
+them as immutable request data. Do not pass an `HttpContext`, request service provider, or request-scoped service
+instance to preserve caller context. RequestBatcher tracing connects `Execute` and `Handle` spans with links; those
+links do not restore caller ambient context. Activities created inside a Handler still use the Handler batch span as
+their parent.
+
+### Completion, Cancellation, and Draining
+
 - A successful handler call completes every request in that handler batch.
 - A non-cancellation handler exception fails every request in that handler batch with that exception.
 - A handler `OperationCanceledException` produces canceled response tasks. RequestBatcher does not retry failed handlers.
@@ -207,6 +265,17 @@ may be split by `BatchSize` or partition routing. Separate submissions can share
 - `DisposeAsync` stops new admissions, drains accepted work including submissions waiting for capacity, and releases owned
   resources. Concurrent and repeated disposal calls share one operation. When registered through DI, the application
   container owns async disposal.
+
+The default is `FullMode = Wait`. `MaxPendingRequests` bounds queued requests, not callers or submissions waiting for
+capacity, and is not a process-wide memory limit; apply an ingress concurrency or rate limit when total waiting work must
+be bounded. See the root documentation's [Capacity and Backpressure](https://github.com/eventhorizon-cli/RequestBatcher#capacity-and-backpressure)
+section for the HTTP admission example. A caller cancellation timer can cancel capacity waits and undispatched requests;
+it does not impose a deadline on `ExecuteAsync` after dispatch.
+
+Caller cancellation cannot abort a shared Handler after dispatch, even when all callers cancel; configure downstream
+timeouts independently. The downstream operation must support cancellation or its own timeout mechanism. See
+[Caller Cancellation](https://github.com/eventhorizon-cli/RequestBatcher#caller-cancellation) for an example. Disposal drains
+accepted work before stopping the consumer, so a stalled downstream call can keep `DisposeAsync` waiting.
 
 ## Observability
 

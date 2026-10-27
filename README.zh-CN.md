@@ -54,6 +54,10 @@ RequestBatcher 基于 [BufferQueue](https://github.com/eventhorizon-cli/BufferQu
 这个过程不依赖定时轮询，也没有固定的收集窗口。有空闲名额时，等待主要来自唤醒和调度；名额占满时，请求仍需排队。
 `BatchSize` 只限制每批的最大数量：低流量时一批可能只有一个请求，请求短时间集中到达时则可能合并同一 Partition 中的多个请求。
 
+本地验证时，如果没有其他调用方并发提交，在循环中逐条 `await ExecuteAsync(...)`，前一条完成后才提交下一条，
+就无法观察到请求合并。可以让有限数量的请求并发提交，再观察 Handler 实际收到的批大小；并发提交也不保证所有请求
+进入同一个批次，或每批都达到 `BatchSize`。
+
 **较低的 `MaxConcurrency` 可能让请求在等待执行名额期间自然积累**；名额释放后，再将当时已经排队的请求合并处理。
 **这是并发控制带来的排队，不是为了凑批额外等待。** 即使 `MaxConcurrency = 1`，
 **有空闲名额且队列中只有一个请求时，也会处理这个请求，不会等到 `BatchSize` 个请求到齐。**
@@ -105,10 +109,12 @@ dotnet add package RequestBatcher
 
 包支持 `net8.0` 和 `net10.0` 目标框架，可用于 .NET 8 和 .NET 10 应用。
 
+**当前版本不提供 NativeAOT 发布或裁剪支持。**
+
 支持两种注册方式：
 
 - **Handler 类型**：使用 `AddRequestBatcher` 注册 Handler 类型并指定生命周期，适合将处理逻辑放在独立类中。
-- **委托 Handler**：使用 `AddDelegateRequestBatcher` 注册，在 `ExecuteAsync` 时传入静态委托，所需服务通过参数注入。详见[委托 Handler](#委托-handler)。
+- **委托 Handler**：使用 `AddDelegateRequestBatcher` 注册，在 `ExecuteAsync` 时传入静态委托，所需服务通过参数注入。**不支持 NativeAOT 或裁剪。** 详见[委托 Handler](#委托-handler)。
 
 使用 `int`、`string` 等基础类型作为请求时，建议使用 [Named RequestBatcher](#named-requestbatcher-与基础类型请求)，通过名称区分使用相同请求类型的不同业务。
 
@@ -145,10 +151,13 @@ public sealed class CatalogHandler : IRequestBatchHandler<PriceLookup, decimal?>
         IReadOnlyList<RequestBatchEntry<PriceLookup, decimal?>> entries,
         CancellationToken cancellationToken = default)
     {
-        foreach (var entry in entries)
-        {
-            entry.SetResponse(Prices.TryGetValue(entry.Request.ProductId, out var price) ? price : null);
-        }
+        entries.SetResponses(request => Prices.TryGetValue(request.ProductId, out var price) ? price : null);
+
+        // Alternatively, replace the call above with per-entry assignment.
+        // foreach (var entry in entries)
+        // {
+        //     entry.SetResponse(Prices.TryGetValue(entry.Request.ProductId, out var price) ? price : null);
+        // }
 
         return ValueTask.CompletedTask;
     }
@@ -161,13 +170,16 @@ public sealed class CatalogHandler : IRequestBatchHandler<PriceLookup, decimal?>
 [委托 PostgreSQL 示例](samples/RequestBatcher.Delegates)。
 
 **带返回值的 Handler 必须在成功完成前，为每个 Entry 显式设置且仅设置一次响应。** 显式设置 `null` 也是有效响应。
-遗漏赋值会使整个 Handler 批次失败。提交返回的 Task 会等待实际处理结果；失败和取消行为见[处理语义](#处理语义)。
+遗漏赋值会使整个 Handler 批次失败。提交返回的 Task 会等待实际处理结果；失败和取消行为见[请求处理流程](#请求处理流程)。
 
 `AddRequestBatcher` 会将 Handler、协调器和内部 BufferQueue Topic 注册到现有的 `IServiceCollection` 中。应用无需
 直接配置 BufferQueue，RequestBatcher 也不会创建嵌套的 Service Provider。
 
 `Scoped` 和 `Transient` Handler 会在每个处理批次专属的异步作用域中解析一次。`Singleton` Handler 会跨批次
 复用；当 `MaxConcurrency > 1` 时，它必须保证线程安全。
+
+Handler 不会继承调用方的执行上下文，批次作用域也独立于 HTTP 请求作用域。处理所需的数据应通过请求对象显式传递，
+详见 [Handler 的执行上下文](#handler-的执行上下文)。
 
 ### Partition Key 路由
 
@@ -303,6 +315,34 @@ public interface IRequestBatchHandler<TRequest, TResponse>
 
 RequestBatcher 只会在内部等待每次 Handler 调用返回的 `ValueTask` 一次，不会将它返回给调用方。同步完成的 Handler
 可以因此避免分配 `Task`；普通异步 I/O 仍可直接使用 `async ValueTask` 实现。
+
+### 设置返回值
+
+`SetResponse` 为单个 Entry 设置响应；`SetResponses` 是为整个 Handler 批次设置响应的扩展方法，支持结果工厂和有序结果序列
+两个重载。以下仅列出签名，省略实现：
+
+```csharp
+public sealed class RequestBatchEntry<TRequest, TResponse>
+{
+    public TRequest Request { get; }
+
+    public void SetResponse(TResponse response);
+}
+
+public static class RequestBatchEntryExtensions
+{
+    public static void SetResponses<TRequest, TResponse>(
+        this IReadOnlyList<RequestBatchEntry<TRequest, TResponse>> entries,
+        Func<TRequest, TResponse> responseFactory);
+
+    public static void SetResponses<TRequest, TResponse>(
+        this IReadOnlyList<RequestBatchEntry<TRequest, TResponse>> entries,
+        IEnumerable<TResponse> responses);
+}
+```
+
+结果工厂按 Entry 顺序接收原始请求，先计算全部响应，再执行赋值。有序结果序列的数量必须与 `entries` 一致，且每个位置
+都对应同一位置的请求。每个 Entry 只能赋值一次，请选择一种赋值方式；响应类型允许为空时，可以显式设置 `null`。
 
 ## 无返回值批处理
 
@@ -528,52 +568,6 @@ Partition 路由拆成多个处理批次。
 | 失败 | 这次 Handler 调用失败时，该处理批次中的所有请求都会失败。 | 部分请求可能已经成功，其他处理批次仍可能失败；整组 `Task` 会失败，但不会回滚已经成功的操作。 |
 | 取消 | 只能取消尚未交给 Handler 的请求。 | 同一个 `CancellationToken` 用于整组中的每个请求；尚未分发的请求可以取消，已分发的请求继续返回实际结果。 |
 
-## 处理语义
-
-### 完成与失败
-
-- Handler 正常完成时，该处理批次中的所有请求均记为成功。一次显式批量提交的 `Task` 仍需等待本次提交中的全部请求，
-  包括分配到其他 Handler 批次的请求。
-- Handler 抛出非取消异常时，该处理批次中的所有请求均以原始异常失败。
-- 带返回值的单条请求遇到 Handler 抛出的 `OperationCanceledException` 时，返回的 Task 为取消状态。
-  等待该 Task 会抛出带原始 Token 的 `TaskCanceledException`，不保留原取消异常的实例、消息和派生类型。
-- RequestBatcher 不会自动重试失败的 Handler。
-- 显式批量重载会等待本次提交中的所有请求；只要涉及的某次 Handler 调用失败，最终 `Task` 就会失败。
-- 一次显式批量提交可能跨越多个 Handler 调用。如果其中多次调用失败，`await` 会按普通 `Task` 语义抛出其中一个
-  原始异常；所有不同的异常实例都可以从 `Task.Exception.InnerExceptions` 读取。同一次 Handler 异常即使影响
-  多个请求，也只记录一次。
-
-### 调用方取消
-
-调用方取消只能移除尚未交给 Handler 的请求。一旦 Handler 开始执行，RequestBatcher 会返回实际处理结果，而不会
-将调用方的 `Task` 改成已取消。这样可以避免取消状态掩盖已经发生的副作用。
-
-传给 Handler 的 `CancellationToken` 属于 RequestBatcher 自身的处理生命周期，不属于任何一个调用方。因此，
-一个调用方取消不会中止同一批中的其他请求。
-
-显式批量提交会将调用方传入的同一个 `CancellationToken` 应用于组内每个请求。因此取消后可能同时存在“尚未
-分发而取消”的请求和“已经分发并继续执行”的请求。返回的 `Task` 仍会等待全部请求；其中存在失败时最终状态为
-失败，否则只要有请求被取消，最终状态就是取消。已经完成的副作用不会回滚。
-
-### 容量与背压
-
-`MaxPendingRequests` 是内部 BufferQueue 中仍处于排队状态的请求容量上限。分发循环拉取批次时会自动提交消费进度，
-随后才启动 Handler。因此，除了排队容量外，最多还有 `MaxConcurrency * BatchSize` 个已拉取请求正在执行。它不限制
-一次显式提交的请求数量，也不限制正在等待容量的调用方数量：
-
-- `FullMode = Wait` 在队列空间不足时异步等待，并支持调用方在等待期间取消。
-- `Wait` 模式下，一组请求的数量不超过 `MaxPendingRequests` 时，会等到队列能容纳整组请求后一起入队；超过时，
-  按输入顺序分段，每段最多 `MaxPendingRequests` 个请求，等待队列腾出足够空间后依次入队。
-  中途取消时，已分发的请求仍会继续处理，尚未分发的请求会被取消。
-- `FullMode = Fail` 在队列剩余空间不足以容纳本次提交的全部请求时，立即拒绝整次提交，包括请求总数超过
-  `MaxPendingRequests` 的情况。此时返回的 `Task` 会失败，异常为 `RequestBatchQueueFullException`，本次提交的请求
-  均不会入队。
-
-### 停止与释放
-
-`DisposeAsync` 会停止接收新请求，处理完已经接收的所有提交（包括仍在等待容量的提交），然后释放协调器持有的资源。
-并发或重复调用会共享同一次释放操作。通过 `AddRequestBatcher` 注册时，由应用容器负责异步释放。
-
 ## Named RequestBatcher 与基础类型请求
 
 请求可以直接使用商品 ID。多种操作使用相同请求类型时，通过 `batcherName` 重载区分，例如 `"price"` 和
@@ -774,50 +768,155 @@ DI 生命周期：Singleton 在容器内共享，Scoped 在同一批次内共享
 
 ## 请求处理流程
 
-**内部队列的 Partition 数量不代表 Handler 并发数。** Partition 只用于组织请求的排队和路由；同时执行的 Handler
-批次数由全局 `MaxConcurrency` 限制。
+1. 调用方通过 `ExecuteAsync(request)` 提交单个请求，或通过 `ExecuteAsync(requests)` 提交一组请求。
+2. RequestBatcher 根据容量配置接收请求，并将每个请求路由到一个内存 Partition。
+3. 内部 `BatchDispatchLoop` 先获取一个空闲执行名额，再从一个 Partition 拉取最多 `BatchSize` 个已排队请求，并自动提交队列消费进度。
+4. 尚未分发就已取消的请求会被跳过，其余请求交给 Handler 处理；不同提交中的请求可能共享同一次 Handler 调用。
+5. Handler 的处理结果会完成相应请求的 `Task`；显式批量提交的 `Task` 会等待该组所有请求完成。
 
-同一 Partition 中的多个批次可以并发执行，所有 Partition 共享同一组执行名额。
-
-未配置 `UsePartitionKey` 时，RequestBatcher 固定使用一个内部 Partition，避免将彼此无关的请求分散到多个队列，
-也让它们自然地保留在一起进行批量处理。
-
-配置 Partition Key 和 Partition 数量后，队列使用指定数量的 Partition，将相同键值的请求放入同一 Partition。
-数值键的值必须是有限整数，字符串键不能为 `null`。`P` 只是路由细节；`H = MaxConcurrency` 始终是全局 Handler 批次并发上限。
-单个 Partition 可以连续产生多个异步 Handler 批次，因此 Partition 数量不会限制为一次只能执行一个批次。
-
-1. 调用方通过 `ExecuteAsync` 提交单个请求。
-2. RequestBatcher 根据容量配置接收请求，并将它路由到一个内存 Partition。
-3. 内部 `BatchDispatchLoop` 先获取一个空闲执行名额，再拉取并自动提交最多 `BatchSize` 个已排队请求。
-4. 处理结果会完成该批次中每个调用方持有的 `Task`。
-
-已接收请求的排队时长主要取决于全局执行名额何时可用，而不是等待凑满 `BatchSize`。RequestBatcher 不会为凑满
-单个批次设置额外的收集窗口：只要有执行名额，它就会立即用当前已排队的请求发起 Handler 调用，即使只有一个请求。
-`BatchSize` 只限制单次调用的最大请求数。
+一次显式批量提交可能跨越多个 Handler 批次。RequestBatcher 不会等待凑满 `BatchSize`，也没有固定的收集窗口；
+有空闲执行名额时，会直接处理当前已排队的请求，即使只有一个请求。
 
 ![RequestBatcher 架构图](docs/assets/request-batcher-architecture.zh-CN.svg)
 
 架构图展示了协调器、内存队列中的各个 Partition，以及每个已接收请求独立完成 `Task` 的处理路径。
 
-### 调度流程
+### 容量与背压
 
-`H = MaxConcurrency` 是全局同时执行的 Handler 批次数上限。未配置 Partition Key 时，内部只有一个 Partition；配置
-数值或字符串 Partition Key 时，`P` 是传给 `UsePartitionKey` 的显式 Partition 数量。
+`MaxPendingRequests` 是内部 BufferQueue 中仍处于排队状态的请求容量上限。分发循环拉取批次时会自动提交消费进度，
+随后才启动 Handler。因此，除了排队容量外，最多还有 `MaxConcurrency * BatchSize` 个已拉取请求正在执行。它不限制
+一次显式提交的请求数量，也不限制正在等待容量的调用方数量：
+
+- `FullMode = Wait` 在队列空间不足时异步等待，并支持调用方在等待期间取消。
+- `Wait` 模式下，一组请求的数量不超过 `MaxPendingRequests` 时，会等到队列能容纳整组请求后一起入队；超过时，
+  按输入顺序分段，每段最多 `MaxPendingRequests` 个请求，等待队列腾出足够空间后依次入队。
+  中途取消时，已分发的请求仍会继续处理，尚未分发的请求会被取消。
+- `FullMode = Fail` 在队列剩余空间不足以容纳本次提交的全部请求时，立即拒绝整次提交，包括请求总数超过
+  `MaxPendingRequests` 的情况。此时返回的 `Task` 会失败，异常为 `RequestBatchQueueFullException`，本次提交的请求
+  均不会入队。
+
+异步等待容量不会一直占用线程，但等待中的调用及其请求数据仍会占用内存。`MaxPendingRequests` 不限制这些等待者，
+也不是整个应用的内存上限；需要控制入口积压时，应在调用方限制并发量或请求速率。
+
+下面的代码可以替换快速开始中的 `app.MapGet`，保留其余代码。它使用默认的 `Wait` 模式，并在提交前启动一个 200 ms 的
+取消计时器，同时保留 HTTP 请求本身的取消信号。200 ms 仅为演示值，应根据业务允许的等待时间调整：
+
+```csharp
+app.MapGet("/prices/{productId:long}", async Task<IResult> (
+    long productId,
+    IRequestBatcher<PriceLookup, decimal?> batcher,
+    CancellationToken cancellationToken) =>
+{
+    using var admissionCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+    admissionCancellation.CancelAfter(TimeSpan.FromMilliseconds(200));
+
+    try
+    {
+        var price = await batcher.ExecuteAsync(new PriceLookup(productId), admissionCancellation.Token);
+        return price is { } value ? Results.Ok(value) : Results.NotFound();
+    }
+    catch (RequestBatchQueueFullException)
+    {
+        return Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+    }
+});
+```
+
+如果希望容量不足时立即拒绝提交，将快速开始中的注册替换为以下配置。此时上面的 `catch` 会把队列满转换为 HTTP 503，
+应用也可以在这里返回已有的缓存结果：
+
+```csharp
+builder.Services.AddRequestBatcher<PriceLookup, decimal?, CatalogHandler>(
+    ServiceLifetime.Singleton,
+    options => options.FullMode = RequestBatchFullMode.Fail);
+```
+
+**这个计时器可以取消容量等待和未分发的排队请求，不保证 `ExecuteAsync` 在 200 ms 内返回。** 如果请求已分发给 Handler，
+即使计时器到期，提交 Task 仍会等待实际处理结果。示例没有捕获取消异常，由应用按自身约定处理；不要把 Handler 自身抛出的
+取消异常一律判断为排队超时。
+
+### 路由与调度
+
+**内部队列的 Partition 数量不代表 Handler 并发数。** Partition 用于组织请求的排队和路由；所有 Partition 共享
+`MaxConcurrency` 个 Handler 执行名额。同一 Partition 中的多个批次也可以并发执行。
+
+未配置 `UsePartitionKey`，或指定 `partitionCount: 1` 时，内部只有一个 Partition，不按 Key 路由。
+指定更大的 Partition 数量后，相同键值的请求会进入同一 Partition。数值键的值必须是有限整数，字符串键不能为 `null`。
+相同键值仍可能分到不同 Handler 批次，路由不会自动去重，也不保证 Handler 的执行顺序。
+
+下图中，`P` 表示内部 Partition 数量，`H = MaxConcurrency` 表示同时执行的 Handler 批次数上限。
 
 ![内部调度流程](docs/assets/request-batcher-dispatch-scheduling.zh-CN.svg)
 
-一个 `BatchDispatchLoop` 负责所有 Partition，并共享同一组全局执行名额。它只有在取得执行名额后才会从队列拉取
-批次，因此请求只在 BufferQueue 中等待，不会进入应用自行维护的转交队列。名额按一次 Handler 批次调用完成释放，
-而不是批次内某个请求单独完成时释放。任一正在执行的 Handler 批次完成后，其名额会立即归还，调度循环随即可以
-拉取并启动下一批；无需等待其他正在执行的批次全部完成。
-
-## 路由规则与调度
+一个 `BatchDispatchLoop` 负责所有 Partition，只有在取得执行名额后才会从队列拉取批次，因此请求只在 BufferQueue
+中等待，不会进入应用自行维护的转交队列。执行名额在一次 Handler 批次调用完成后释放，而不是批次内某个请求单独
+完成时释放。任一批次完成后，调度循环就可以拉取并启动下一批，无需等待其他正在执行的批次全部完成。
 
 启用按 Key 路由时，队列会在有数据的 Partition 之间轮转拉取机会，但不保证 Handler 执行时间相等，也不保证不同
 键值之间公平。
 
 Handler 会在分发调用链上执行，直到完成或遇到尚未完成的异步等待。在此之前的 CPU 密集计算或同步阻塞会
 推迟其他批次的分发，即使仍有空闲执行名额。`MaxConcurrency` 是并发上限，不会自动将同步 Handler 代码并行化。
+
+### Handler 的执行上下文
+
+**Handler 不会继承调用方的执行上下文。** 一个处理批次可能包含多个调用方的请求，因此 Handler 不在其中某个调用方的
+HTTP 请求上下文中运行。调用方设置的 `AsyncLocal` 值、`ILogger.BeginScope` 日志作用域、`Activity.Current` 和 Baggage
+不会自动传入 Handler；也不能依赖 `IHttpContextAccessor.HttpContext` 读取原 HTTP 请求。
+
+Handler 使用的批次 DI Scope 与 HTTP 请求的 DI Scope 相互独立。即使注入的是同一种 `Scoped` 服务，Handler 获取的也不是
+原 HTTP 请求中的那个实例，不会带有调用方在该实例上设置的状态。处理所需的币种、语言或业务关联编号等数据，应在提交前
+读取，并作为不可变值放进请求对象。不要通过传递整个 `HttpContext`、请求的 Service Provider 或请求作用域中的服务实例来
+保留上下文，这些对象的生命周期仍属于原请求。
+
+链路追踪通过 Span Link 关联提交与处理批次，不会恢复调用方的执行上下文。Handler 内创建的 Activity 会关联到当前批次
+Span，详见[链路追踪](#链路追踪)。
+
+### 完成与失败
+
+- Handler 正常完成时，该处理批次中的所有请求均记为成功。一次显式批量提交的 `Task` 仍需等待本次提交中的全部请求，
+  包括分配到其他 Handler 批次的请求。
+- Handler 抛出非取消异常时，该处理批次中的所有请求均以原始异常失败。
+- 带返回值的单条请求遇到 Handler 抛出的 `OperationCanceledException` 时，返回的 Task 为取消状态。
+  等待该 Task 会抛出带原始 Token 的 `TaskCanceledException`，不保留原取消异常的实例、消息和派生类型。
+- RequestBatcher 不会自动重试失败的 Handler。
+- 显式批量重载会等待本次提交中的所有请求；只要涉及的某次 Handler 调用失败，最终 `Task` 就会失败。
+- 一次显式批量提交可能跨越多个 Handler 调用。如果其中多次调用失败，`await` 会按普通 `Task` 语义抛出其中一个
+  原始异常；所有不同的异常实例都可以从 `Task.Exception.InnerExceptions` 读取。同一次 Handler 异常即使影响
+  多个请求，也只记录一次。
+
+### 调用方取消
+
+调用方取消只能移除尚未交给 Handler 的请求。一旦 Handler 开始执行，RequestBatcher 会返回实际处理结果，而不会
+将调用方的 `Task` 改成已取消。这样可以避免取消状态掩盖已经发生的副作用。
+
+传给 Handler 的 `CancellationToken` 属于 RequestBatcher 自身的处理生命周期，不属于任何一个调用方。因此，
+一个调用方取消不会中止同一批中的其他请求。
+
+即使已分发批次中的所有调用方都取消，也不会自动中止该批次。下游操作需要独立的超时配置。例如，可以将前文
+`PriceQueryHandler` 中的 `store.FindAsync` 调用替换为：
+
+```csharp
+using var batchTimeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+batchTimeout.CancelAfter(TimeSpan.FromSeconds(2));
+var prices = await store.FindAsync(keys, batchTimeout.Token).ConfigureAwait(false);
+```
+
+这里关联的是 Handler 收到的批次 Token，2 秒仅为演示值。存储实现需要将 Token 传给支持取消的下游调用；如果下游不响应
+取消，计时器不能强制终止操作，还需按客户端或数据库驱动的能力配置超时。如果取消最终以 `OperationCanceledException`
+从 Handler 抛出，带返回值的请求 Task 会按前述规则进入取消状态。
+
+显式批量提交会将调用方传入的同一个 `CancellationToken` 应用于组内每个请求。因此取消后可能同时存在“尚未
+分发而取消”的请求和“已经分发并继续执行”的请求。返回的 `Task` 仍会等待全部请求；其中存在失败时最终状态为
+失败，否则只要有请求被取消，最终状态就是取消。已经完成的副作用不会回滚。
+
+### 停止与释放
+
+`DisposeAsync` 会停止接收新请求，处理完已经接收的所有提交（包括仍在等待容量的提交），然后释放协调器持有的资源。
+并发或重复调用会共享同一次释放操作。通过 `AddRequestBatcher` 注册时，由应用容器负责异步释放。
+
+正常释放会先排空已接收工作，再取消消费循环，不会通过取消正在执行的 Handler 来结束处理。如果下游操作长期不返回，
+`DisposeAsync` 也可能持续等待。因此，下游超时应由 Handler 或下游客户端单独配置，不能依赖调用方取消或释放操作代替。
 
 ## 性能调优与压测
 
@@ -1122,7 +1221,8 @@ Named RequestBatcher 会在操作名后追加注册名称，例如 `RequestBatch
   同一次提交的多项请求，在每个批次中只计一次。
 
 Handler 不会继承调用方的 HTTP Span、日志 Scope、Baggage 或其他 `AsyncLocal` 值。
-租户标识等业务数据应通过请求显式传递；Handler 内创建的 Activity 会正常关联到当前批次 Span。
+处理所需的业务数据应通过请求显式传递，详见 [Handler 的执行上下文](#handler-的执行上下文)。Handler 内创建的 Activity
+会正常关联到当前批次 Span。
 
 ![RequestBatcher 可观测性模型](docs/diagrams/observability.zh-CN.svg)
 
