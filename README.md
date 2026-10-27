@@ -241,8 +241,8 @@ throw `ArgumentOutOfRangeException`; the selector must still be non-null.
 A single partition can still supply several concurrent Handler batches.
 
 **Use one partition by default; add partitions only for a clear keyed-routing need with measured benefits.** More partitions do not add Handler
-execution slots. Each pull reads only one partition, so splitting a small burst can increase partially filled
-batches and downstream calls. The independent experiments in
+execution slots. Each pull reads only one partition. **At low traffic, multiple partitions can split requests that could
+otherwise be combined, producing more small batches and increasing Handler and downstream calls even with explicit batch submission.** The independent experiments in
 [Performance Tuning and Benchmarks](#performance-tuning-and-benchmarks) measure this tradeoff.
 
 **Start load testing with `MaxConcurrency = 1`, then increase it gradually if throughput or queueing latency misses your target.**
@@ -1070,9 +1070,9 @@ Compare one and four partitions within this experiment, not against the single-s
 
 ![Explicit-submission throughput with one and four partitions](docs/assets/partition-submission-explicit.svg)
 
-**Explicit submission enqueues a group without fixing the Handler batch boundary.** Changing the partition count from
+Explicit submission enqueues a group without fixing the Handler batch boundary. **Changing the partition count from
 one to four still splits small request sets into more Handler calls. Grouping requests at the caller therefore does
-not prevent partial batches caused by partition routing. Use explicit submission when a list is already available,
+not prevent partial batches caused by partition routing.** Use explicit submission when a list is already available,
 and choose partition count according to the batches actually formed.
 
 For large unique-product workloads, more partitions show no established timing benefit and increase allocation.

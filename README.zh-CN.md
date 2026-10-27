@@ -213,7 +213,7 @@ RequestBatcher 不提供全局、Partition 内或 Partition Key 级别的 Handle
 单 Partition 仍能提供多个并发执行的 Handler 批次。
 
 **默认使用 1 个 Partition；没有明确的按 Key 路由需求和压测收益，就不要增加 Partition。** 增加 Partition 不会增加 Handler 执行名额。
-每次拉取只读取一个 Partition，把短时间集中提交的少量请求分散到多个 Partition 可能增加未满批次的数量和下游调用次数。
+每次拉取只读取一个 Partition。**流量不足时，多 Partition 可能把原本可合并的请求拆散；即使调用方已经批量提交，也可能形成更多小批次，增加 Handler 和下游调用次数。**
 [性能调优与压测](#性能调优与压测)中的两个独立实验测量了这种取舍。
 
 **`MaxConcurrency` 从 `1` 开始压测，吞吐或排队延迟不满足目标时再逐步提高。** 执行名额过多时，已到达的请求可能更早被
@@ -991,8 +991,8 @@ var prices = await store.FindAsync(keys, batchTimeout.Token).ConfigureAwait(fals
 
 ![显式批量提交在一个与四个 Partition 下的吞吐](docs/assets/partition-submission-explicit.zh-CN.svg)
 
-**显式提交会批量入队，但不会固定 Handler 的批次边界。** Partition 数量从 1 个改为 4 个后，
-少量请求仍会被拆散成更多 Handler 调用，所以“调用方已经分好组”并不能避免队列分区带来的小批次。
+显式提交会批量入队，但不会固定 Handler 的批次边界。**Partition 数量从 1 个改为 4 个后，
+少量请求仍会被拆散成更多 Handler 调用，所以“调用方已经分好组”并不能避免队列分区带来的小批次。**
 已有请求列表时可以使用显式批量提交，Partition 数量仍应按实际合并效果选择。
 
 大量无重复请求下，更多 Partition 没有带来稳定的耗时收益，分配反而增加。

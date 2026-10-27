@@ -197,8 +197,9 @@ Partition count and handler concurrency are independent:
 - one partition can supply multiple concurrent handler batches;
 - no handler execution ordering is guaranteed, including when `MaxConcurrency = 1`.
 
-**Use one partition by default; add partitions only for a clear keyed-routing need with measured benefits.** More partitions can fragment
-small bursts into partially filled batches and increase downstream calls.
+**Use one partition by default; add partitions only for a clear keyed-routing need with measured benefits.**
+**At low traffic, multiple partitions can split requests that could otherwise be combined, producing more small batches
+and increasing handler and downstream calls even with explicit batch submission.**
 
 **Start load testing with `MaxConcurrency = 1` and increase it gradually only as needed to meet throughput and latency targets.**
 Too many slots can produce smaller batches and reduce merging; too few can increase queueing.
