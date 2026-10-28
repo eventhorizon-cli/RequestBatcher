@@ -11,10 +11,8 @@ and bounds queued capacity. It is useful when a database, cache, or downstream A
 
 ## How Requests Are Batched: Opportunistic Merging
 
-Within a consumer group, BufferQueue assigns each partition to one consumer, which owns pulling and consumption
-progress. RequestBatcher uses one pull loop to dispatch batches and `MaxConcurrency` to bound concurrent handler
-batches, decoupling partition count from processing concurrency. **This is a scheduling choice for in-process request
-batching, not a BufferQueue design defect.** See the
+RequestBatcher uses `MaxConcurrency` to limit concurrent Handler batches; its consumption loop pulls and dispatches
+batches. See the
 [internal dispatch design](https://github.com/eventhorizon-cli/RequestBatcher/blob/main/docs/batch-dispatch-redesign.md#topology).
 
 **RequestBatcher does not wait to fill a batch or add a fixed collection window.** When an execution slot is available,
@@ -207,21 +205,29 @@ Partition count and handler concurrency are independent:
 **At low traffic, multiple partitions can split requests that could otherwise be combined, producing more small batches
 and increasing handler and downstream calls even with explicit batch submission.**
 
-**Start load testing with `MaxConcurrency = 1` and increase it gradually only as needed to meet throughput and latency targets.**
+**Avoid `MaxConcurrency = 1` unless you have carefully evaluated its queueing cost and downstream constraints. Start with `2` for typical workloads.**
 Too many slots can produce smaller batches and reduce merging; too few can increase queueing.
 **Lower concurrency can improve merging but increase tail latency:** with one slot, a slow Handler batch delays queued
-requests, and `Task.WhenAll` holds the slot until the slowest child query completes. Compare downstream work saved with
-end-to-end P95/P99; try `2`, then `4` if latency misses the target and downstream capacity permits.
+requests even at low traffic, and `Task.WhenAll` holds the slot until the slowest child query completes. Two slots let
+a later batch run while one batch is still awaiting I/O. Compare downstream work saved with end-to-end P95/P99;
+increase the limit if measured throughput or latency requires it and downstream capacity permits.
 
 Low Handler concurrency can still support substantial traffic: each batch processes multiple requests and can run
-multiple downstream calls even with `MaxConcurrency = 1`. Under sustained load, item throughput is roughly
+multiple downstream calls within a single Handler batch. Under sustained load, item throughput is roughly
 `MaxConcurrency × actual mean batch size / mean Handler seconds`; use measured batch sizes and durations.
 After deduplication, query directly if the items fit in one downstream call. Otherwise, split with `Chunk`, start each async query, and await
 `Task.WhenAll` before assigning responses. Neither `MaxConcurrency` nor `Task.WhenAll` caps those child calls. For this approach, a `BatchSize` of
 `3–10` times the desired downstream batch size is a tuning starting point; validate it against downstream capacity.
 See [Estimating Handler and Downstream Concurrency Separately](https://github.com/eventhorizon-cli/RequestBatcher#estimating-handler-and-downstream-concurrency-separately).
 
-Before tuning, collect the existing system's per-instance peak QPS, request-item counts, downstream RT and batch limits,
+**Do not evaluate only high-load results; compare performance before and after adopting RequestBatcher under typical traffic too.**
+Test typical, peak, and short-burst traffic with matched resources, downstream configuration, request arrival patterns,
+item counts, and data distributions. Compare throughput, mean and P95/P99 end-to-end latency, actual batch sizes,
+downstream call counts, and resource costs. Typical traffic may offer fewer batching opportunities, so batching savings
+may not offset admission and scheduling overhead; requests also queue when no execution slot is available.
+High-load throughput gains do not replace this comparison.
+
+Before tuning, collect the existing system's per-instance typical and peak QPS, request-item counts, downstream RT and batch limits,
 and latency target; see [Preparing Inputs for an Agent](https://github.com/eventhorizon-cli/RequestBatcher#preparing-inputs-for-an-agent).
 These inputs support an initial configuration proposal, not a performance guarantee.
 
@@ -230,7 +236,7 @@ These inputs support an initial configuration proposal, not a performance guaran
 | Option | Default | Behavior |
 | --- | ---: | --- |
 | `BatchSize` | `128` | Maximum requests passed to one handler invocation; it is not a minimum. |
-| `MaxConcurrency` | `1` | Maximum concurrent handler batches across all partitions. |
+| `MaxConcurrency` | `1` | Maximum concurrent handler batches across all partitions. Explicitly configure `2` as a typical starting point; retain `1` only after careful evaluation. |
 | `MaxPendingRequests` | `8192` | Capacity for requests still queued in memory; pulled requests can already be executing. |
 | `FullMode` | `Wait` | `Wait` waits for capacity; an oversized explicit group is admitted in capacity-sized slices. `Fail` rejects the whole group immediately when it cannot fit. |
 | `UsePartitionKey(selector, partitionCount)` | Not set (one partition) | Routes equal supported keys together when the count is greater than one; it does not serialize execution. |

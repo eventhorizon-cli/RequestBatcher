@@ -1,12 +1,13 @@
-%% Semantic contract: one Handler batch with MaxConcurrency=1 fans out 120 unique items into four parallel 30-item calls.
+%% Semantic contract: this shows one of up to two concurrent Handler batches; each fans out 120 unique items into four parallel 30-item calls.
+%% MaxConcurrency=2 is the batcher-wide cap, so two active batches can issue up to eight downstream calls in total.
 %% The Handler awaits all four calls, then maps results back to all 120 responses.
-%% Idealized timing: 120 items per batch; four queries run in parallel and finish in about 20 ms.
-%% One second contains fifty 20 ms intervals: about 50 batches/s; 50 batches/s * 120 items/batch = 6,000 items/s.
-%% This is not a benchmark result and ignores other overhead under sustained demand with four downstream calls available.
+%% Idealized timing: 120 items per batch; four queries per batch finish in about 20 ms, even with eight downstream calls active.
+%% Two full batch slots yield about 100 batches/s; 100 batches/s * 120 items/batch = 12,000 items/s.
+%% This is not a benchmark result; it assumes sustained demand, eight downstream calls maintaining 20 ms, and negligible other overhead.
 flowchart LR
     Input["120 requests<br/>no duplicates"] --> Split
 
-    subgraph Batch["One Handler batch<br/>MaxConcurrency = 1"]
+    subgraph Batch["One of up to two concurrent Handler batches<br/>Batcher MaxConcurrency = 2"]
         Split["Chunk(30)<br/>4 chunks of 30"]
         Q1["Downstream query 1<br/>30 items · about 20 ms"]
         Q2["Downstream query 2<br/>30 items · about 20 ms"]

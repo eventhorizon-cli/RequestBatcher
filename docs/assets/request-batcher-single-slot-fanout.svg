@@ -8,7 +8,7 @@
   <g font-family="Arial, sans-serif" text-anchor="middle" fill="#233247">
     <rect x="260" y="38" width="930" height="420" rx="10" fill="#f5f1fb" stroke="#75529b" stroke-width="2"/>
     <text x="290" y="72" text-anchor="start" font-size="22" font-weight="600">One Handler batch</text>
-    <text x="1160" y="72" text-anchor="end" font-size="18" fill="#5d4a78">MaxConcurrency = 1</text>
+    <text x="1160" y="72" text-anchor="end" font-size="18" fill="#5d4a78">Batcher MaxConcurrency = 2</text>
 
     <rect x="24" y="184" width="196" height="76" rx="8" fill="#eaf2ff" stroke="#3567a7" stroke-width="1.5"/>
     <text x="122" y="216" font-size="20" font-weight="600">120 requests</text>
@@ -54,10 +54,10 @@
       <path d="M1012 222 H1038"/>
     </g>
 
-    <text x="720" y="428" font-size="17" fill="#5d4a78">Four downstream calls belong to the same Handler batch and run in parallel.</text>
-    <text x="720" y="492" font-size="17">Idealized: 120 items per batch; four queries run in parallel and finish in about 20 ms.</text>
-    <text x="720" y="517" font-size="17">One second contains fifty 20 ms intervals: about 50 batches per second.</text>
-    <text x="720" y="542" font-size="17">50 batches/s × 120 items/batch = 6,000 items/s; not a benchmark.</text>
-    <text x="720" y="567" font-size="17">Assumes sustained demand, four downstream calls, and negligible other overhead.</text>
+    <text x="720" y="428" font-size="17" fill="#5d4a78">One of up to two active Handler batches; two batches can issue up to eight downstream calls.</text>
+    <text x="720" y="492" font-size="17">Idealized: 120 items per batch; each batch's four queries finish in about 20 ms.</text>
+    <text x="720" y="517" font-size="17">Two full batch slots yield about 100 batches per second.</text>
+    <text x="720" y="542" font-size="17">100 batches/s × 120 items/batch = 12,000 items/s; not a benchmark.</text>
+    <text x="720" y="567" font-size="17">Assumes eight downstream calls maintain 20 ms, sustained demand, and negligible overhead.</text>
   </g>
 </svg>

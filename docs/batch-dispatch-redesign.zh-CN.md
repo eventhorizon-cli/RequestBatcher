@@ -23,7 +23,7 @@ RequestBatcher 不承诺请求顺序，包括 `MaxConcurrency = 1` 的情况：�
 
 ## 队列拓扑
 
-在同一个 BufferQueue 消费组内，每个分区属于一个 Consumer，由它负责拉取数据并推进消费进度。RequestBatcher 保留这一归属模型，并使用一个拉取 Consumer 消费所有分区。独立的执行窗口通过 `MaxConcurrency` 限制并发 Handler 批次，因此单个分区可以提供多个并发批次。这是面向进程内请求合批的调度选择，不是 BufferQueue 的设计缺陷。
+在同一个 BufferQueue 消费组内，每个分区属于一个 Consumer，由它负责拉取数据并推进消费进度。RequestBatcher 在这一归属模型上实现进程内请求合批：使用一个拉取 Consumer 消费所有分区，再通过 `MaxConcurrency` 独立控制 Handler 批次并发，因此单个分区可以提供多个并发批次。
 
 ![分区归属与 Handler 并发](diagrams/partition-handler-decoupling.zh-CN.svg)
 
