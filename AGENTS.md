@@ -15,6 +15,9 @@ You are an AI coding assistant for this repository.
   `dotnet run --file path/to/script.cs -- ...` using the repository SDK. Do not introduce Python scripts or require
   a separate scripting runtime. Name these files with descriptive PascalCase names, such as `EvaluateScheduling.cs`.
   Keep script dependencies minimal and document their arguments and validation.
+- Keep script entry points, implementations, and shared helpers under `scripts/`; place reusable script utilities in
+  `scripts/Common`. Do not put script implementation or helper code in benchmark, test, or production projects.
+  Scripts may reference the production API they exercise; benchmark workloads belong in the benchmark project.
 - Find script entry points and usage guidance in the [script index](scripts/README.md). Update the index when adding,
   renaming, or changing script entry points.
 - Keep simple GitHub Actions release-tag parsing and package selection inline in the workflow YAML; do not add a

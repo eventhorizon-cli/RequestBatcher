@@ -118,6 +118,14 @@ Container and data preparation are outside measurement. Their results are separa
 | [RedisReadBenchmarks](Redis/RedisReadBenchmarks.cs) | Direct GETs, single submissions and explicit batch submission. |
 | [RedisWriteBenchmarks](Redis/RedisWriteBenchmarks.cs) | Direct SETs, single submissions and explicit batch submission. |
 
+## Paced explicit-submission probe
+
+For paced explicit submissions against the current public API, use
+[`MeasurePacedBatchFanout.cs`](../../scripts/MeasurePacedBatchFanout.cs). It is a bounded load probe rather than a
+BenchmarkDotNet throughput loop: arrivals do not wait for earlier responses. See the
+[paced batch fan-out evaluation](../../docs/evaluations/paced-batch-fanout/README.md) for its direct bulk-query baseline,
+correctness checks, runtime, commands, and latency results.
+
 ## Historical scheduling probe
 
 [SchedulingProbe](SchedulingEvaluation/SchedulingProbe.cs) uses `--scheduling-probe`, separately from BenchmarkDotNet.

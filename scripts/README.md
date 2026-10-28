@@ -5,6 +5,10 @@ experiments. Benchmark workloads live in the [benchmark project](../tests/Reques
 recorded results and their limitations live in the [evaluation index](../docs/evaluations/README.md).
 Follow the repository's [contributor instructions](../AGENTS.md) when maintaining these tools.
 
+Keep script entry points, implementations, and shared helpers in this directory, with reusable utilities under
+[`Common`](Common/RequestBatcher.ScriptUtilities.csproj). Do not place script code in benchmark, test, or production
+projects. Scripts may reference the production API they exercise; benchmark workloads remain in the benchmark project.
+
 ## Running Scripts
 
 Run commands from the repository root with the SDK selected by [global.json](../global.json). Each entry point supports
@@ -34,6 +38,37 @@ respectively, under the system temporary directory. Profiling requires the addit
 its guide. These tracing tools do not require Docker or an OpenTelemetry backend.
 
 ## Scheduling Experiments
+
+[`MeasurePacedBatchFanout.cs`](MeasurePacedBatchFanout.cs) measures the current public response API under paced
+explicit submissions. Defaults are 20 items per submission, 30 items per downstream query, and simulated 20 ms I/O.
+Configure `--submission-size`, `--downstream-batch-size`, and `--delay-ms` to change these independently; `--rate`
+is submissions per second, not items per second. `--batch-size`, `--concurrency`, and `--pending-capacity` configure
+RequestBatcher. Run with `--help` for all arguments, defaults, and bounds. It writes a JSON summary and per-submission samples, validates every response and exactly-once
+processing, and reports arrival lateness alongside end-to-end latency. See the
+[paced batch fan-out evaluation](../docs/evaluations/paced-batch-fanout/README.md) for matched configurations and results.
+
+For example, compare both modes with identical rate, submission size, query size and delay:
+
+```bash
+dotnet run --configuration Release --file scripts/MeasurePacedBatchFanout.cs -- \
+  --mode batcher --rate 500 --submission-size 20 --batch-size 120 --concurrency 2 \
+  --downstream-batch-size 30 --delay-ms 20 --pending-capacity 65536 \
+  --seconds 20 --warmup-seconds 3 --output /private/tmp/paced-fanout/custom.json
+```
+
+Use `--mode direct` for the baseline. Direct mode ignores Handler batch size, concurrency, and queue capacity;
+it has no shared downstream limiter. Direct mode queries each submission independently, splitting it into parallel
+calls only when it exceeds `--downstream-batch-size`; batcher mode can combine submissions before applying that same
+query limit. A Handler that fits in one query directly awaits it, without `Task.WhenAll`. The delay is a fixed value
+per simulated query, not a random latency distribution or a real downstream service. Each JSON records the selected
+parameters. Per-phase limits are 500,000 submissions and 10,000,000 items; the phase timeout is its arrival duration
+plus 120 seconds for draining. Overloaded configurations can therefore fail instead of completing indefinitely.
+
+New probes can reuse [`SampleSummary.Calculate`](Common/SampleSummary.cs)
+for count, mean, P50/P95/P99, and maximum values. Add `#:project Common/RequestBatcher.ScriptUtilities.csproj`
+to a file-based script in this directory, as the fan-out probe does. The helper copies samples and uses nearest-rank percentiles (`ceil(N * p) - 1`), without
+interpolation. Empty input has `Count = 0`; its zero-valued fields are not measured latency. Keep sample units and
+timing boundaries in each workload; do not average percentiles from different runs as if they were a pooled percentile.
 
 [`SummarizePartitionSubmissions.cs`](SummarizePartitionSubmissions.cs) validates and summarizes one independent
 partition-count experiment. Run `dotnet run --file scripts/SummarizePartitionSubmissions.cs -- <benchmark-report.csv>

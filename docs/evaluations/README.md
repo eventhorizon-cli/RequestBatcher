@@ -10,6 +10,7 @@ Find reports by question; versions, workloads, and limitations are documented in
 
 ## Scheduling and External I/O
 
+- [paced-batch-fanout](paced-batch-fanout/README.md): compares direct 20-item bulk queries with two Handler slots and batch size 120 under uniform explicit-submission arrivals, using simulated 20 ms I/O on .NET 10.
 - [queue-pull-capacity](queue-pull-capacity/README.md): isolates prefilled queue draining and compares the complete pipeline with direct full batches for synchronous and 20 ms asynchronous handlers.
 - [arrival-scheduling](arrival-scheduling/README.md): compares direct handlers with controlled `Task.Run` for async I/O, CPU, and synchronous blocking workloads (local PostgreSQL/Redis included).
 - [external-io-scheduling](external-io-scheduling/README.md): evaluates `Task.Run`, handler concurrency, and connection count for real HTTP calls (local HTTP).
