@@ -8,7 +8,7 @@
   <g font-family="Arial, PingFang SC, Microsoft YaHei, sans-serif" text-anchor="middle" fill="#233247">
     <rect x="260" y="38" width="930" height="420" rx="10" fill="#f5f1fb" stroke="#75529b" stroke-width="2"/>
     <text x="290" y="72" text-anchor="start" font-size="22" font-weight="600">1 个 Handler 批次</text>
-    <text x="1160" y="72" text-anchor="end" font-size="18" fill="#5d4a78">MaxConcurrency = 1</text>
+    <text x="1160" y="72" text-anchor="end" font-size="18" fill="#5d4a78">Batcher MaxConcurrency = 2</text>
 
     <rect x="24" y="184" width="196" height="76" rx="8" fill="#eaf2ff" stroke="#3567a7" stroke-width="1.5"/>
     <text x="122" y="216" font-size="20" font-weight="600">120 个请求</text>
@@ -54,10 +54,10 @@
       <path d="M1012 222 H1038"/>
     </g>
 
-    <text x="720" y="428" font-size="17" fill="#5d4a78">4 个下游查询属于同一个 Handler 批次，并行执行。</text>
-    <text x="720" y="492" font-size="17">理想估算：每批 120 项，4 次查询并行，约 20 ms 完成。</text>
-    <text x="720" y="517" font-size="17">1 秒包含 50 个 20 ms，即每秒约完成 50 批。</text>
-    <text x="720" y="542" font-size="17">50 批/秒 × 120 项/批 = 6,000 项/秒；不是压测结论。</text>
-    <text x="720" y="567" font-size="17">前提是请求持续到达、下游支持 4 个并发调用，并忽略其他开销。</text>
+    <text x="720" y="428" font-size="17" fill="#5d4a78">图中是最多两个活动 Handler 批次之一；两批合计最多发起八个下游调用。</text>
+    <text x="720" y="492" font-size="17">理想估算：每批 120 项，每批的 4 次查询约 20 ms 完成。</text>
+    <text x="720" y="517" font-size="17">两个批次名额持续满载时约为 100 批/秒。</text>
+    <text x="720" y="542" font-size="17">100 批/秒 × 120 项/批 = 12,000 项/秒；不是压测结论。</text>
+    <text x="720" y="567" font-size="17">假定 8 个下游调用仍维持 20 ms、请求持续到达，并忽略其他开销。</text>
   </g>
 </svg>

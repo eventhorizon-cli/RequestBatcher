@@ -40,9 +40,7 @@ RequestBatcher 基于 [BufferQueue](https://github.com/eventhorizon-cli/BufferQu
 合并为批次，交给应用的 Handler 处理。当前依赖 [BufferQueue 2.1.0](https://www.nuget.org/packages/BufferQueue/2.1.0)，
 应用无需单独注册或配置它。
 
-BufferQueue 在同一消费组内将每个 Partition 分配给一个 Consumer，由它负责拉取和推进消费进度。
-RequestBatcher 用单个拉取消费循环分发批次，再由 `MaxConcurrency` 控制 Handler 批次并发，使 Partition 数量与处理并发度解耦。
-**这不是 BufferQueue 的设计缺陷，而是 RequestBatcher 针对进程内请求合批场景采用的调度方式。** 详见[内部调度设计](docs/batch-dispatch-redesign.zh-CN.md#队列拓扑)。
+RequestBatcher 通过 `MaxConcurrency` 限制 Handler 批次并发，消费循环负责拉取和分发。详见[内部调度设计](docs/batch-dispatch-redesign.zh-CN.md#队列拓扑)。
 
 这种批次处理可以理解为**机会式攒批（Opportunistic Batching）**：请求写入 BufferQueue 后会发出通知，唤醒空闲的消费流程。
 消费流程先占用一个执行名额，再通过拉取 API 从一个 Partition 拉取最多 `BatchSize` 条请求（默认 128 条），随后分发这一批。
@@ -220,13 +218,14 @@ RequestBatcher 不提供全局、Partition 内或 Partition Key 级别的 Handle
 每次拉取只读取一个 Partition。**流量不足时，多 Partition 可能把原本可合并的请求拆散；即使调用方已经批量提交，也可能形成更多小批次，增加 Handler 和下游调用次数。**
 [性能调优与压测](#性能调优与压测)中的两个独立实验测量了这种取舍。
 
-**`MaxConcurrency` 从 `1` 开始压测，吞吐或排队延迟不满足目标时再逐步提高。** 执行名额过多时，已到达的请求可能更早被
+**除非已慎重评估排队延迟和下游限制，否则不建议将 `MaxConcurrency` 设为 `1`；通常可以从 `2` 开始。** 执行名额过多时，已到达的请求可能更早被
 取走，形成更多小批次，减少合并和去重的机会；过低则可能增加排队。应选择能满足吞吐和延迟目标的较小值。
 
 **较低并发有利于合并，但也可能增加尾延迟。** 尤其在 `MaxConcurrency = 1` 时，一个慢批次会占住唯一的执行名额，
-后续请求只能排队；Handler 内使用 `Task.WhenAll` 时，还要等最慢的子查询完成才能释放名额。
+后续请求只能排队，即使流量很低也一样。设置为 `2` 后，一个批次等待 I/O 时，后续批次仍有机会执行。
+Handler 内使用 `Task.WhenAll` 时，还要等最慢的子查询完成才能释放名额。
 压测时应同时比较实际批大小、去重后的查询量、下游调用次数和端到端 P95/P99，判断减少的下游工作量是否值得付出额外等待。
-如果合并效果不错但尾延迟不达标，可以逐步尝试 `2`、`4`，同时确认下游能承受增加的并发调用。
+如果实测吞吐或延迟仍不达标，再逐步提高，同时确认下游能承受增加的并发调用。
 
 **Handler 并发低，不等于能处理的请求量少。** 一个 Handler 批次可以处理多个请求，内部也可以拆成小批并行调用下游，
 因此较低的 `MaxConcurrency` 仍可能支撑较高流量。实际能力取决于批大小、Handler 耗时，以及下游能承受的调用量和并发度，
@@ -258,7 +257,7 @@ builder.Services.AddRequestBatcher<ProductQueryItem, ProductBatchHandler>(
 | 选项 | 默认值 | 行为 |
 | --- | ---: | --- |
 | `BatchSize` | `128` | 单次 Handler 调用包含的请求数量上限。 |
-| `MaxConcurrency` | `1` | Handler 批次最大并发数；它始终是 Handler 并发上限，与按键路由的 Partition 数量相互独立。 |
+| `MaxConcurrency` | `1` | Handler 批次最大并发数，与按键路由的 Partition 数量相互独立。通常建议显式设置为 `2` 作为起点，保留 `1` 前应慎重评估。 |
 | `MaxPendingRequests` | `8192` | 内部 BufferQueue 中尚未被拉取执行的请求容量上限。 |
 | `FullMode` | `Wait` | `Wait` 在容量不足时等待；超过容量的显式提交按输入顺序分段。`Fail` 要求整组立即容纳，否则整组失败且一个请求也不会入队。 |
 | `UsePartitionKey(selector, partitionCount)` | 未配置（单 Partition） | `partitionCount` 至少为 1；设为 1 时关闭按 Key 路由且不调用选择器，大于 1 时将相同键值的请求路由到同一 Partition。 |
@@ -929,6 +928,12 @@ var prices = await store.FindAsync(keys, batchTimeout.Token).ConfigureAwait(fals
 
 ## 性能调优与压测
 
+**不要只看高流量压测结果；日常流量下也应对比接入 RequestBatcher 前后的性能。** 在相同资源和下游配置下，
+分别模拟日常、高峰及短时突发流量，保持接入前后的请求到达节奏、项数和数据分布一致，对比吞吐、端到端平均延迟及 P95/P99、
+实际批大小、下游调用次数和资源开销。日常流量下合批机会可能较少，合批收益未必能抵消入队和调度的额外开销；
+如果执行名额已被占满，还会产生排队等待。
+高负载下的吞吐收益不能替代日常流量下的延迟验证。
+
 ### 让 Agent 协助制定初步配置
 
 如果希望 AI Agent 帮你分析如何设置参数，可以先告诉它**你当前的流量、下游耗时和业务要求**。
@@ -950,7 +955,7 @@ var prices = await store.FindAsync(keys, batchTimeout.Token).ConfigureAwait(fals
 还需说明业务是只读还是写入，是否要求顺序、是否允许去重，以及取消和失败如何处理；同时提供下游的 QPS 配额、
 最大并发和连接池限制。
 
-**最小输入：单实例高峰 QPS、每次请求项数、当前下游调用方式、下游平均/P99 RT、批量接口限制、端到端延迟目标。**
+**最小输入：单实例日常及高峰 QPS、每次请求项数、当前下游调用方式、下游平均/P99 RT、批量接口限制、端到端延迟目标。**
 缺失的数据直接标为未知，不要让 Agent 用猜测补齐。只有单项查询 RT 时，不能直接推断批量查询的 RT；
 可以先补测几组批大小，再估算合并是否划算。
 
@@ -1062,24 +1067,22 @@ Partition 数量和消费速度都会影响合并效果，应从较少的 Partit
 ### 拆分调用时，分别估算两层并发
 
 **`MaxConcurrency` 只限制 Batcher 同时执行的 Handler 批次数，不直接限制 Handler 内部的下游调用并发。**
-可以从 `MaxConcurrency = 1` 开始压测，按需逐步提高，例如测试 `2–4`；将 `BatchSize` 设为期望每次下游批量调用项数
+通常可以从 `MaxConcurrency = 2` 开始，根据实测吞吐和延迟调整；将 `BatchSize` 设为期望每次下游批量调用项数
 `S` 的 `3–10` 倍，作为另一组调优起点。这些范围是待验证的配置思路，不是实测最优值。
 
 Handler 内先按业务需要去重，再按每组最多 `S` 项拆分并行查询，等待全部查询完成后，为每个原始请求回填结果。
 若去重后有 `U` 项，就产生 `ceil(U / S)` 个子调用：请求少时调用少，不等待凑满；积压较多时，一个 Handler 可以并行处理
 更多小批次。**这样即使 Handler 并发保持较低，下游调用数也能随实际批大小变化，为不同流量提供弹性。**
 
-**`MaxConcurrency = 1` 表示同时执行一个 Handler 批次，不是一次只能处理一个请求或发起一个下游调用。**
-假设持续有请求可合批，每个 Handler 实际收到 120 个请求且没有重复商品；下游支持 4 次并行查询，每次约 20 ms。
-把 120 个请求按 `Chunk(30)` 拆成 4 次查询并行执行，`Task.WhenAll` 等待最慢的一次完成。
-暂时忽略调度、去重和回填等其他开销，就相当于**每 20 ms（0.02 秒）完成一批 120 个请求**。
+**以 `MaxConcurrency = 2` 为例：最多同时执行 2 个 Handler 批次，每批内部还可以并行调用下游。**
+假设持续有请求可合批，每个 Handler 实际收到 120 个请求且没有重复商品。
+每批按 `Chunk(30)` 拆成 4 次查询并行执行，`Task.WhenAll` 等待最慢的一次完成；两个批次合计最多有 **8 次下游调用并发执行**。
+假设下游能承受这 8 次并发查询，且每次仍约 20 ms，忽略调度、去重和回填等其他开销，两个执行名额持续满载时，
+理想吞吐约为 **`2 ÷ 0.02 秒 × 120 项/批 = 12,000 项/秒`**。
 
-**1 秒包含 50 个 20 ms**。每 20 ms 完成一批 120 个请求，所以每秒约能完成 50 批，
-即 **`50 批/秒 × 120 项/批 = 6,000 项/秒`**。
+下图展示其中一个 Handler 批次的内部流程。任意批次完成就释放自己的名额，后续批次不必等两个批次都结束。
 
-这说明较低的 Handler 并发也可能支撑较高请求量，**并不保证 `1` 对所有业务都足够**。
-
-![一个 Handler 批次拆成四次并行下游查询](docs/assets/request-batcher-single-slot-fanout.zh-CN.svg)
+![MaxConcurrency 为 2，每个 Handler 批次拆成四次并行下游查询](docs/assets/request-batcher-single-slot-fanout.zh-CN.svg)
 
 这是持续有请求可合批时的理想估算，不是实测结果。一般可用
 `请求项吞吐 ≈ MaxConcurrency × 实际平均批大小 ÷ Handler 平均耗时（秒）` 估算；

@@ -45,10 +45,8 @@ RequestBatcher uses [BufferQueue](https://github.com/eventhorizon-cli/BufferQueu
 [BufferQueue 2.1.0](https://www.nuget.org/packages/BufferQueue/2.1.0); applications do not register or configure it
 separately.
 
-Within a consumer group, BufferQueue assigns each partition to one consumer, which owns pulling and consumption
-progress. RequestBatcher uses one pull loop to dispatch batches and `MaxConcurrency` to bound concurrent handler
-batches, decoupling partition count from processing concurrency. **This is a scheduling choice for in-process request
-batching, not a BufferQueue design defect.** See the [internal dispatch design](docs/batch-dispatch-redesign.md#topology).
+RequestBatcher uses `MaxConcurrency` to limit concurrent Handler batches; its consumption loop pulls and dispatches
+batches. See the [internal dispatch design](docs/batch-dispatch-redesign.md#topology).
 
 This is **opportunistic batching**: writing a request to BufferQueue sends a push notification that wakes an idle
 consumer. It first acquires one execution slot, then pulls up to `BatchSize` requests (default: 128) from one partition
@@ -250,15 +248,16 @@ execution slots. Each pull reads only one partition. **At low traffic, multiple 
 otherwise be combined, producing more small batches and increasing Handler and downstream calls even with explicit batch submission.** The independent experiments in
 [Performance Tuning and Benchmarks](#performance-tuning-and-benchmarks) measure this tradeoff.
 
-**Start load testing with `MaxConcurrency = 1`, then increase it gradually if throughput or queueing latency misses your target.**
+**Avoid `MaxConcurrency = 1` unless you have carefully evaluated its queueing cost and downstream constraints. Start with `2` for typical workloads.**
 Too many execution slots can pull requests earlier into smaller batches, reducing merging and deduplication opportunities;
 too few can increase queueing. Prefer the smallest value that meets your throughput and latency requirements.
 
 **Lower concurrency can improve merging but also increase tail latency.** With `MaxConcurrency = 1`, a slow batch
-occupies the only execution slot while later requests queue. A Handler using `Task.WhenAll` must wait for its slowest
+occupies the only execution slot while later requests queue, even at low traffic. Two slots let a later batch run while
+one batch is still awaiting I/O. A Handler using `Task.WhenAll` must wait for its slowest
 child query before releasing that slot. Compare actual batch sizes, distinct items queried, downstream call counts,
 and end-to-end P95/P99 to decide whether reduced downstream work justifies the extra waiting.
-If merging is effective but tail latency misses the target, try `2`, then `4`, while checking downstream capacity.
+Increase the limit if measured throughput or latency requires it, while checking downstream capacity.
 
 **Low Handler concurrency does not necessarily mean low request throughput.** Each Handler batch processes multiple requests
 and may split them into parallel downstream calls, so a low `MaxConcurrency` can still sustain substantial traffic.
@@ -292,7 +291,7 @@ A single partition can also supply several concurrent batches.
 | Option | Default | Behavior |
 | --- | ---: | --- |
 | `BatchSize` | `128` | Maximum requests passed to one handler call. |
-| `MaxConcurrency` | `1` | Maximum concurrent handler batches. It is independent of the keyed partition count. |
+| `MaxConcurrency` | `1` | Maximum concurrent handler batches, independent of the keyed partition count. Explicitly configure `2` as a typical starting point; retain `1` only after careful evaluation. |
 | `MaxPendingRequests` | `8192` | Internal BufferQueue capacity for requests that have not yet been pulled for execution. |
 | `FullMode` | `Wait` | `Wait` waits for capacity and splits explicit groups larger than capacity into slices. `Fail` rejects the whole submission without admitting any item unless it fits immediately. |
 | `UsePartitionKey(selector, partitionCount)` | Not set (one partition) | Requires `partitionCount >= 1`; `1` disables keyed routing without invoking the selector, and larger counts route equal keys to one partition. |
@@ -1008,6 +1007,14 @@ When registered through `AddRequestBatcher`, the application container owns asyn
 
 ## Performance Tuning and Benchmarks
 
+**Do not evaluate only high-load results; compare performance before and after adopting RequestBatcher under typical traffic too.**
+Test typical, peak, and short-burst traffic with the same resources and downstream configuration, matching request arrival
+patterns, item counts, and data distributions between the baseline and RequestBatcher. Compare throughput, mean and P95/P99
+end-to-end latency, actual batch sizes, downstream call counts, and resource costs. Typical traffic may offer fewer batching
+opportunities, so batching savings may not offset admission and scheduling overhead; occupied execution slots also cause
+queueing when no slot is available. Throughput gains at high load
+do not replace latency validation under typical traffic.
+
 ### Preparing Inputs for an Agent
 
 If you want an AI Agent to help choose an initial configuration before adopting RequestBatcher, share the following
@@ -1030,7 +1037,7 @@ Also state the business semantics: read versus write behavior, ordering requirem
 and failure handling, and downstream QPS, concurrency, or connection-pool limits. Mark missing values as `unknown`; a single-item RT
 does not establish a batch RT, so use a small targeted test when batch behavior is unknown.
 
-**Minimum useful input:** per-instance peak QPS, items per entry, downstream call pattern, downstream mean/P99 RT,
+**Minimum useful input:** per-instance typical and peak QPS, items per entry, downstream call pattern, downstream mean/P99 RT,
 batch limits, and the end-to-end latency target.
 
 An Agent can use these inputs to propose initial `MaxConcurrency`, `BatchSize`, `MaxPendingRequests`, and partition
@@ -1152,7 +1159,7 @@ affect merging, so start load testing with fewer partitions.
 ### Estimating Handler and Downstream Concurrency Separately
 
 **`MaxConcurrency` limits concurrent Handler batches for one registered batcher, not the downstream calls within each batch.**
-Start load testing at `MaxConcurrency = 1` and increase it as needed, for example by testing `2–4`. A `BatchSize`
+Start with `MaxConcurrency = 2` for typical workloads and tune against measured throughput and latency. A `BatchSize`
 of roughly `3–10` times the desired downstream sub-batch size `S` is another tuning starting point.
 
 Inside the Handler, deduplicate when appropriate, split the resulting items into sub-batches of at most `S`,
@@ -1161,19 +1168,18 @@ number of child calls is `ceil(U / S)`, where `U` is the post-deduplication item
 without waiting to fill a full batch, while backlog allows more small sub-batches to run concurrently.
 **Downstream call counts can therefore adapt to actual batch size while Handler concurrency stays low.**
 
-**`MaxConcurrency = 1` means one Handler batch at a time, not one request or one downstream call at a time.**
-Assume sustained load, 120 actual requests for distinct products in each Handler batch, and a downstream that supports
-four concurrent queries taking about 20 ms each. `Chunk(30)` splits the 120 requests into four parallel queries,
-and `Task.WhenAll` waits for the slowest. Temporarily ignoring scheduling, deduplication, and response-mapping overhead,
-this means **one batch of 120 requests completes every 20 ms (0.02 seconds)**.
+**With `MaxConcurrency = 2`, up to two Handler batches can execute at once, each issuing parallel downstream calls.**
+Assume sustained load and 120 actual requests for distinct products in each Handler batch.
+Each batch uses `Chunk(30)` to start four parallel queries and awaits the slowest through `Task.WhenAll`;
+the two batches can therefore issue **up to eight concurrent downstream calls**.
+Assuming the downstream supports all eight concurrent queries while each still takes about 20 ms, ignoring scheduling,
+deduplication, and response-mapping overhead, two continuously occupied slots yield an idealized throughput of
+**`2 / 0.02 seconds × 120 items/batch = 12,000 items/s`**.
 
-**One second contains fifty 20 ms intervals.** Each interval completes one batch of 120 requests,
-so about 50 batches finish each second, with 120 items per batch:
-**`50 batches/s × 120 items/batch = 6,000 items/s`**.
+The diagram shows the internal flow of one of these Handler batches. Each batch releases its own slot on completion;
+the next batch does not wait for both batches to finish.
 
-This explains why low Handler concurrency can support high throughput; **it does not mean one slot is sufficient for every workload**.
-
-![One Handler batch fans out into four concurrent downstream queries](docs/assets/request-batcher-single-slot-fanout.svg)
+![MaxConcurrency is two; each Handler batch fans out into four concurrent downstream queries](docs/assets/request-batcher-single-slot-fanout.svg)
 
 This is an idealized estimate under sustained load, not a measured result. More generally,
 `item throughput ≈ MaxConcurrency × actual mean batch size / mean Handler seconds`.

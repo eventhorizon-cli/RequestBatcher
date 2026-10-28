@@ -39,7 +39,8 @@ cancellation before dispatch, or an infrastructure failure.
 Within a BufferQueue consumer group, each partition belongs to one consumer, which owns pulling and consumption
 progress. RequestBatcher keeps that ownership model and uses one pull consumer for all its partitions. A separate
 execution window limits concurrent Handler batches through `MaxConcurrency`, so one partition can supply several
-concurrent batches. This is a scheduling choice for in-process request batching, not a BufferQueue design defect.
+concurrent batches. This builds in-process request batching on BufferQueue's partition ownership model while managing
+Handler execution independently.
 
 ![Partition ownership and Handler concurrency](diagrams/partition-handler-decoupling.svg)
 
