@@ -1,0 +1,122 @@
+{
+  "Runtime": ".NET 10.0.0",
+  "OperatingSystem": "macOS 27.2.0",
+  "Architecture": "Arm64",
+  "ProcessorCount": 12,
+  "Configuration": "Release",
+  "Options": {
+    "Mode": "batcher",
+    "Output": "/private/tmp/paced-fanout/measured-r1-batcher-50.json",
+    "Rate": 50,
+    "Seconds": 20,
+    "WarmupSeconds": 3,
+    "BatchSize": 120,
+    "Concurrency": 2
+  },
+  "SubmissionSize": 20,
+  "DownstreamBatchSize": 30,
+  "SimulatedDownstreamMilliseconds": 20,
+  "PartitionCount": 1,
+  "PendingCapacity": 65536,
+  "Observability": "No ActivityListener, MeterListener, or OpenTelemetry provider",
+  "Validation": "Every response value and explicit response order checked; every item queried exactly once; all calls drained",
+  "Submissions": 1000,
+  "CompletedSubmissions": 1000,
+  "Items": 20000,
+  "IssueSpanSeconds": 19.979912542,
+  "ActualSubmissionRate": 50.000218864821896,
+  "CompletionSecondsIncludingDrain": 20.001092667,
+  "CompletedSubmissionsPerSecond": 49.997268481731986,
+  "CompletedItemsPerSecond": 999.9453696346397,
+  "DrainMillisecondsAfterLastSubmission": 21.091625,
+  "LatencyMilliseconds": {
+    "Count": 1000,
+    "Mean": 20.677981283,
+    "P50": 21.047625,
+    "P95": 21.220458,
+    "P99": 21.532291,
+    "Max": 21.607125
+  },
+  "ScheduledLatencyMilliseconds": {
+    "Count": 1000,
+    "Mean": 20.680170077,
+    "P50": 21.048834,
+    "P95": 21.220917,
+    "P99": 21.533,
+    "Max": 21.608042
+  },
+  "FirstQuarterLatencyMilliseconds": {
+    "Count": 250,
+    "Mean": 20.68729082799999,
+    "P50": 21.054958,
+    "P95": 21.421,
+    "P99": 21.536917,
+    "Max": 21.565125
+  },
+  "LastQuarterLatencyMilliseconds": {
+    "Count": 250,
+    "Mean": 20.656054999999995,
+    "P50": 20.912542,
+    "P95": 21.158875,
+    "P99": 21.249,
+    "Max": 21.5495
+  },
+  "ProducerLatenessMilliseconds": {
+    "Count": 1000,
+    "Mean": 0.0021887939999999974,
+    "P50": 0.001875,
+    "P95": 0.003792,
+    "P99": 0.01025,
+    "Max": 0.0885
+  },
+  "InterarrivalMilliseconds": {
+    "Count": 999,
+    "Mean": 19.999912454454474,
+    "P50": 20,
+    "P95": 20.002791,
+    "P99": 20.007333,
+    "Max": 20.03025
+  },
+  "Handler": {
+    "Calls": 1000,
+    "Items": 20000,
+    "MeanSize": 20,
+    "SizeHistogram": {
+      "20": 1000
+    },
+    "PeakConcurrency": 2,
+    "MeanConcurrency": 1.0319296171780492,
+    "CallsPerSecond": 49.997268481731986,
+    "DurationMilliseconds": {
+      "Count": 1000,
+      "Mean": 20.639719898999992,
+      "P50": 21.005875,
+      "P95": 21.182875,
+      "P99": 21.492291,
+      "Max": 21.575333
+    }
+  },
+  "Downstream": {
+    "Calls": 1000,
+    "Items": 20000,
+    "MeanSize": 20,
+    "SizeHistogram": {
+      "20": 1000
+    },
+    "PeakConcurrency": 2,
+    "MeanConcurrency": 1.0317182510756875,
+    "CallsPerSecond": 49.997268481731986,
+    "DurationMilliseconds": {
+      "Count": 1000,
+      "Mean": 20.63549234599999,
+      "P50": 21.003625,
+      "P95": 21.178959,
+      "P99": 21.489875,
+      "Max": 21.555583
+    }
+  },
+  "ProcessAllocatedBytes": 9624104,
+  "AllocatedBytesPerItem": 481.2052,
+  "ProcessCpuMilliseconds": 1182.305,
+  "MeasurementNotes": "In-process Task.Delay models I/O, not a real database. Allocation/CPU include the generator, timers, instrumentation and validation. Actual latency starts immediately before ExecuteAsync or direct query; scheduled latency also includes generator lateness. Nearest-rank percentiles. No deduplication savings: all item IDs are unique."
+}

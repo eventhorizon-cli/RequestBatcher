@@ -15,6 +15,9 @@ You are an AI coding assistant for this repository.
   `dotnet run --file path/to/script.cs -- ...` using the repository SDK. Do not introduce Python scripts or require
   a separate scripting runtime. Name these files with descriptive PascalCase names, such as `EvaluateScheduling.cs`.
   Keep script dependencies minimal and document their arguments and validation.
+- Keep script entry points, implementations, and shared helpers under `scripts/`; place reusable script utilities in
+  `scripts/Common`. Do not put script implementation or helper code in benchmark, test, or production projects.
+  Scripts may reference the production API they exercise; benchmark workloads belong in the benchmark project.
 - Find script entry points and usage guidance in the [script index](scripts/README.md). Update the index when adding,
   renaming, or changing script entry points.
 - Keep simple GitHub Actions release-tag parsing and package selection inline in the workflow YAML; do not add a
@@ -50,6 +53,11 @@ You are an AI coding assistant for this repository.
 
 - Target the frameworks declared by project files and use only C# 12 language features.
 - Keep nullable annotations, cancellation propagation, and `ConfigureAwait(false)` usage correct and consistent.
+- Define observability tag keys and fixed tag values as internal constants. Keep Span tags in
+  `RequestBatcherTraceTags` and Metrics tags in `RequestBatcherMetricTags`; maintain these separately even when their
+  text matches. Keep instrument names in `RequestBatcherMetricNames` and reuse them in recording and OpenTelemetry
+  view configuration. Avoid scattered literals in production code; contract tests may use explicit strings to verify
+  externally visible names.
 - Do not add per-file copyright or license headers. Repository licensing is defined by the root `LICENSE` file and
   package metadata.
 - Write code comments and XML documentation in English. Document every public API type and member; do not suppress

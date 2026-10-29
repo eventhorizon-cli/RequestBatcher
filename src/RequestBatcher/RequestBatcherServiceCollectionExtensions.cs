@@ -3,6 +3,7 @@ using BufferQueue.Memory;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using RequestBatcher.Diagnostics;
 using RequestBatcher.PendingRequests;
 
 namespace RequestBatcher;
@@ -158,6 +159,7 @@ public static partial class RequestBatcherServiceCollectionExtensions
         RequestBatchOptions<TRequest> options,
         string topicName = RequestBatchCoordinator<TRequest>.TopicName)
     {
+        services.AddSingleton(new RequestBatcherMetricsConfiguration(options.BatchSize));
         services.AddBufferQueue(queue =>
             queue.UseMemory(memory =>
                 memory.AddTopic<PendingBatchRequest<TRequest>>(topic =>

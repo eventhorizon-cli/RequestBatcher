@@ -64,10 +64,15 @@ curl --fail http://127.0.0.1:5082/health
 curl --fail --request POST http://127.0.0.1:5081/cart/quote \
   --header 'Content-Type: application/json' \
   --data '[{"productId":1,"quantity":2},{"productId":2,"quantity":1}]'
+curl --fail --request POST http://127.0.0.1:5081/cart/quote/ordinary \
+  --header 'Content-Type: application/json' \
+  --data '[{"productId":1,"quantity":2},{"productId":2,"quantity":1}]'
 ```
 
 The quote response contains one line per requested product and the calculated total. Cart validates 2 to 10 entries, positive
-product IDs, and quantities from 1 through 100. Missing products return `404`; invalid input returns `400`.
+product IDs, and quantities from 1 through 100. Missing products return `404`; invalid input returns `400`. The original
+`/cart/quote` route uses the `pricing-queries` delegate pipeline; `/cart/quote/ordinary` uses the `pricing-queries-ordinary`
+handler-type pipeline with the same Pricing lookup behavior.
 Pricing also supports direct inspection and explicit grouped reads:
 
 ```bash
@@ -83,7 +88,7 @@ show submitted requests, batch size, and batch duration. The logs and trace pane
 trace families for `RequestBatcher.Execute` and `RequestBatcher.Handle`.
 
 The visible trace starts with the Cart ASP.NET Core request span. Each Cart request creates one
-`RequestBatcher.Execute pricing-queries` span for its complete 2–10 ID sequence. The shared Cart batch handler receives up to 20
+`RequestBatcher.Execute` span named for its pipeline (`pricing-queries` or `pricing-queries-ordinary`) for its complete 2–10 ID sequence. The shared Cart batch handler receives up to 20
 product requests, mixes requests from concurrent Cart calls, deduplicates their IDs, and makes one HTTP call to Pricing for the group. Pricing's ASP.NET Core span contains the
 Npgsql database span created by Npgsql's official OpenTelemetry integration. The Cart batch spans are independent
 Consumer roots. Each `Handle` span links to the contributing caller `Execute` contexts and carries
@@ -107,13 +112,15 @@ links to every contributing `Execute` span, and each `Execute` span links to eve
 its requests. See Grafana's [TraceQL link query documentation](https://grafana.com/docs/tempo/latest/traceql/construct-traceql-queries/)
 for the `link:traceID` and `link:spanID` selectors.
 
+The following example uses the default `/cart/quote` endpoint.
+
 For direct navigation, open a `Handle` trace from the dashboard's `Handler execution · Handle` table, click the
 `RequestBatcher.Handle pricing-queries` span row, and expand `References` in the span details to see its `Execute`
 callers. Click an `Execute` span in the `Cart calls · Execute` table and expand `References` to see the
 `Handle` spans that processed it. Grafana groups parent references and span links in this list: the `cart POST /cart/quote`
 entry is Execute's HTTP parent in the same trace, while handler links target independent `Handle` traces.
 The parent entry is not an extra ActivityLink. To find the `Execute` spans from
-from a batch, copy its trace and span IDs and query Tempo with:
+a batch, copy its trace and span IDs and query Tempo with:
 
 ```text
 { link:traceID = "BATCH_TRACE_ID" && link:spanID = "BATCH_SPAN_ID" && span:name = "RequestBatcher.Execute pricing-queries" }

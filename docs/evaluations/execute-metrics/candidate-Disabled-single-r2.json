@@ -1,0 +1,23 @@
+{
+  "Runtime": ".NET 10.0.0",
+  "OS": "macOS 27.2.0",
+  "Architecture": "Arm64",
+  "Mode": "Disabled",
+  "SubmissionKind": "single",
+  "Waves": 30,
+  "RequestsPerWave": 1024,
+  "BatchSize": 32,
+  "Concurrency": 8,
+  "DownstreamDelayMilliseconds": 20,
+  "AllocatedBytes": 8714952,
+  "BytesPerItem": 283.68984375,
+  "WaveMilliseconds": {
+    "Count": 30,
+    "Mean": 103.43480333333332,
+    "P50": 105.4934,
+    "P95": 106.4101,
+    "P99": 108.1279,
+    "Max": 108.1279
+  },
+  "Notes": "Bounded allocation/timing probe of the existing metrics benchmark; five warmups excluded. Metrics aggregation enabled only in AggregationOnly, no exporter in the measured region, no tracing. Not a per-call latency benchmark."
+}

@@ -67,21 +67,115 @@ RequestBatcher also exposes a `RequestBatcher` meter. The
 `MeterProviderBuilder.AddRequestBatcherInstrumentation()` extension registers
 that meter with the application's provider. The package does not create a
 meter provider or choose an exporter. The metrics are deliberately low
-cardinality and use only the request type and optional public batcher name as
-dimensions:
+cardinality. All instruments use the request type and optional public batcher name;
+Execute duration additionally distinguishes submission kind and terminal outcome:
 
-- `requestbatcher.requests.submitted` counts requests accepted by a coordinator.
-- `requestbatcher.requests.processed` counts requests completed by a handler.
-- `requestbatcher.batches.processed` counts non-empty dispatched batches.
-- `requestbatcher.batch.size` records the number of requests in each batch.
-- `requestbatcher.batch.duration` records handler duration in milliseconds.
+- `requestbatcher.batch.size` records the number of requests in each completed Handler batch, including failed attempts.
+- `requestbatcher.submission.size` records request items per submission reaching coordinator admission, once per
+  single call (value 1) or materialized collection call (its item count, including zero). Tags are public request
+  type, optional batcher name, and `requestbatcher.submission.kind` (`single`/`multi`). Internal response forwarding
+  records at the same admission boundary, never twice. Capacity slices do not create additional observations.
+  Calls rejected before admission (pre-canceled, stopped, null, or failed enumeration) are excluded; queue-full
+  failures after admission and later handler failures/cancellations remain included.
+  Empty collections contribute a zero observation but no request items.
+- `requestbatcher.handle.duration` records Handler execution and scope disposal duration in milliseconds.
+- `requestbatcher.execute.duration` records the duration of one public `ExecuteAsync` call in milliseconds.
+
+### Size histogram buckets
+
+The metrics integration reads immutable BatchSize metadata from the application's service provider when building
+MeterProvider. The common internal queue-registration path registers one metadata instance per pipeline from the
+validated options snapshot. This includes named, unnamed, request-only, response, and delegate registrations without
+resolving a coordinator or Handler. OpenTelemetry registration may precede Batcher registration; all registrations
+must be complete before the provider is built. No static process-wide configuration or runtime bucket updates are used.
+
+Let B be the largest registered BatchSize in that provider. Each size histogram has a budget of 25 buckets including
+overflow. Batch-size boundaries include 0, 1, and ceil(B * i / 22), for i = 1 through 22, sorted and deduplicated.
+Submission-size boundaries separately use 0, 1, and seventeen equal steps up to B, then add five doublings of B
+(2B through 32B) because explicit submissions may
+exceed BatchSize. The SDK adds an overflow bucket. Batch-size and submission-size histograms therefore have at most
+25 buckets each including overflow, independent of the number of pipelines or distinct BatchSize configurations.
+With classic Prometheus export, bucket, sum, and count series total at most 27 per label combination for each histogram.
+More label combinations still multiply the total number of series. The largest configuration sets the resolution for
+all pipelines; smaller pipelines may receive coarser buckets than if registered alone.
+
+Bucket estimates trade resolution for bounded storage. Observations above 32B enter overflow and cannot be resolved
+into finer tail quantiles. Sums, counts, and means still include those observations and are independent of bucket
+boundaries. Instances whose buckets are combined for quantiles must use the same boundaries.
+
+The integration applies views only to the RequestBatcher Meter's two size histograms. Duration histograms retain SDK
+defaults. Repeated instrumentation registration adds the configuration once. With no registered pipeline in that service
+provider, the integration leaves SDK defaults intact. Direct AddMeter/MeterListener registration does not apply these
+views; custom aggregation remains the application's responsibility. Applications that require their own bucket views
+can use AddMeter instead of the integration extension. No new public configuration or API is required.
+
+Tests validate exported bucket boundaries/counts for small, ordinary, and maximum int BatchSize, empty and oversized
+submissions, a fixed bucket budget with many differently sized named pipelines, all registration shapes, registration order, provider isolation, repeated
+instrumentation registration, and the no-pipeline fallback. The metadata registry is startup-only; request processing
+does not read options or compute bucket layouts.
+
+### Public call duration
+
+Execute duration starts before synchronous enumeration/admission and ends when the returned operation's outcome
+is available, including capacity waiting, queueing, all participating Handler batches, and response-array assembly.
+Each single or explicit-group call records exactly one observation, including an empty group, pre-cancellation,
+admission rejection, enumeration failure, or shutdown rejection. A null collection still throws synchronously before
+instrumentation and is not measured. Request-only and response APIs are instrumented at their public boundary only;
+internal forwarding does not record another observation. Delegate adapters measure their SubmitAsync entry before
+binding the Handler and invoking the internal submission core. This includes binding failures and avoids calling the
+ordinary public entry a second time, which would duplicate metrics and tracing. All public entry adapters call
+`RequestBatcherCallDiagnostics.Execute`, the shared outer boundary that composes metrics around tracing and then invokes
+the adapter's submission operation. Delegate binding remains inside that operation. Response-group operations include
+response-array assembly and do not attach the tracing observer to an earlier queue completion. Delegate extension
+argument checks (including null collections or callbacks) and unsupported
+batcher validation occur before this boundary and are not measured.
+
+Its additional tags are `requestbatcher.submission.kind` (`single` or `multi`) and `requestbatcher.outcome`
+(`success`, `error`, or `canceled`). Outcome follows the returned Task's status, not the exception type: a faulted
+Task containing an OperationCanceledException remains `error`. Failed groups record once after all their items
+finish. No error messages, request values, or identifiers become dimensions. The histogram count already provides
+completed-call counts. The four histograms also provide all request-item and batch totals; no separate counters are emitted.
+Submission kind identifies the public overload, not item count: a collection containing zero or one item is still
+`multi`. These are new Execute histogram attributes, not renamed existing dimensions. OTLP retains dotted instrument
+and attribute names. The sample's Prometheus translation uses `requestbatcher_execute_duration_milliseconds_bucket`
+(plus `_sum`/`_count`), with labels `requestbatcher_submission_kind` and `requestbatcher_outcome`. Attribute values
+remain `single`/`multi` and `success`/`error`/`canceled`. Backend translation settings may produce different names.
+
+The public boundary checks the Execute instrument's `Enabled` flag before allocating timing state. With no
+subscriber it follows the existing submission path. With a subscriber, synchronous completion is recorded inline;
+incomplete operations use a completion wrapper that records before publishing the public result. It preserves the
+original result, all fault exceptions, cancellation token, and synchronous-throw behavior. This wrapper composes
+with tracing without requiring an Activity or changing tracing sampling. Recording rechecks `Enabled` at completion;
+late subscription does not replay calls that started without a subscriber. Meter callbacks retain the existing
+requirement to be non-blocking and exception-free.
+
+Histogram sums and counts are aggregation fields in OTLP, not separate instrument names. With the sample's classic
+Prometheus translation, size histograms expose `_sum` (request items), `_count` (submissions or Handler batches),
+and `_bucket` (cumulative size distribution). Duration histograms expose the same suffixes after `_milliseconds`;
+their sums measure elapsed time, not request items. `rate(..._count[5m])` gives operations per second,
+`rate(..._size_sum[5m])` gives request items per second, and the ratio of sum/count rates gives the mean size or
+duration over that window. `increase(..._count[1m])` estimates operations during the last minute. Classic-histogram
+quantiles use `histogram_quantile` over bucket rates and are approximate.
+
+This metric contract changes existing dashboards and alerts: submitted request totals use the submission-size sum,
+processed request totals use the batch-size sum, and processed batch totals use the batch-size count. Handler-duration
+queries use the `handle.duration` instrument. There are no public configuration/API changes or changes to admission,
+cancellation, batching, or disposal contracts. Tests assert the four-instrument catalog and cover all four submission
+shapes, named/type tags, split and merged batches,
+capacity/dispatch waiting, errors and mixed outcomes, cancellation before/after dispatch, empty/null/enumeration
+cases, subscriber transitions, and coexistence with tracing. Performance validation compares disabled and enabled
+metrics on .NET 10; response stress validates per-item correlation, explicit order, and exactly-once handling.
 
 The request-type dimension uses the public request type's simple name, without
 its namespace or an internal response wrapper. The name is cached per closed
 coordinator/consumer type. Types with the same simple name share this dimension;
 public batcher names can distinguish pipelines. Existing label filters must use
-short names. Instrument names remain unchanged and already contain the
+short names. Instrument names already contain the
 `requestbatcher.` prefix; an exporter namespace must not duplicate it.
+
+Span tags and fixed values are defined in RequestBatcherTraceTags, separately from RequestBatcherMetricTags.
+RequestBatcherMetricNames supplies the instrument names for both recording and integration views. Contract tests
+assert literal exported names so accidental naming changes cannot pass by sharing the same constants.
 
 Batch measurements finish alongside the batch span, before request completions are
 published. Processed counts include failed handler attempts and exclude requests
@@ -253,8 +347,10 @@ integration extension changes the SDK's batch decision when it is registered.
 
 ## Internal flow and performance
 
-Diagnostics owns a shared ActivitySource and tracing helpers. Public entry points
-check HasListeners before creating closures or tracing state. With no listener,
+Diagnostics owns a shared ActivitySource and tracing helpers. Ordinary and delegate entry points use the same
+`RequestBatcherCallDiagnostics` wrapper, which owns cached call metadata and checks metric and tracing subscriptions.
+It composes the existing measurement and tracing helpers without introducing an additional completion bridge.
+Static callbacks and value-type state avoid per-call closure allocations. With no listener,
 the existing task path is used without an async wrapper, span, link collection,
 or extra per-item tracing allocation. Traced pending requests use an internal
 subclass that stores shared submission tracing state, keeping the untraced pending object's size unchanged.
@@ -301,6 +397,8 @@ faults, and cancellation semantics while optimizing the ordinary admission path.
 only the final aggregate publication, never an individual item's completion. No Task.Run or extra thread is added per call/batch.
 Response and delegate adapters invoke uninstrumented core methods under their
 outer call span to avoid duplicate spans and include their own preparation.
+The shared wrapper preserves synchronous exceptions, original Task outcomes and cancellation tokens, and the
+existing no-listener Task path. Public APIs, metric names/tags, span boundaries, and Handler scheduling are unchanged.
 
 ## Validation and compatibility
 
@@ -316,6 +414,9 @@ adapter registration/null validation. Named and unnamed class/delegate registrat
 with and without responses, must expose the correct name on both spans without mixing
 concurrent pipelines. Tests with global listeners are isolated
 from unrelated Activity-sensitive tests.
+Entry-point regression tests exercise ordinary and delegate single/group calls, with and without responses, across
+independent metric/tracing subscription combinations. They assert exactly one call measurement/span when enabled,
+binding failures inside the boundary, and no early completion before response materialization.
 
 Matched measurements compare the previous release implementation plus context
 isolation with the new implementation without listeners, and compare disabled,
@@ -354,8 +455,9 @@ proxies, and unique W3C trace IDs to isolate its evidence from other sample traf
 available for manual inspection but is not started by the automated integration project. No production dependency or
 public API changes are required.
 
-Concurrent Cart requests each submit 2–10 product IDs through the native enumerable API. The suite verifies ordered
-prices including duplicates, exactly one Execute span per HTTP request, its HTTP parent, and independent Handle
+Concurrent Cart requests each submit 2–10 product IDs through both the ordinary handler-type API and the delegate API,
+using separate batcher names and endpoints but the same Pricing lookup implementation. For each name independently,
+the suite verifies ordered prices including duplicates, exactly one Execute span per HTTP request, its HTTP parent, and independent Handle
 roots linked to the corresponding Execute contexts. Each Execute must link back to exactly those batch contexts;
 both directions must be unique and symmetric, with no unrelated batch links. Every submitted caller
 must be represented, and a concurrent burst must demonstrate a batch containing multiple callers. Batch size counts
@@ -365,6 +467,8 @@ Pricing batcher or error spans. Repeated fresh bursts also detect accidental reu
 
 Telemetry assertions poll for complete evidence with a bounded deadline, accounting for asynchronous export and
 indexing. Failures identify missing trace IDs, links, or metrics rather than passing on partial data. Prometheus checks
-verify all five RequestBatcher instruments for the configured name and positive post-request increments for submitted,
-processed, and batch counters. Histogram counts and sums must also advance. Integration runs are explicitly enabled;
+verify all four RequestBatcher histograms independently for each configured name. Submission-size and batch-size sums
+must match the input item count, and submission-size and Execute-duration histogram counts must each match the number of HTTP calls exactly;
+this prevents duplicate or missing ordinary-path measurements from being masked by delegate measurements. Handler
+batch counts and duration sums must also advance. Integration runs are explicitly enabled;
 without the opt-in environment variable, tests are reported as skipped.

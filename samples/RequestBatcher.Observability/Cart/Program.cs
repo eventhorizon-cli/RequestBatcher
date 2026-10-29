@@ -17,6 +17,15 @@ builder.Services.AddDelegateRequestBatcher<int, Product?>(
         options.MaxConcurrency = 2;
         options.MaxPendingRequests = 1024;
     });
+builder.Services.AddRequestBatcher<int, Product?, PricingQueryHandler>(
+    "pricing-queries-ordinary",
+    ServiceLifetime.Scoped,
+    options =>
+    {
+        options.BatchSize = 20;
+        options.MaxConcurrency = 2;
+        options.MaxPendingRequests = 1024;
+    });
 
 var app = builder.Build();
 app.MapGet("/health", () => Results.Ok(new { status = "ready" }));

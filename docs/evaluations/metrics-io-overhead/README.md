@@ -2,7 +2,10 @@
 
 ## Evaluation contract
 
-Measure metrics independently of tracing using the current RequestBatcher source, .NET 8, and the real
+This is a historical measurement of source `18f4422` and its five-instrument contract. For the current four-histogram
+contract, see the [.NET 10 Execute and submission metrics evaluation](../execute-metrics/README.md).
+
+Measure metrics independently of tracing using that RequestBatcher source, .NET 8, and the real
 OpenTelemetry SDK. No Activity listener is installed. Compare no meter subscription, SDK aggregation without
 periodic collection, and periodic collection every 1,000 ms or 100 ms. The periodic modes use a validating in-process
 exporter without retaining metric batches; transport, serialization, collectors, and backend costs are excluded.

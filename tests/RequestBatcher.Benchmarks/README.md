@@ -31,6 +31,7 @@ load. Run both when changing shared submission, scheduling, or response-completi
 | Explicit admission, shared completion, backpressure | [ExplicitSubmissionBenchmarks](InMemory/ExplicitSubmissionBenchmarks.cs), [ExplicitCompletionBenchmarks](InMemory/ExplicitCompletionBenchmarks.cs) | Mixed/group submissions; capacity waiting, partial cancellation, failure fan-out, and per-ID processing validation. |
 | Queue pulling and dispatch capacity | [QueuePullBenchmarks](InMemory/QueuePullBenchmarks.cs), [DispatchCapacityBenchmarks](InMemory/DispatchCapacityBenchmarks.cs) | 4,096 requests across partition/concurrency settings; synchronous and 20 ms handlers in the dispatch benchmark. |
 | Tracing or metrics | [TracingIoOverheadBenchmarks](InMemory/TracingIoOverheadBenchmarks.cs), [MetricsIoOverheadBenchmarks](InMemory/MetricsIoOverheadBenchmarks.cs) | 1,024 requests per wave, single or groups of 32, 20 ms handlers, per-ID exactly-once validation; disabled/sampling or metric-reader configurations. These use request-only handlers. |
+| Execute metrics completion | [ExecuteMetricsTests](../RequestBatcher.Tests/Diagnostics/ExecuteMetricsTests.cs), [DelegateExecuteMetricsTests](../RequestBatcher.Tests/Diagnostics/DelegateExecuteMetricsTests.cs) | Enabled metrics with concurrent single and explicit response submissions; checks response values, collection order, exactly-once handling, and one duration sample per public call. Delegate cases also cover Handler binding, tracing on/off, and cancellation. |
 | SDK sampling and trace links | [TracingStressTests](../it/RequestBatcher.Observability.IntegrationTests/TracingStressTests.cs) | 32 waves of 512 requests at 0%/100% sampling, mixed submissions, exactly-once handling and actual-batch links; also mixed-sampling policy tests. No Docker needed for this class. |
 | Request-only delegate forwarding | [DelegateRequestOnlyStressTests](../RequestBatcher.Tests/DelegateRequestOnlyStressTests.cs), [DelegateRequestOnlyBenchmarks](InMemory/DelegateRequestOnlyBenchmarks.cs), [DelegateForwardingBenchmarks](InMemory/DelegateForwardingBenchmarks.cs) | Eight producers, single/list/mixed submissions, four 2,048-request waves per case; validates every request's transformation and exactly-once handling. Benchmarks measure full-pipeline and isolated forwarding allocation. |
 | Database paths | PostgreSQL/Redis benchmarks below | Matched direct/batched operations, result or persisted-data validation; require Docker. |
@@ -117,6 +118,14 @@ Container and data preparation are outside measurement. Their results are separa
 | [PostgreSqlPriceQueryRateBenchmarks](PostgreSql/PostgreSqlPriceQueryRateBenchmarks.cs) | Paced direct and batched queries across target arrival rates and concurrency limits. |
 | [RedisReadBenchmarks](Redis/RedisReadBenchmarks.cs) | Direct GETs, single submissions and explicit batch submission. |
 | [RedisWriteBenchmarks](Redis/RedisWriteBenchmarks.cs) | Direct SETs, single submissions and explicit batch submission. |
+
+## Paced explicit-submission probe
+
+For paced explicit submissions against the current public API, use
+[`MeasurePacedBatchFanout.cs`](../../scripts/MeasurePacedBatchFanout.cs). It is a bounded load probe rather than a
+BenchmarkDotNet throughput loop: arrivals do not wait for earlier responses. See the
+[paced batch fan-out evaluation](../../docs/evaluations/paced-batch-fanout/README.md) for its direct bulk-query baseline,
+correctness checks, runtime, commands, and latency results.
 
 ## Historical scheduling probe
 

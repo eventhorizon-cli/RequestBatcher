@@ -6,7 +6,6 @@ namespace RequestBatcher.Observability.IntegrationTests;
 internal sealed class TempoClient
 {
     private const string ApiPath = "api/datasources/proxy/uid/requestbatcher-tempo/api";
-    private const string BatchName = "RequestBatcher.Handle pricing-queries";
     private readonly HttpClient _client;
 
     public TempoClient(HttpClient client) => _client = client ?? throw new ArgumentNullException(nameof(client));
@@ -30,11 +29,13 @@ internal sealed class TempoClient
 
     public async Task<IReadOnlyList<string>> FindBatchTracesAsync(
         IReadOnlyCollection<string> callerTraceIds,
+        string batcherName,
         DateTimeOffset start,
         DateTimeOffset end,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(callerTraceIds);
+        ArgumentException.ThrowIfNullOrWhiteSpace(batcherName);
         var ids = callerTraceIds.Select(id => NormalizeId(id, 32)).Distinct(StringComparer.Ordinal).ToArray();
         if (ids.Length == 0)
         {
@@ -43,7 +44,7 @@ internal sealed class TempoClient
 
         // Tempo's TraceQL representation omits leading zeroes from link trace IDs.
         var links = string.Join(" || ", ids.Select(id => $"link:traceID = \"{id.TrimStart('0')}\""));
-        var query = $"{{ span:name = \"{BatchName}\" && ({links}) }}";
+        var query = $"{{ span:name = \"RequestBatcher.Handle {batcherName}\" && ({links}) }}";
         var path = $"{ApiPath}/search?q={Uri.EscapeDataString(query)}" +
                    $"&start={start.ToUnixTimeSeconds()}&end={end.ToUnixTimeSeconds()}&limit=1000";
 

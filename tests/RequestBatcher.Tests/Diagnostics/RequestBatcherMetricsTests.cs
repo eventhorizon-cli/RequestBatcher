@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.Metrics;
 using Microsoft.Extensions.DependencyInjection;
+using Moq;
 using OpenTelemetry;
 using OpenTelemetry.Metrics;
 using RequestBatcher.Diagnostics;
@@ -23,12 +24,14 @@ public sealed class RequestBatcherMetricsTests
     public async Task ExecuteAsync_WithMeterListener_RecordsSubmissionAndBatchMeasurements()
     {
         var measurements = new ConcurrentQueue<MeasurementRecord>();
+        var instruments = new ConcurrentDictionary<string, Instrument>();
         using var listener = new MeterListener
         {
             InstrumentPublished = (instrument, meterListener) =>
             {
                 if (instrument.Meter.Name == RequestBatcherMetrics.MeterName)
                 {
+                    instruments.TryAdd(instrument.Name, instrument);
                     meterListener.EnableMeasurementEvents(instrument);
                 }
             },
@@ -43,25 +46,35 @@ public sealed class RequestBatcherMetricsTests
         services.AddRequestBatcher<int, Handler>("prices", ServiceLifetime.Singleton);
         await using var provider = services.BuildServiceProvider();
         await provider.GetRequiredKeyedService<IRequestBatcher<int>>("prices").ExecuteAsync([1, 2, 3]);
+        await provider.DisposeAsync();
 
-        Assert.Equal(3, Assert.Single(measurements, item => item.Name == "requestbatcher.requests.submitted").Value);
-        Assert.Equal(3, Assert.Single(measurements, item => item.Name == "requestbatcher.requests.processed").Value);
-        Assert.Equal(1, Assert.Single(measurements, item => item.Name == "requestbatcher.batches.processed").Value);
+        Assert.Equal(new[]
+        {
+            "requestbatcher.batch.size",
+            "requestbatcher.execute.duration",
+            "requestbatcher.handle.duration",
+            "requestbatcher.submission.size",
+        }, instruments.Keys.Order());
+        Assert.IsType<Histogram<long>>(instruments["requestbatcher.submission.size"]);
+        Assert.IsType<Histogram<long>>(instruments["requestbatcher.batch.size"]);
+        Assert.IsType<Histogram<double>>(instruments["requestbatcher.handle.duration"]);
+        Assert.IsType<Histogram<double>>(instruments["requestbatcher.execute.duration"]);
+        Assert.Equal(3, Assert.Single(measurements, item => item.Name == "requestbatcher.submission.size").Value);
         Assert.Equal(3, Assert.Single(measurements, item => item.Name == "requestbatcher.batch.size").Value);
-        Assert.Contains(measurements, item => item.Name == "requestbatcher.batch.duration");
+        Assert.True(Assert.Single(measurements, item => item.Name == "requestbatcher.handle.duration").Value >= 0);
+        Assert.True(Assert.Single(measurements, item => item.Name == "requestbatcher.execute.duration").Value >= 0);
 
-        var tagged = Assert.Single(measurements, item => item.Name == "requestbatcher.requests.submitted");
+        var tagged = Assert.Single(measurements, item => item.Name == "requestbatcher.submission.size");
         Assert.Equal(nameof(Int32), tagged.Tags["requestbatcher.request.type"]);
         Assert.Equal("prices", tagged.Tags["requestbatcher.name"]);
     }
 
     [Theory]
-    [InlineData("requestbatcher.requests.submitted", 3)]
-    [InlineData("requestbatcher.requests.processed", 3)]
-    [InlineData("requestbatcher.batches.processed", 1)]
+    [InlineData("requestbatcher.submission.size", 3)]
     [InlineData("requestbatcher.batch.size", 3)]
-    [InlineData("requestbatcher.batch.duration", -1)]
-    public void MeterListener_SelectsOneInstrument_RecordsExpectedMeasurement(
+    [InlineData("requestbatcher.handle.duration", -1)]
+    [InlineData("requestbatcher.execute.duration", -1)]
+    public async Task MeterListener_SelectsOneInstrument_RecordsExpectedMeasurement(
         string selectedInstrument,
         double expectedValue)
     {
@@ -83,14 +96,15 @@ public sealed class RequestBatcherMetricsTests
             measurements.Enqueue(new MeasurementRecord(instrument.Name, value, tags)));
         listener.Start();
 
-        RequestBatcherMetrics.RecordSubmitted("Int32", "prices", 3);
-        using (RequestBatcherMetrics.StartBatch("Int32", "prices", 3))
-        {
-        }
+        var services = new ServiceCollection();
+        services.AddRequestBatcher<int, Handler>("prices", ServiceLifetime.Singleton);
+        await using var provider = services.BuildServiceProvider();
+        await provider.GetRequiredKeyedService<IRequestBatcher<int>>("prices").ExecuteAsync([1, 2, 3]);
+        await provider.DisposeAsync();
 
         var measurement = Assert.Single(measurements);
         Assert.Equal(selectedInstrument, measurement.Name);
-        if (selectedInstrument == "requestbatcher.batch.duration")
+        if (expectedValue < 0)
         {
             Assert.True(measurement.Value >= 0);
         }
@@ -101,6 +115,71 @@ public sealed class RequestBatcherMetricsTests
 
         Assert.Equal("Int32", measurement.Tags["requestbatcher.request.type"]);
         Assert.Equal("prices", measurement.Tags["requestbatcher.name"]);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_HandlerFailsAndQueuedRequestCanceled_SizeSumsRetainTheirBoundaries()
+    {
+        var measurements = new ConcurrentQueue<MeasurementRecord>();
+        using var listener = new MeterListener
+        {
+            InstrumentPublished = (instrument, meterListener) =>
+            {
+                if (instrument.Meter.Name == RequestBatcherMetrics.MeterName &&
+                    instrument.Name is "requestbatcher.submission.size" or "requestbatcher.batch.size")
+                {
+                    meterListener.EnableMeasurementEvents(instrument);
+                }
+            },
+        };
+        listener.SetMeasurementEventCallback<long>((instrument, value, tags, _) =>
+            measurements.Enqueue(new MeasurementRecord(instrument.Name, value, tags)));
+        listener.Start();
+
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var expected = new InvalidOperationException("handler failed");
+        var handler = new Mock<IRequestBatchHandler<int>>(MockBehavior.Strict);
+        handler.Setup(value => value.HandleAsync(It.IsAny<IReadOnlyList<int>>(), It.IsAny<CancellationToken>()))
+            .Returns(async (IReadOnlyList<int> requests, CancellationToken _) =>
+            {
+                Assert.Equal(1, Assert.Single(requests));
+                entered.SetResult();
+                await release.Task;
+                throw expected;
+            });
+        var services = new ServiceCollection();
+        services.AddSingleton(handler);
+        services.AddRequestBatcher<int, MockHandlerProxy>(ServiceLifetime.Singleton, options =>
+        {
+            options.BatchSize = 1;
+            options.MaxConcurrency = 1;
+        });
+        await using var provider = services.BuildServiceProvider();
+        var batcher = provider.GetRequiredService<IRequestBatcher<int>>();
+        var running = batcher.ExecuteAsync(1);
+        using var cancellation = new CancellationTokenSource();
+        try
+        {
+            await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            var queued = batcher.ExecuteAsync(new[] { 2 }, cancellation.Token);
+            cancellation.Cancel();
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => queued.WaitAsync(TimeSpan.FromSeconds(10)));
+        }
+        finally
+        {
+            release.TrySetResult();
+        }
+        Assert.Same(expected, await Assert.ThrowsAsync<InvalidOperationException>(() => running.WaitAsync(TimeSpan.FromSeconds(10))));
+        await provider.DisposeAsync();
+
+        var submissions = measurements.Where(item => item.Name == "requestbatcher.submission.size").ToArray();
+        Assert.Equal(2, submissions.Length);
+        Assert.Equal(2, submissions.Sum(item => item.Value));
+        var consumed = Assert.Single(measurements, item => item.Name == "requestbatcher.batch.size");
+        Assert.Equal(1, consumed.Value);
+        handler.Verify(value => value.HandleAsync(It.IsAny<IReadOnlyList<int>>(), It.IsAny<CancellationToken>()), Times.Once);
+        handler.VerifyNoOtherCalls();
     }
 
     [Fact]
@@ -117,7 +196,7 @@ public sealed class RequestBatcherMetricsTests
             measurements.Enqueue(new MeasurementRecord(instrument.Name, value, tags)));
         listener.Start();
 
-        RequestBatcherMetrics.RecordSubmitted("Int32", "prices", 3);
+        RequestBatcherMetrics.RecordSubmissionSize("Int32", "prices", "multi", 3);
         using (RequestBatcherMetrics.StartBatch("Int32", "prices", 3))
         {
         }
@@ -128,17 +207,17 @@ public sealed class RequestBatcherMetricsTests
     [Fact]
     public void MeterListener_EnableDisableInstrument_ControlsMeasurements()
     {
-        RequestBatcherMetrics.RecordSubmitted("Int32", "prices", 3);
+        RequestBatcherMetrics.RecordSubmissionSize("Int32", "prices", "multi", 3);
         var measurements = new ConcurrentQueue<MeasurementRecord>();
-        Instrument? processedRequests = null;
+        Instrument? batchSize = null;
         using var listener = new MeterListener
         {
             InstrumentPublished = (instrument, _) =>
             {
                 if (instrument.Meter.Name == RequestBatcherMetrics.MeterName &&
-                    instrument.Name == "requestbatcher.requests.processed")
+                    instrument.Name == "requestbatcher.batch.size")
                 {
-                    processedRequests = instrument;
+                    batchSize = instrument;
                 }
             },
         };
@@ -148,8 +227,8 @@ public sealed class RequestBatcherMetricsTests
             measurements.Enqueue(new MeasurementRecord(instrument.Name, value, tags)));
         listener.Start();
 
-        Assert.NotNull(processedRequests);
-        var instrument = processedRequests!;
+        Assert.NotNull(batchSize);
+        var instrument = batchSize!;
         Assert.False(instrument.Enabled);
         using (RequestBatcherMetrics.StartBatch("Int32", "prices", 3))
         {
@@ -163,7 +242,7 @@ public sealed class RequestBatcherMetricsTests
         }
 
         var measurement = Assert.Single(measurements);
-        Assert.Equal("requestbatcher.requests.processed", measurement.Name);
+        Assert.Equal("requestbatcher.batch.size", measurement.Name);
         Assert.Equal(3, measurement.Value);
 
         listener.DisableMeasurementEvents(instrument);
@@ -178,7 +257,7 @@ public sealed class RequestBatcherMetricsTests
     [Fact]
     public void MeterListener_OneSubscriberDisposed_KeepsOtherSubscriberEnabled()
     {
-        RequestBatcherMetrics.RecordSubmitted("Int32", "prices", 3);
+        RequestBatcherMetrics.RecordSubmissionSize("Int32", "prices", "multi", 3);
         var firstMeasurements = new ConcurrentQueue<MeasurementRecord>();
         var secondMeasurements = new ConcurrentQueue<MeasurementRecord>();
         Instrument? firstInstrument = null;
@@ -188,7 +267,7 @@ public sealed class RequestBatcherMetricsTests
             InstrumentPublished = (instrument, meterListener) =>
             {
                 if (instrument.Meter.Name == RequestBatcherMetrics.MeterName &&
-                    instrument.Name == "requestbatcher.requests.processed")
+                    instrument.Name == "requestbatcher.batch.size")
                 {
                     firstInstrument = instrument;
                     meterListener.EnableMeasurementEvents(instrument);
@@ -202,7 +281,7 @@ public sealed class RequestBatcherMetricsTests
             InstrumentPublished = (instrument, meterListener) =>
             {
                 if (instrument.Meter.Name == RequestBatcherMetrics.MeterName &&
-                    instrument.Name == "requestbatcher.requests.processed")
+                    instrument.Name == "requestbatcher.batch.size")
                 {
                     secondInstrument = instrument;
                     meterListener.EnableMeasurementEvents(instrument);
@@ -252,15 +331,15 @@ public sealed class RequestBatcherMetricsTests
     public void StartBatch_NoSubscriberAtCreation_DoesNotBackfillMeasurement()
     {
         var measurements = new ConcurrentQueue<MeasurementRecord>();
-        Instrument? processedRequests = null;
+        Instrument? batchSize = null;
         using var listener = new MeterListener
         {
             InstrumentPublished = (instrument, _) =>
             {
                 if (instrument.Meter.Name == RequestBatcherMetrics.MeterName &&
-                    instrument.Name == "requestbatcher.requests.processed")
+                    instrument.Name == "requestbatcher.batch.size")
                 {
-                    processedRequests = instrument;
+                    batchSize = instrument;
                 }
             },
         };
@@ -269,8 +348,8 @@ public sealed class RequestBatcherMetricsTests
         listener.Start();
 
         var scope = RequestBatcherMetrics.StartBatch("Int32", "prices", 3);
-        Assert.NotNull(processedRequests);
-        var instrument = processedRequests!;
+        Assert.NotNull(batchSize);
+        var instrument = batchSize!;
         Assert.False(instrument.Enabled);
         listener.EnableMeasurementEvents(instrument);
         scope.Dispose();
@@ -305,6 +384,12 @@ public sealed class RequestBatcherMetricsTests
     {
         public ValueTask HandleAsync(IReadOnlyList<int> requests, CancellationToken cancellationToken = default) =>
             ValueTask.CompletedTask;
+    }
+
+    private sealed class MockHandlerProxy(Mock<IRequestBatchHandler<int>> handler) : IRequestBatchHandler<int>
+    {
+        public ValueTask HandleAsync(IReadOnlyList<int> requests, CancellationToken cancellationToken = default) =>
+            handler.Object.HandleAsync(requests, cancellationToken);
     }
 
     private readonly record struct MeasurementRecord(

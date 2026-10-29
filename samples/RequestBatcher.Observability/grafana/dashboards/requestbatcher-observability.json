@@ -226,7 +226,7 @@
             "uid": "requestbatcher-prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (service_name, requestbatcher_name) (rate(requestbatcher_requests_submitted_total{service_name=\"cart\"}[$__rate_interval]))",
+          "expr": "sum by (service_name, requestbatcher_name) (rate(requestbatcher_submission_size_sum{service_name=\"cart\"}[$__rate_interval]))",
           "legendFormat": "{{service_name}} / {{requestbatcher_name}}",
           "range": true,
           "refId": "A"
@@ -322,13 +322,13 @@
             "uid": "requestbatcher-prometheus"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum by (le, service_name, requestbatcher_name) (rate(requestbatcher_batch_duration_milliseconds_bucket{service_name=\"cart\"}[$__rate_interval])))",
+          "expr": "histogram_quantile(0.95, sum by (le, service_name, requestbatcher_name) (rate(requestbatcher_handle_duration_milliseconds_bucket{service_name=\"cart\"}[$__rate_interval])))",
           "legendFormat": "{{service_name}} / {{requestbatcher_name}} p95",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "RequestBatcher batch duration p95",
+      "title": "RequestBatcher Handler duration p95",
       "type": "timeseries"
     },
     {

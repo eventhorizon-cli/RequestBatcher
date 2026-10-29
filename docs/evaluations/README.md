@@ -10,6 +10,7 @@ Find reports by question; versions, workloads, and limitations are documented in
 
 ## Scheduling and External I/O
 
+- [paced-batch-fanout](paced-batch-fanout/README.md): compares direct 20-item bulk queries with two Handler slots and batch size 120 under uniform explicit-submission arrivals, using simulated 20 ms I/O on .NET 10.
 - [queue-pull-capacity](queue-pull-capacity/README.md): isolates prefilled queue draining and compares the complete pipeline with direct full batches for synchronous and 20 ms asynchronous handlers.
 - [arrival-scheduling](arrival-scheduling/README.md): compares direct handlers with controlled `Task.Run` for async I/O, CPU, and synchronous blocking workloads (local PostgreSQL/Redis included).
 - [external-io-scheduling](external-io-scheduling/README.md): evaluates `Task.Run`, handler concurrency, and connection count for real HTTP calls (local HTTP).
@@ -47,3 +48,8 @@ allocation probe and explains why explicit submissions still need multiple rever
 
 The [metrics I/O evaluation](metrics-io-overhead/README.md) isolates SDK aggregation and periodic collection overhead
 with tracing disabled, using the same 1,024-request waves and simulated 20 ms calls.
+
+The [Execute and submission metrics evaluation](execute-metrics/README.md) compares the four-histogram implementation
+against its previous metric contract on .NET 10, including public-call completion and submission-size recording.
+The [shared call diagnostics validation](execute-metrics/call-diagnostics.md) covers the unified ordinary/delegate
+boundary, both APIs through real OTLP export, and bounded .NET 10 metrics/tracing workloads.

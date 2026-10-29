@@ -12,12 +12,12 @@ namespace RequestBatcher.Observability.IntegrationTests;
 
 public sealed class ObservabilityTests(ITestOutputHelper output, ObservabilityFixture fixture) : IClassFixture<ObservabilityFixture>
 {
-    private const string ExecuteName = "RequestBatcher.Execute pricing-queries";
-    private const string BatchName = "RequestBatcher.Handle pricing-queries";
+    private const string DelegateBatcherName = "pricing-queries";
+    private const string OrdinaryBatcherName = "pricing-queries-ordinary";
     private static readonly TimeSpan _telemetryTimeout = TimeSpan.FromSeconds(120);
 
     [LiveFact]
-    public async Task Quote_ConcurrentNativeSubmissions_ExportsLinkedTracesAndMetrics()
+    public async Task Quote_ConcurrentOrdinaryAndDelegateSubmissions_ExportsLinkedTracesAndMetrics()
     {
         using var cart = new HttpClient
         {
@@ -35,8 +35,21 @@ public sealed class ObservabilityTests(ITestOutputHelper output, ObservabilityFi
         using var health = await cart.GetAsync("/health");
         health.EnsureSuccessStatusCode();
         var tempo = new TempoClient(grafana);
-        var baseline = await ReadMetricsAsync(grafana);
+        await RunScenarioAsync(cart, grafana, tempo, "/cart/quote", DelegateBatcherName, "delegate");
+        await RunScenarioAsync(cart, grafana, tempo, "/cart/quote/ordinary", OrdinaryBatcherName, "ordinary");
+    }
+
+    private async Task RunScenarioAsync(
+        HttpClient cart,
+        HttpClient grafana,
+        TempoClient tempo,
+        string endpoint,
+        string batcherName,
+        string apiStyle)
+    {
+        var baseline = await ReadMetricsAsync(grafana, batcherName);
         var submittedItems = 0;
+        var submittedCalls = 0;
         var completedCallerIds = new HashSet<string>();
 
         // Fresh IDs in a second burst catch accidental reuse of an earlier caller's context.
@@ -44,11 +57,12 @@ public sealed class ObservabilityTests(ITestOutputHelper output, ObservabilityFi
         {
             var probes = Enumerable.Range(0, 32).Select(index => CreateProbe(index, round)).ToArray();
             submittedItems += probes.Sum(probe => probe.Items.Length);
+            submittedCalls += probes.Length;
             var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             var submissions = probes.Select(async probe =>
             {
                 await gate.Task;
-                await SubmitAsync(cart, probe);
+                await SubmitAsync(cart, endpoint, probe);
             }).ToArray();
             gate.SetResult();
             await Task.WhenAll(submissions);
@@ -57,7 +71,8 @@ public sealed class ObservabilityTests(ITestOutputHelper output, ObservabilityFi
             {
                 var callers = await Task.WhenAll(probes.Select(async probe =>
                     (Probe: probe, Spans: await tempo.GetTraceAsync(probe.TraceId, cancellationToken))));
-                var executions = callers.Select(caller => AssertCaller(caller.Probe, caller.Spans)).ToArray();
+                var executions = callers.Select(caller =>
+                    AssertCaller(caller.Probe, caller.Spans, endpoint, batcherName)).ToArray();
                 // Use exported timestamps to avoid host/container clock differences. Tempo excludes very recent
                 // data from search, so leave enough lookback for its end-time clamp to preserve a valid range.
                 var start = DateTimeOffset.FromUnixTimeMilliseconds(executions.Min(span => span.StartTimeUnixNano) / 1_000_000)
@@ -65,10 +80,10 @@ public sealed class ObservabilityTests(ITestOutputHelper output, ObservabilityFi
                 var end = DateTimeOffset.FromUnixTimeMilliseconds(executions.Max(span => span.EndTimeUnixNano) / 1_000_000)
                     .AddSeconds(5);
                 var batchIds = await tempo.FindBatchTracesAsync(
-                    probes.Select(probe => probe.TraceId).ToArray(), start, end, cancellationToken);
+                    probes.Select(probe => probe.TraceId).ToArray(), batcherName, start, end, cancellationToken);
                 Assert.NotEmpty(batchIds);
                 var batches = await Task.WhenAll(batchIds.Select(id => tempo.GetTraceAsync(id, cancellationToken)));
-                var roots = batches.Select(AssertBatch).ToArray();
+                var roots = batches.Select(spans => AssertBatch(spans, batcherName)).ToArray();
                 var batchContexts = roots
                     .Select(root => (root.TraceId, root.SpanId))
                     .ToHashSet();
@@ -105,7 +120,7 @@ public sealed class ObservabilityTests(ITestOutputHelper output, ObservabilityFi
                         link => Assert.Contains(link, callerContexts));
                 }
 
-                output.WriteLine($"Round {round + 1}: {probes.Length} Cart traces, {roots.Length} linked batches; " +
+                output.WriteLine($"{apiStyle} round {round + 1}: {probes.Length} Cart traces, {roots.Length} linked batches; " +
                     $"batch sizes {string.Join(',', roots.Select(root => root.Attributes["requestbatcher.batch.size"]))}.");
                 output.WriteLine($"Caller: {probes[0].TraceId}; batch: {roots[0].TraceId}");
             });
@@ -114,22 +129,35 @@ public sealed class ObservabilityTests(ITestOutputHelper output, ObservabilityFi
 
         await AssertEventuallyAsync(async cancellationToken =>
         {
-            var current = await ReadMetricsAsync(grafana, cancellationToken);
-            foreach (var metric in new[] { "requestbatcher_requests_submitted_total", "requestbatcher_requests_processed_total",
-                         "requestbatcher_batch_size_sum" })
+            var current = await ReadMetricsAsync(grafana, batcherName, cancellationToken);
+            foreach (var metric in new[] { "requestbatcher_batch_size_sum", "requestbatcher_submission_size_sum" })
             {
-                Assert.True(current.GetValueOrDefault(metric) - baseline.GetValueOrDefault(metric) >= submittedItems,
-                    $"{metric} has not increased by the {submittedItems} submitted product items.");
+                var actual = current.GetValueOrDefault(metric) - baseline.GetValueOrDefault(metric);
+                Assert.True(actual == submittedItems,
+                    $"{metric} delta was {actual}; expected {submittedItems} submitted product items.");
             }
 
-            foreach (var metric in new[] { "requestbatcher_batches_processed_total", "requestbatcher_batch_size_count",
-                         "requestbatcher_batch_duration_milliseconds_count", "requestbatcher_batch_duration_milliseconds_sum" })
+            foreach (var metric in new[]
+                     {
+                         "requestbatcher_submission_size_count",
+                         "requestbatcher_execute_duration_milliseconds_count"
+                     })
+            {
+                var actual = current.GetValueOrDefault(metric) - baseline.GetValueOrDefault(metric);
+                Assert.True(actual == submittedCalls,
+                    $"{metric} delta was {actual}; expected exactly {submittedCalls} calls for {batcherName}.");
+            }
+
+            foreach (var metric in new[] { "requestbatcher_batch_size_count",
+                         "requestbatcher_handle_duration_milliseconds_count", "requestbatcher_handle_duration_milliseconds_sum",
+                         "requestbatcher_execute_duration_milliseconds_sum" })
             {
                 Assert.True(current.GetValueOrDefault(metric) > baseline.GetValueOrDefault(metric),
                     $"{metric} has not advanced after the requests.");
             }
         });
-        output.WriteLine($"All five RequestBatcher instruments exported; {submittedItems} probe product items completed.");
+        output.WriteLine($"{apiStyle}: all four histograms exported; {submittedCalls} calls and " +
+            $"{submittedItems} product items completed for {batcherName}.");
     }
 
     private static Probe CreateProbe(int index, int round)
@@ -142,9 +170,9 @@ public sealed class ObservabilityTests(ITestOutputHelper output, ObservabilityFi
         return new Probe(ActivityTraceId.CreateRandom().ToHexString(), ActivitySpanId.CreateRandom().ToHexString(), items);
     }
 
-    private static async Task SubmitAsync(HttpClient cart, Probe probe)
+    private static async Task SubmitAsync(HttpClient cart, string endpoint, Probe probe)
     {
-        using var request = new HttpRequestMessage(HttpMethod.Post, "/cart/quote")
+        using var request = new HttpRequestMessage(HttpMethod.Post, endpoint)
         {
             Content = JsonContent.Create(probe.Items)
         };
@@ -171,31 +199,37 @@ public sealed class ObservabilityTests(ITestOutputHelper output, ObservabilityFi
         Assert.Equal(total, document.RootElement.GetProperty("total").GetDecimal());
     }
 
-    private static TempoSpan AssertCaller(Probe probe, IReadOnlyList<TempoSpan> spans)
+    private static TempoSpan AssertCaller(
+        Probe probe,
+        IReadOnlyList<TempoSpan> spans,
+        string endpoint,
+        string batcherName)
     {
         Assert.True(spans.Count >= 2, $"Caller trace {probe.TraceId} has not been completely exported.");
-        var http = Assert.Single(spans, span => span.Name == "POST /cart/quote");
-        var execute = Assert.Single(spans, span => span.Name == ExecuteName);
+        var http = Assert.Single(spans, span => span.Name == $"POST {endpoint}");
+        var execute = Assert.Single(spans, span =>
+            span.Name.StartsWith("RequestBatcher.Execute ", StringComparison.Ordinal));
+        Assert.Equal($"RequestBatcher.Execute {batcherName}", execute.Name);
         Assert.Equal(probe.ParentSpanId, http.ParentSpanId);
         Assert.Equal(http.SpanId, execute.ParentSpanId);
         Assert.Equal(probe.TraceId, execute.TraceId);
         Assert.Equal("cart", execute.ServiceName);
-        Assert.Equal("pricing-queries", execute.Attributes["requestbatcher.name"]);
+        Assert.Equal(batcherName, execute.Attributes["requestbatcher.name"]);
         Assert.Equal(nameof(Int32), execute.Attributes["requestbatcher.request.type"]);
         Assert.Equal("200", http.Attributes["http.response.status_code"]);
         Assert.InRange(execute.StartTimeUnixNano, http.StartTimeUnixNano, http.EndTimeUnixNano);
         Assert.InRange(execute.EndTimeUnixNano, execute.StartTimeUnixNano + 1, http.EndTimeUnixNano);
-        Assert.DoesNotContain(spans, span => span.Name == BatchName || span.IsError);
+        Assert.DoesNotContain(spans, span => span.Name == $"RequestBatcher.Handle {batcherName}" || span.IsError);
         return execute;
     }
 
-    private static TempoSpan AssertBatch(IReadOnlyList<TempoSpan> spans)
+    private static TempoSpan AssertBatch(IReadOnlyList<TempoSpan> spans, string batcherName)
     {
-        var root = Assert.Single(spans, span => span.Name == BatchName);
+        var root = Assert.Single(spans, span => span.Name == $"RequestBatcher.Handle {batcherName}");
         Assert.Equal("cart", root.ServiceName);
         Assert.Equal("SPAN_KIND_CONSUMER", root.Kind);
         Assert.Empty(root.ParentSpanId);
-        Assert.Equal("pricing-queries", root.Attributes["requestbatcher.name"]);
+        Assert.Equal(batcherName, root.Attributes["requestbatcher.name"]);
         Assert.Equal(nameof(Int32), root.Attributes["requestbatcher.request.type"]);
         var size = int.Parse(root.Attributes["requestbatcher.batch.size"], CultureInfo.InvariantCulture);
         Assert.InRange(size, 1, 20);
@@ -223,11 +257,14 @@ public sealed class ObservabilityTests(ITestOutputHelper output, ObservabilityFi
     }
 
     private static async Task<Dictionary<string, double>> ReadMetricsAsync(
-        HttpClient grafana, CancellationToken cancellationToken = default)
+        HttpClient grafana,
+        string batcherName,
+        CancellationToken cancellationToken = default)
     {
-        const string query = "sum by (__name__) ({__name__=~\"requestbatcher_(requests_submitted_total|requests_processed_total|" +
-            "batches_processed_total|batch_size_(sum|count)|batch_duration_milliseconds_(sum|count))\"," +
-            "requestbatcher_name=\"pricing-queries\",requestbatcher_request_type=\"Int32\",service_name=\"cart\"})";
+        var query = "sum by (__name__) ({__name__=~\"requestbatcher_(batch_size_(sum|count)|" +
+            "submission_size_(sum|count)|handle_duration_milliseconds_(sum|count)|" +
+            "execute_duration_milliseconds_(sum|count))\"," +
+            $"requestbatcher_name=\"{batcherName}\",requestbatcher_request_type=\"Int32\",service_name=\"cart\"}})";
         using var response = await grafana.GetAsync("/api/datasources/proxy/uid/requestbatcher-prometheus/api/v1/query?query=" +
             Uri.EscapeDataString(query), cancellationToken);
         response.EnsureSuccessStatusCode();

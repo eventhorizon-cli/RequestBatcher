@@ -1262,7 +1262,7 @@ Handler 内数据库和 HTTP 子 Span 仍使用应用的 Sampler。`ParentBasedS
 
 ### Metrics
 
-如果只需要 Metrics，可以选择不安装集成包，直接监听 Meter：
+只采集 Metrics 时，可不安装集成包，直接注册 Meter：
 
 ```csharp
 builder.Services.AddOpenTelemetry()
@@ -1270,43 +1270,16 @@ builder.Services.AddOpenTelemetry()
 ```
 
 也可以安装 [`RequestBatcher.OpenTelemetry`](https://www.nuget.org/packages/RequestBatcher.OpenTelemetry)，
-使用前面示例中的 Metrics `AddRequestBatcherInstrumentation()` 扩展。
+使用前面示例中的 `AddRequestBatcherInstrumentation()` 扩展；它还会根据同一服务集合中最大的 `BatchSize` 应用大小 Histogram 的 view。
 
 | 指标名称 | 类型 | 单位 | 含义 |
 | --- | --- | --- | --- |
-| `requestbatcher.requests.submitted` | `Counter<long>` | `{request}`（请求） | 已接收的请求数。 |
-| `requestbatcher.requests.processed` | `Counter<long>` | `{request}`（请求） | Handler 已处理的请求数，包含失败的处理。 |
-| `requestbatcher.batches.processed` | `Counter<long>` | `{batch}`（批次） | 已处理的 Handler 批次数。 |
-| `requestbatcher.batch.size` | `Histogram<long>` | `{request}`（请求） | 每个 Handler 批次的请求数。 |
-| `requestbatcher.batch.duration` | `Histogram<double>` | `ms`（毫秒） | Handler 批次耗时，包含 Handler 作用域释放。 |
+| `requestbatcher.submission.size` | `Histogram<long>` | `{request}` | 到达 RequestBatcher 接纳边界的每次提交所含请求数。 |
+| `requestbatcher.batch.size` | `Histogram<long>` | `{request}` | 每个已完成 Handler 批次的请求数，包含失败尝试；分发前取消的请求不计。 |
+| `requestbatcher.handle.duration` | `Histogram<double>` | `ms` | Handler 批次耗时，包含 Handler 作用域释放。 |
+| `requestbatcher.execute.duration` | `Histogram<double>` | `ms` | 每次公开 `ExecuteAsync` 调用的端到端耗时，包含容量等待、排队、所有 Handler 批次及响应组装。 |
 
-Counter 累加计数；Histogram 记录每个批次的测量值，用于统计批次大小和耗时的分布。
-
-维度只包含请求类型短名（`requestbatcher.request.type`）和可选的 Batcher 名称（`requestbatcher.name`）。
-同名类型会共享请求类型维度，需要区分时可以配置不同的 Batcher 名称。不记录请求内容、租户值或 Partition Key。
-
-指标名称已包含 `requestbatcher.`；示例的 Prometheus Exporter 会生成
-`requestbatcher_batches_processed_total`。导出端不要重复添加 `requestbatcher` 命名空间/前缀，
-以免出现 `requestbatcher_requestbatcher_*`。
-
-自行使用 `System.Diagnostics.Metrics.MeterListener` 采集时，需要显式订阅想采集的指标：
-
-```csharp
-listener.InstrumentPublished = (instrument, meterListener) =>
-{
-    if (instrument.Meter.Name == "RequestBatcher")
-    {
-        meterListener.EnableMeasurementEvents(instrument);
-    }
-};
-```
-
-- 发现指标或注册测量值回调都不等于订阅。每个监听者对想采集的每个指标调用一次 `EnableMeasurementEvents`；
-  如需只采集部分指标，可以按 `instrument.Name` 筛选。
-- 为计数和批次大小注册 `long` 回调，为耗时注册 `double` 回调。在提交请求前调用 `Start()`，
-  并让监听者存活到 Batcher 关闭完成后。订阅前的测量值不会补发。
-- 回调同步执行，也可能被多个线程并发调用，应保持轻量、线程安全，避免阻塞 I/O 和异常向外传播。
-  回调返回后仍要使用的标签需要复制。聚合和导出由自定义 Listener 自行实现。
+这些 Histogram 可用于查看数量和耗时分布，并计算平均值与处理速率。更多用法见 [Metrics 指南](docs/metrics.zh-CN.md)。
 
 ### Logs
 

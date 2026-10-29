@@ -49,18 +49,20 @@ Without `REQUESTBATCHER_RUN_INTEGRATION_TESTS=1`, the live test is reported as s
 the generated Cart and Grafana URLs; no fixed-port environment variables are required. For a manually inspected
 sample, use the separate Compose instructions in the sample README and stop that stack when finished.
 
-The test sends two bursts of 32 concurrent Cart requests with unique W3C trace contexts. Each request contains 2–10
-product items, including a duplicate. It verifies:
+The test sends two bursts of 32 concurrent Cart requests with unique W3C trace contexts to each of the ordinary and
+delegate endpoints. Each request contains 2–10 product items, including a duplicate. It verifies:
 
 - Response order, quantities, seeded prices, duplicate fan-out, and totals.
-- Exactly one `RequestBatcher.Execute pricing-queries` span per Cart request, under its HTTP server span.
-- Independent `RequestBatcher.Handle pricing-queries` roots with unique links from each batch to its caller
+- Exactly one `RequestBatcher.Execute` span per Cart request, with the matching pipeline name and HTTP server parent.
+- Independent `RequestBatcher.Handle` roots for each pipeline, with unique links from each batch to its caller
   `Execute` spans, matching links from each `Execute` span to the `Handle` spans that handled its requests,
   coverage of every test caller, and a batch combining multiple callers.
 - Batch sizes of 1–20 **product items**. A Cart submission can span multiple batches; a batch need not be full.
 - Cart HTTP client → Pricing HTTP server → Npgsql query parent relationships, successful HTTP status, and no Pricing batcher.
 - New contexts in a subsequent burst, guarding against an earlier caller contaminating later traces.
-- All five RequestBatcher instruments exported with the short request type `Int32`, with increasing counters and histogram counts/sums.
+- All four RequestBatcher histograms exported with the short request type `Int32` for each pipeline. Per-pipeline
+  submission-size and batch-size sums match the inputs, and submission-size and Execute-duration histogram counts match
+  submitted calls, so results from one API cannot mask missing or duplicate measurements from the other.
 
 The sample uses `service.name=cart` and `service.name=pricing` for new telemetry. The dashboard's `Cart calls · Execute`
 and `Handler execution · Handle` tables expose both directions explicitly: a `Handle` row links to its caller
@@ -69,8 +71,8 @@ backend retention removes it.
 
 Trace and metric assertions poll for up to 120 seconds per phase because OTLP export, Tempo indexing, and Prometheus
 scraping are asynchronous. Failures include missing trace/link/metric evidence. Successful output includes caller and
-batch trace IDs for inspection in Grafana. Only this run's trace IDs are searched; unrelated sample traffic is allowed.
-Metrics are cumulative for the named sample batcher, so additional generator traffic may also contribute to their growth.
+batch trace IDs for inspection in Grafana. Only this run's trace IDs are searched.
+Metrics are cumulative for each named sample batcher; the fixture does not start the traffic generator.
 The test uses the sample's seeded product IDs 1–100 and prices (`id × 1.25`); it does not modify database contents.
 
 | Environment variable | Default | Purpose |

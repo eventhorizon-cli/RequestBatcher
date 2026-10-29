@@ -73,18 +73,15 @@ builder.Services.AddOpenTelemetry()
 ```
 
 You can also install [`RequestBatcher.OpenTelemetry`](https://www.nuget.org/packages/RequestBatcher.OpenTelemetry) and use
-`.WithMetrics(metrics => metrics.AddRequestBatcherInstrumentation())`. Both options register the same Meter and are
-independent of tracing; the metrics extension only adds the meter.
+`.WithMetrics(metrics => metrics.AddRequestBatcherInstrumentation())`. Both register the same Meter; the extension also
+applies size-histogram views from the largest `BatchSize` registered in the same service collection when `MeterProvider`
+is built. Complete batcher registrations first. Direct `AddMeter("RequestBatcher")` registers the Meter without these
+views and retains SDK defaults.
 
-Applications using `System.Diagnostics.Metrics.MeterListener` instead of the SDK do not need this package. Filter
-`InstrumentPublished` by `instrument.Meter.Name == "RequestBatcher"` and call `EnableMeasurementEvents(instrument)` once
-per desired instrument per listener. Discovery notifications and measurement callback registration alone do not enable
-measurements. Register `long` callbacks for counts and batch size, and a `double` callback for batch duration. Start the
-listener before submitting work and keep it alive until the batcher has shut down; subscriptions do not replay earlier
-measurements. Recording invokes callbacks synchronously and potentially concurrently, so keep callbacks lightweight,
-thread-safe, and prevent exceptions from escaping. Copy any tags needed after the callback returns. Custom listeners
-provide their own aggregation and export. See the core package's
-[metrics guidance](https://www.nuget.org/packages/RequestBatcher#readme-body-tab) for a listener example.
+The Meter exposes four histograms: `requestbatcher.submission.size` and `requestbatcher.batch.size` are `Histogram<long>`
+in `{request}`; `requestbatcher.handle.duration` and `requestbatcher.execute.duration` are `Histogram<double>` in `ms`.
+For recording semantics, tags, PromQL, bucket rules, and MeterListener usage, see the
+[RequestBatcher Metrics guide](https://github.com/eventhorizon-cli/RequestBatcher/blob/main/docs/metrics.md).
 
 ## Migration
 
