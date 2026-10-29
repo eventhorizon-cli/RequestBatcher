@@ -48,3 +48,6 @@ allocation probe and explains why explicit submissions still need multiple rever
 
 The [metrics I/O evaluation](metrics-io-overhead/README.md) isolates SDK aggregation and periodic collection overhead
 with tracing disabled, using the same 1,024-request waves and simulated 20 ms calls.
+
+The [Execute and submission metrics evaluation](execute-metrics/README.md) compares the four-histogram implementation
+against its previous metric contract on .NET 10, including public-call completion and submission-size recording.

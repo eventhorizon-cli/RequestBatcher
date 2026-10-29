@@ -37,6 +37,7 @@ public sealed class ObservabilityTests(ITestOutputHelper output, ObservabilityFi
         var tempo = new TempoClient(grafana);
         var baseline = await ReadMetricsAsync(grafana);
         var submittedItems = 0;
+        var submittedCalls = 0;
         var completedCallerIds = new HashSet<string>();
 
         // Fresh IDs in a second burst catch accidental reuse of an earlier caller's context.
@@ -44,6 +45,7 @@ public sealed class ObservabilityTests(ITestOutputHelper output, ObservabilityFi
         {
             var probes = Enumerable.Range(0, 32).Select(index => CreateProbe(index, round)).ToArray();
             submittedItems += probes.Sum(probe => probe.Items.Length);
+            submittedCalls += probes.Length;
             var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             var submissions = probes.Select(async probe =>
             {
@@ -115,21 +117,27 @@ public sealed class ObservabilityTests(ITestOutputHelper output, ObservabilityFi
         await AssertEventuallyAsync(async cancellationToken =>
         {
             var current = await ReadMetricsAsync(grafana, cancellationToken);
-            foreach (var metric in new[] { "requestbatcher_requests_submitted_total", "requestbatcher_requests_processed_total",
-                         "requestbatcher_batch_size_sum" })
+            foreach (var metric in new[] { "requestbatcher_batch_size_sum", "requestbatcher_submission_size_sum" })
             {
                 Assert.True(current.GetValueOrDefault(metric) - baseline.GetValueOrDefault(metric) >= submittedItems,
                     $"{metric} has not increased by the {submittedItems} submitted product items.");
             }
 
-            foreach (var metric in new[] { "requestbatcher_batches_processed_total", "requestbatcher_batch_size_count",
-                         "requestbatcher_batch_duration_milliseconds_count", "requestbatcher_batch_duration_milliseconds_sum" })
+            foreach (var metric in new[] { "requestbatcher_submission_size_count", "requestbatcher_execute_duration_milliseconds_count" })
+            {
+                Assert.True(current.GetValueOrDefault(metric) - baseline.GetValueOrDefault(metric) >= submittedCalls,
+                    $"{metric} has not increased by the {submittedCalls} submitted calls.");
+            }
+
+            foreach (var metric in new[] { "requestbatcher_batch_size_count",
+                         "requestbatcher_handle_duration_milliseconds_count", "requestbatcher_handle_duration_milliseconds_sum",
+                         "requestbatcher_execute_duration_milliseconds_sum" })
             {
                 Assert.True(current.GetValueOrDefault(metric) > baseline.GetValueOrDefault(metric),
                     $"{metric} has not advanced after the requests.");
             }
         });
-        output.WriteLine($"All five RequestBatcher instruments exported; {submittedItems} probe product items completed.");
+        output.WriteLine($"All four RequestBatcher histograms exported; {submittedCalls} calls and {submittedItems} probe product items completed.");
     }
 
     private static Probe CreateProbe(int index, int round)
@@ -225,8 +233,8 @@ public sealed class ObservabilityTests(ITestOutputHelper output, ObservabilityFi
     private static async Task<Dictionary<string, double>> ReadMetricsAsync(
         HttpClient grafana, CancellationToken cancellationToken = default)
     {
-        const string query = "sum by (__name__) ({__name__=~\"requestbatcher_(requests_submitted_total|requests_processed_total|" +
-            "batches_processed_total|batch_size_(sum|count)|batch_duration_milliseconds_(sum|count))\"," +
+        const string query = "sum by (__name__) ({__name__=~\"requestbatcher_(batch_size_(sum|count)|" +
+            "submission_size_(sum|count)|handle_duration_milliseconds_(sum|count)|execute_duration_milliseconds_(sum|count))\"," +
             "requestbatcher_name=\"pricing-queries\",requestbatcher_request_type=\"Int32\",service_name=\"cart\"})";
         using var response = await grafana.GetAsync("/api/datasources/proxy/uid/requestbatcher-prometheus/api/v1/query?query=" +
             Uri.EscapeDataString(query), cancellationToken);

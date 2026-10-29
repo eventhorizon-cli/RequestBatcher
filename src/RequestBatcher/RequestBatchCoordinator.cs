@@ -103,6 +103,14 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
 
     /// <inheritdoc />
     public Task ExecuteAsync(TRequest request, CancellationToken cancellationToken = default) =>
+        RequestBatcherMetrics.ExecuteEnabled
+            ? RequestBatcherMetrics.MeasureExecution(
+                _telemetryRequestTypeName, BatcherName, RequestBatcherMetricTags.SingleSubmission,
+                (Batcher: this, Request: request, Token: cancellationToken),
+                static state => state.Batcher.ExecuteWithTracing(state.Request, state.Token))
+            : ExecuteWithTracing(request, cancellationToken);
+
+    private Task ExecuteWithTracing(TRequest request, CancellationToken cancellationToken) =>
         RequestBatcherTracing.Source.HasListeners()
             ? RequestBatcherTracing.TraceCall(
                 _traceMetadata,
@@ -136,6 +144,16 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(requests);
+        return RequestBatcherMetrics.ExecuteEnabled
+            ? RequestBatcherMetrics.MeasureExecution(
+                _telemetryRequestTypeName, BatcherName, RequestBatcherMetricTags.MultiSubmission,
+                (Batcher: this, Requests: requests, Token: cancellationToken),
+                static state => state.Batcher.ExecuteWithTracing(state.Requests, state.Token))
+            : ExecuteWithTracing(requests, cancellationToken);
+    }
+
+    private Task ExecuteWithTracing(IEnumerable<TRequest> requests, CancellationToken cancellationToken)
+    {
         return RequestBatcherTracing.Source.HasListeners()
             ? RequestBatcherTracing.TraceCall(
                 _traceMetadata,
@@ -184,6 +202,8 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
 
         if (requestArray.Length == 0)
         {
+            RequestBatcherMetrics.RecordSubmissionSize(
+                _telemetryRequestTypeName, BatcherName, RequestBatcherMetricTags.MultiSubmission, 0);
             return Task.CompletedTask;
         }
 
@@ -233,7 +253,8 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
             _pendingRequests.TryAdd(pendingRequest, 0);
         }
 
-        RequestBatcherMetrics.RecordSubmitted(_telemetryRequestTypeName, BatcherName, 1);
+        RequestBatcherMetrics.RecordSubmissionSize(
+            _telemetryRequestTypeName, BatcherName, RequestBatcherMetricTags.SingleSubmission, 1);
         return _producer.ProduceAsync(pendingRequest, cancellationToken);
     }
 
@@ -264,7 +285,8 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
             }
         }
 
-        RequestBatcherMetrics.RecordSubmitted(_telemetryRequestTypeName, BatcherName, requests.Length);
+        RequestBatcherMetrics.RecordSubmissionSize(
+            _telemetryRequestTypeName, BatcherName, RequestBatcherMetricTags.MultiSubmission, requests.Length);
         return _producer.ProduceAsync(pendingRequests, cancellationToken);
     }
 

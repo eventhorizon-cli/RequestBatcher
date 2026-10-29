@@ -7,13 +7,22 @@ internal sealed class ResponseRequestBatcher<TRequest, TResponse>(
     RequestBatchCoordinator<RequestBatchEntry<TRequest, TResponse>> batcher)
     : IRequestBatcher<TRequest, TResponse>
 {
+    private static readonly string _telemetryRequestTypeName = RequestBatcherRequestType.GetName(typeof(TRequest));
     private readonly RequestBatcherTraceMetadata _traceMetadata = new(
-        RequestBatcherRequestType.GetName(typeof(TRequest)),
+        _telemetryRequestTypeName,
         batcher.BatcherName);
 
     internal string? BatcherName => batcher.BatcherName;
 
     public Task<TResponse> ExecuteAsync(TRequest request, CancellationToken cancellationToken = default) =>
+        RequestBatcherMetrics.ExecuteEnabled
+            ? RequestBatcherMetrics.MeasureExecution(
+                _telemetryRequestTypeName, BatcherName, RequestBatcherMetricTags.SingleSubmission,
+                (Batcher: this, Request: request, Token: cancellationToken),
+                static state => state.Batcher.ExecuteWithTracing(state.Request, state.Token))
+            : ExecuteWithTracing(request, cancellationToken);
+
+    private Task<TResponse> ExecuteWithTracing(TRequest request, CancellationToken cancellationToken) =>
         RequestBatcherTracing.Source.HasListeners()
             ? RequestBatcherTracing.TraceCall(
                 _traceMetadata,
@@ -42,7 +51,16 @@ internal sealed class ResponseRequestBatcher<TRequest, TResponse>(
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(requests);
+        return RequestBatcherMetrics.ExecuteEnabled
+            ? RequestBatcherMetrics.MeasureExecution(
+                _telemetryRequestTypeName, BatcherName, RequestBatcherMetricTags.MultiSubmission,
+                (Batcher: this, Requests: requests, Token: cancellationToken),
+                static state => state.Batcher.ExecuteWithTracing(state.Requests, state.Token))
+            : ExecuteWithTracing(requests, cancellationToken);
+    }
 
+    private Task<IReadOnlyList<TResponse>> ExecuteWithTracing(IEnumerable<TRequest> requests, CancellationToken cancellationToken)
+    {
         return RequestBatcherTracing.Source.HasListeners()
             ? RequestBatcherTracing.TraceCall(
                 _traceMetadata,

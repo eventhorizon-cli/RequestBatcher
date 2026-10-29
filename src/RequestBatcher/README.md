@@ -332,8 +332,13 @@ package, or a `MeterListener` that calls `EnableMeasurementEvents` for the desir
 application logging pipeline with category prefix `RequestBatcher.RequestBatchCoordinator`; set the `RequestBatcher`
 log-level prefix to configure the whole library.
 
+The Meter exposes four histograms: `requestbatcher.submission.size` and `requestbatcher.batch.size` are `Histogram<long>`
+in `{request}`; `requestbatcher.handle.duration` and `requestbatcher.execute.duration` are `Histogram<double>` in `ms`.
+Histogram `sum / count` gives the mean. For metric semantics, tags, queries, and bucket rules, see the
+[RequestBatcher Metrics guide](https://github.com/eventhorizon-cli/RequestBatcher/blob/main/docs/metrics.md).
+
 See the [full observability documentation](https://github.com/eventhorizon-cli/RequestBatcher#observability) for span names,
-metrics, links, sampling details, and exporters.
+links, sampling details, and exporters.
 
 ## Samples and Upgrade Notes
 

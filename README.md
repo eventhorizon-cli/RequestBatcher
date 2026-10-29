@@ -1370,7 +1370,7 @@ contains the detailed sampling flow, context/link implementation, and performanc
 
 ### Metrics
 
-For metrics alone, you can choose direct Meter registration without installing the integration package:
+For metrics alone, register the Meter directly without the integration package:
 
 ```csharp
 builder.Services.AddOpenTelemetry()
@@ -1378,45 +1378,18 @@ builder.Services.AddOpenTelemetry()
 ```
 
 Alternatively, install [`RequestBatcher.OpenTelemetry`](https://www.nuget.org/packages/RequestBatcher.OpenTelemetry) and
-use the metrics `AddRequestBatcherInstrumentation()` extension shown above.
+use the `AddRequestBatcherInstrumentation()` extension shown above. It also applies size-histogram views from the largest
+`BatchSize` registered in the same service collection.
 
 | Instrument | Type | Unit | Meaning |
 | --- | --- | --- | --- |
-| `requestbatcher.requests.submitted` | `Counter<long>` | `{request}` | Accepted requests. |
-| `requestbatcher.requests.processed` | `Counter<long>` | `{request}` | Requests processed by a Handler, including failed attempts. |
-| `requestbatcher.batches.processed` | `Counter<long>` | `{batch}` | Handler batches processed. |
-| `requestbatcher.batch.size` | `Histogram<long>` | `{request}` | Requests per Handler batch. |
-| `requestbatcher.batch.duration` | `Histogram<double>` | `ms` | Handler batch duration in milliseconds, including handler scope disposal. |
+| `requestbatcher.submission.size` | `Histogram<long>` | `{request}` | Request items in each submission reaching coordinator admission. |
+| `requestbatcher.batch.size` | `Histogram<long>` | `{request}` | Requests per completed Handler batch, including failed attempts; items canceled before dispatch are excluded. |
+| `requestbatcher.handle.duration` | `Histogram<double>` | `ms` | Handler batch duration in milliseconds, including handler scope disposal. |
+| `requestbatcher.execute.duration` | `Histogram<double>` | `ms` | End-to-end duration of one public `ExecuteAsync` call, including capacity waiting, queueing, all Handler batches, and response assembly. |
 
-Counters accumulate counts. Histograms record distributions; the `ms` duration unit means milliseconds.
-
-Dimensions contain only the short request type (`requestbatcher.request.type`) and optional batcher name
-(`requestbatcher.name`). Types with the same short name share a dimension; use batcher names to distinguish pipelines.
-Request payloads, tenant values, and partition keys are not recorded.
-
-Instrument names already contain `requestbatcher.`. The sample's Prometheus exporter produces names such as
-`requestbatcher_batches_processed_total`; leave an additional `requestbatcher` exporter namespace/prefix unset to
-avoid `requestbatcher_requestbatcher_*`.
-
-With a custom `System.Diagnostics.Metrics.MeterListener`, explicitly subscribe to each instrument you want:
-
-```csharp
-listener.InstrumentPublished = (instrument, meterListener) =>
-{
-    if (instrument.Meter.Name == "RequestBatcher")
-    {
-        meterListener.EnableMeasurementEvents(instrument);
-    }
-};
-```
-
-- Discovery and measurement callbacks alone do not subscribe. Call `EnableMeasurementEvents` once per desired
-  instrument per listener; filter `instrument.Name` if needed.
-- Register `long` callbacks for counts and batch size and a `double` callback for duration. Call `Start()` before
-  submitting work and keep the listener alive until the batcher has shut down. Earlier measurements are not replayed.
-- Callbacks run synchronously and may run concurrently. Keep them lightweight and thread-safe, avoid blocking I/O,
-  and prevent exceptions from escaping. Copy any tags needed after the callback returns. Custom listeners provide
-  their own aggregation and export.
+These histograms describe size and duration distributions and support averages and processing rates.
+See the [metrics guide](docs/metrics.md) for details and queries.
 
 ### Logs
 

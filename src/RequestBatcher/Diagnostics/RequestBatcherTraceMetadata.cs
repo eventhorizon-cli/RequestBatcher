@@ -6,11 +6,11 @@ internal sealed class RequestBatcherTraceMetadata
     {
         CallName = RequestBatcherTracing.GetCallName(batcherName);
         KeyValuePair<string, object?>[] tags = batcherName is null
-            ? [new("requestbatcher.request.type", requestTypeName)]
+            ? [new(RequestBatcherTraceTags.RequestType, requestTypeName)]
             :
             [
-                new("requestbatcher.request.type", requestTypeName),
-                new("requestbatcher.name", batcherName),
+                new(RequestBatcherTraceTags.RequestType, requestTypeName),
+                new(RequestBatcherTraceTags.BatcherName, batcherName),
             ];
         Tags = Array.AsReadOnly(tags);
     }

@@ -155,7 +155,7 @@ internal static class RequestBatcherTracing
         }
 
         var tags = CreateTags(requestTypeName, batcherName);
-        tags.Add("requestbatcher.batch.size", requests.Count);
+        tags.Add(RequestBatcherTraceTags.BatchSize, requests.Count);
 
         // Dispatch runs in an isolated context. Links describe the many-to-many relationship with calls.
         // Listeners sample these creation-time inputs before allocating the Activity object. Still call StartActivity
@@ -172,7 +172,7 @@ internal static class RequestBatcherTracing
             links?.AddBatch(activity.Context);
             if (activity.IsAllDataRequested)
             {
-                activity.SetTag("requestbatcher.batch.submission.count", CountSubmissions(requests, links));
+                activity.SetTag(RequestBatcherTraceTags.SubmissionCount, CountSubmissions(requests, links));
             }
         }
 
@@ -225,7 +225,7 @@ internal static class RequestBatcherTracing
     public static void RecordFailure(Activity? activity, Exception exception)
     {
         activity?.SetStatus(ActivityStatusCode.Error);
-        activity?.SetTag("error.type", exception.GetType().FullName);
+        activity?.SetTag(RequestBatcherTraceTags.ErrorType, exception.GetType().FullName);
     }
 
     private static Activity? StartCall(RequestBatcherTraceMetadata metadata) => Source.StartActivity(
@@ -243,10 +243,10 @@ internal static class RequestBatcherTracing
 
     private static ActivityTagsCollection CreateTags(string requestTypeName, string? batcherName)
     {
-        var tags = new ActivityTagsCollection { { "requestbatcher.request.type", requestTypeName } };
+        var tags = new ActivityTagsCollection { { RequestBatcherTraceTags.RequestType, requestTypeName } };
         if (batcherName is not null)
         {
-            tags.Add("requestbatcher.name", batcherName);
+            tags.Add(RequestBatcherTraceTags.BatcherName, batcherName);
         }
 
         return tags;
@@ -268,7 +268,7 @@ internal static class RequestBatcherTracing
         }
         else if (task.IsCanceled)
         {
-            activity.SetTag("requestbatcher.canceled", true);
+            activity.SetTag(RequestBatcherTraceTags.Canceled, true);
         }
 
         context?.Complete(activity);

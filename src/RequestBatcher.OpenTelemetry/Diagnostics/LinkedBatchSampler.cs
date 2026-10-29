@@ -1,11 +1,12 @@
 using System.Diagnostics;
 using global::OpenTelemetry.Trace;
+using RequestBatcher.Diagnostics;
 
 namespace RequestBatcher.OpenTelemetry.Diagnostics;
 
 internal sealed class LinkedBatchSampler : Sampler, IDisposable
 {
-    private const string BatchName = "RequestBatcher.Handle";
+    private const string BatchName = RequestBatcherTracing.BatchName;
     private readonly Sampler _inner;
     private int _disposed;
 
@@ -69,8 +70,8 @@ internal sealed class LinkedBatchSampler : Sampler, IDisposable
         {
             foreach (var tag in tags)
             {
-                hasBatchSize |= tag.Key == "requestbatcher.batch.size" && tag.Value is int size && size > 0;
-                hasRequestType |= tag.Key == "requestbatcher.request.type" && tag.Value is string;
+                hasBatchSize |= tag.Key == RequestBatcherTraceTags.BatchSize && tag.Value is int size && size > 0;
+                hasRequestType |= tag.Key == RequestBatcherTraceTags.RequestType && tag.Value is string;
                 if (hasBatchSize && hasRequestType)
                 {
                     return true;

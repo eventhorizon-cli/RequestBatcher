@@ -101,7 +101,7 @@ internal sealed class CallCompletionObserver(Activity activity, SubmissionTraceC
         }
         else if (_completion.IsCanceled)
         {
-            activity.SetTag("requestbatcher.canceled", true);
+            activity.SetTag(RequestBatcherTraceTags.Canceled, true);
         }
 
         context?.Complete(activity);

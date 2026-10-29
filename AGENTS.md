@@ -53,6 +53,11 @@ You are an AI coding assistant for this repository.
 
 - Target the frameworks declared by project files and use only C# 12 language features.
 - Keep nullable annotations, cancellation propagation, and `ConfigureAwait(false)` usage correct and consistent.
+- Define observability tag keys and fixed tag values as internal constants. Keep Span tags in
+  `RequestBatcherTraceTags` and Metrics tags in `RequestBatcherMetricTags`; maintain these separately even when their
+  text matches. Keep instrument names in `RequestBatcherMetricNames` and reuse them in recording and OpenTelemetry
+  view configuration. Avoid scattered literals in production code; contract tests may use explicit strings to verify
+  externally visible names.
 - Do not add per-file copyright or license headers. Repository licensing is defined by the root `LICENSE` file and
   package metadata.
 - Write code comments and XML documentation in English. Document every public API type and member; do not suppress

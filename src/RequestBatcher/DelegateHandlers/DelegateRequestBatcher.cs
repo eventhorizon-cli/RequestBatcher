@@ -8,8 +8,9 @@ internal sealed class DelegateRequestBatcher<TRequest>(
     RequestBatchCoordinator<TRequest> coordinator,
     DelegateRequestBatchHandler<TRequest> handler) : IRequestBatcher<TRequest>, IDelegateRequestBatcher<TRequest>
 {
+    private static readonly string _telemetryRequestTypeName = RequestBatcherRequestType.GetName(typeof(TRequest));
     private readonly RequestBatcherTraceMetadata _traceMetadata = new(
-        RequestBatcherRequestType.GetName(typeof(TRequest)),
+        _telemetryRequestTypeName,
         coordinator.BatcherName);
 
     public Task ExecuteAsync(TRequest request, CancellationToken cancellationToken = default) =>
@@ -21,6 +22,16 @@ internal sealed class DelegateRequestBatcher<TRequest>(
     [RequiresDynamicCode("Delegate handlers compile a typed invoker on first use.")]
     [RequiresUnreferencedCode("Delegate handlers inspect the delegate signature and service parameter attributes.")]
     public Task SubmitAsync(TRequest request, Delegate callback, CancellationToken cancellationToken) =>
+        RequestBatcherMetrics.ExecuteEnabled
+            ? RequestBatcherMetrics.MeasureExecution(
+                _telemetryRequestTypeName, coordinator.BatcherName, RequestBatcherMetricTags.SingleSubmission,
+                (Batcher: this, Request: request, Callback: callback, Token: cancellationToken),
+                static state => state.Batcher.SubmitWithTracing(state.Request, state.Callback, state.Token))
+            : SubmitWithTracing(request, callback, cancellationToken);
+
+    [RequiresDynamicCode("Delegate handlers compile a typed invoker on first use.")]
+    [RequiresUnreferencedCode("Delegate handlers inspect the delegate signature and service parameter attributes.")]
+    private Task SubmitWithTracing(TRequest request, Delegate callback, CancellationToken cancellationToken) =>
         RequestBatcherTracing.Source.HasListeners()
             ? RequestBatcherTracing.TraceCall(
                 _traceMetadata,
@@ -53,6 +64,16 @@ internal sealed class DelegateRequestBatcher<TRequest>(
         IEnumerable<TRequest> requests,
         Delegate callback,
         CancellationToken cancellationToken) =>
+        RequestBatcherMetrics.ExecuteEnabled
+            ? RequestBatcherMetrics.MeasureExecution(
+                _telemetryRequestTypeName, coordinator.BatcherName, RequestBatcherMetricTags.MultiSubmission,
+                (Batcher: this, Requests: requests, Callback: callback, Token: cancellationToken),
+                static state => state.Batcher.SubmitWithTracing(state.Requests, state.Callback, state.Token))
+            : SubmitWithTracing(requests, callback, cancellationToken);
+
+    [RequiresDynamicCode("Delegate handlers compile a typed invoker on first use.")]
+    [RequiresUnreferencedCode("Delegate handlers inspect the delegate signature and service parameter attributes.")]
+    private Task SubmitWithTracing(IEnumerable<TRequest> requests, Delegate callback, CancellationToken cancellationToken) =>
         RequestBatcherTracing.Source.HasListeners()
             ? RequestBatcherTracing.TraceCall(
                 _traceMetadata,

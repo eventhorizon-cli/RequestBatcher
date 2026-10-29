@@ -22,6 +22,8 @@ The current script entry points and generated evaluation projects target .NET 10
 runtime as well as the repository SDK. A runner's target
 framework does not determine the runtime of every benchmark it launches; check the script and evaluation guide before
 comparing measurements. Package restore requires access to the configured NuGet sources.
+For file-based probes with project references, use `--no-cache` after changing referenced source; otherwise the runner
+can reuse an earlier compiled probe. Check the workload's validation output before retaining measurements.
 
 ## Tracing and Allocation Tools
 
@@ -31,6 +33,7 @@ comparing measurements. Package restore requires access to the configured NuGet 
 | [CompareTracingOverhead.cs](CompareTracingOverhead.cs) | Compare 0.2.4 and the current source with a lightweight handler. Optional artifact parent directory and `--prepare-only`; `TRACING_OVERHEAD_FILTER` selects BenchmarkDotNet cases. | [Tracing I/O measurement and reproduction guide](../docs/evaluations/tracing-io-overhead/README.md) |
 | [ProfileTracingAllocations.cs](ProfileTracingAllocations.cs) | Run the 20 ms allocation probe: `<Disabled\|Sample0\|Sample100> [waves=500]`. Emits measurement markers and allocation totals; use `dotnet-trace` to capture a trace. | [.NET 10 allocation baseline and reproduction](../docs/evaluations/tracing-io-overhead/single-partition-net10.md) |
 | [AnalyzeAllocationTrace.cs](AnalyzeAllocationTrace.cs) | Analyze an existing marked EventPipe trace: `<trace.nettrace> <output-prefix>`. Writes `.types.csv`, `.stacks.csv`, and `.summary.txt`; allocation samples are estimates. | [Allocation diagnostics](../docs/evaluations/tracing-io-overhead/README.md#allocation-diagnostics) |
+| [MeasureMetricsOverhead.cs](MeasureMetricsOverhead.cs) | Run the existing 1,024-item metrics benchmark workload in a bounded probe: `<Disabled\|AggregationOnly> <single\|multi> <output.json> [waves=30]`. Five warmup waves are excluded; use Release and separate processes for baseline/candidate. Reports wave latency and allocation, validates every item's exactly-once handling and exported totals. | [Execute and submission metrics evaluation](../docs/evaluations/execute-metrics/README.md) |
 
 Both comparison runners retain isolated projects, package evidence, and BenchmarkDotNet reports in a unique `run-*`
 directory. Their default parent directories are `requestbatcher-tracing-io` and `requestbatcher-tracing-overhead`,

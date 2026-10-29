@@ -7,6 +7,7 @@ using BenchmarkDotNet.Order;
 using Microsoft.Extensions.DependencyInjection;
 using OpenTelemetry;
 using OpenTelemetry.Metrics;
+using RequestBatcher.Diagnostics;
 
 namespace RequestBatcher.Benchmarks.InMemory;
 
@@ -80,6 +81,8 @@ public class MetricsIoOverheadBenchmarks
             };
             _metricReader.TemporalityPreference = MetricReaderTemporalityPreference.Cumulative;
             _meterProvider = Sdk.CreateMeterProviderBuilder()
+                // The benchmark owns a separate SDK container; supply the same sizing snapshot as its pipeline.
+                .ConfigureServices(services => services.AddSingleton(new RequestBatcherMetricsConfiguration(BatchSize)))
                 .AddRequestBatcherInstrumentation()
                 .AddReader(_metricReader)
                 .Build();
@@ -143,7 +146,7 @@ public class MetricsIoOverheadBenchmarks
         _explicitGroups);
 
     /// <summary>
-    /// Drains the batcher, forces the final cumulative collection, and validates all five instruments.
+    /// Drains the batcher, forces the final cumulative collection, and validates all four histograms.
     /// </summary>
     [GlobalCleanup]
     public async Task GlobalCleanupAsync()
@@ -178,18 +181,19 @@ public class MetricsIoOverheadBenchmarks
             var snapshot = _exporter.Snapshot();
             var expectedRequests = _waveCount * RequestCount;
             var expectedBatches = Handler.TotalBatchCalls;
+            var expectedSubmissions = _waveCount * (_benchmarkName == nameof(SingleSubmissionsAsync) ? RequestCount : _explicitGroups.Length);
             if (snapshot.FirstError is not null)
             {
                 throw new InvalidOperationException($"Metrics exporter failed: {snapshot.FirstError}");
             }
 
-            if (snapshot.ObservedInstrumentCount != 5 ||
-                snapshot.SubmittedRequests != expectedRequests ||
-                snapshot.ProcessedRequests != expectedRequests ||
-                snapshot.ProcessedBatches != expectedBatches ||
+            if (snapshot.ObservedInstrumentCount != 4 ||
                 snapshot.BatchSizeCount != expectedBatches ||
                 snapshot.BatchSizeSum != expectedRequests ||
-                snapshot.BatchDurationCount != expectedBatches)
+                snapshot.HandleDurationCount != expectedBatches ||
+                snapshot.ExecuteDurationCount != expectedSubmissions ||
+                snapshot.SubmissionSizeCount != expectedSubmissions ||
+                snapshot.SubmissionSizeSum != expectedRequests)
             {
                 throw new InvalidOperationException(
                     $"Metrics totals were invalid: {snapshot} ExpectedRequests={expectedRequests}, " +
@@ -199,10 +203,10 @@ public class MetricsIoOverheadBenchmarks
             Console.WriteLine(
                 $"Metrics validation: Benchmark={_benchmarkName}, Mode={Mode}, " +
                 $"ExportsBeforeFinalFlush={exportsBeforeFinalFlush}, TotalExports={snapshot.ExportCount}, " +
-                $"Instruments={snapshot.ObservedInstrumentCount}, Submitted={snapshot.SubmittedRequests}, " +
-                $"Processed={snapshot.ProcessedRequests}, Batches={snapshot.ProcessedBatches}, " +
+                $"Instruments={snapshot.ObservedInstrumentCount}, " +
                 $"BatchSizeCount={snapshot.BatchSizeCount}, BatchSizeSum={snapshot.BatchSizeSum}, " +
-                $"BatchDurationCount={snapshot.BatchDurationCount}");
+                $"HandleDurationCount={snapshot.HandleDurationCount}, ExecuteDurationCount={snapshot.ExecuteDurationCount}, " +
+                $"SubmissionSizeCount={snapshot.SubmissionSizeCount}, SubmissionSizeSum={snapshot.SubmissionSizeSum}");
         }
 
         if (_waveCount > 0)
@@ -331,12 +335,12 @@ public class MetricsIoOverheadBenchmarks
         private readonly object _gate = new();
         private int _exportCount;
         private int _observedInstrumentCount;
-        private long _submittedRequests;
-        private long _processedRequests;
-        private long _processedBatches;
         private long _batchSizeCount;
         private long _batchSizeSum;
-        private long _batchDurationCount;
+        private long _handleDurationCount;
+        private long _executeDurationCount;
+        private long _submissionSizeCount;
+        private long _submissionSizeSum;
         private string? _firstError;
 
         public int ExportCount
@@ -360,44 +364,43 @@ public class MetricsIoOverheadBenchmarks
                     {
                         switch (metric.Name)
                         {
-                            case "requestbatcher.requests.submitted":
-                                _observedInstrumentCount |= 1;
-                                foreach (var point in metric.GetMetricPoints())
-                                {
-                                    _submittedRequests = point.GetSumLong();
-                                }
-
-                                break;
-                            case "requestbatcher.requests.processed":
-                                _observedInstrumentCount |= 2;
-                                foreach (var point in metric.GetMetricPoints())
-                                {
-                                    _processedRequests = point.GetSumLong();
-                                }
-
-                                break;
-                            case "requestbatcher.batches.processed":
-                                _observedInstrumentCount |= 4;
-                                foreach (var point in metric.GetMetricPoints())
-                                {
-                                    _processedBatches = point.GetSumLong();
-                                }
-
-                                break;
                             case "requestbatcher.batch.size":
-                                _observedInstrumentCount |= 8;
+                                _observedInstrumentCount |= 1;
+                                _batchSizeCount = 0;
+                                _batchSizeSum = 0;
                                 foreach (var point in metric.GetMetricPoints())
                                 {
-                                    _batchSizeCount = point.GetHistogramCount();
-                                    _batchSizeSum = (long)point.GetHistogramSum();
+                                    _batchSizeCount += point.GetHistogramCount();
+                                    _batchSizeSum += (long)point.GetHistogramSum();
                                 }
 
                                 break;
-                            case "requestbatcher.batch.duration":
-                                _observedInstrumentCount |= 16;
+                            case "requestbatcher.handle.duration":
+                                _observedInstrumentCount |= 2;
+                                _handleDurationCount = 0;
                                 foreach (var point in metric.GetMetricPoints())
                                 {
-                                    _batchDurationCount = point.GetHistogramCount();
+                                    _handleDurationCount += point.GetHistogramCount();
+                                }
+
+                                break;
+                            case "requestbatcher.execute.duration":
+                                _observedInstrumentCount |= 4;
+                                _executeDurationCount = 0;
+                                foreach (var point in metric.GetMetricPoints())
+                                {
+                                    _executeDurationCount += point.GetHistogramCount();
+                                }
+
+                                break;
+                            case "requestbatcher.submission.size":
+                                _observedInstrumentCount |= 8;
+                                _submissionSizeCount = 0;
+                                _submissionSizeSum = 0;
+                                foreach (var point in metric.GetMetricPoints())
+                                {
+                                    _submissionSizeCount += point.GetHistogramCount();
+                                    _submissionSizeSum += (long)point.GetHistogramSum();
                                 }
 
                                 break;
@@ -426,13 +429,13 @@ public class MetricsIoOverheadBenchmarks
             {
                 return new MetricSnapshot(
                     _exportCount,
-                    _observedInstrumentCount == 31 ? 5 : BitOperations.PopCount((uint)_observedInstrumentCount),
-                    _submittedRequests,
-                    _processedRequests,
-                    _processedBatches,
+                    BitOperations.PopCount((uint)_observedInstrumentCount),
                     _batchSizeCount,
                     _batchSizeSum,
-                    _batchDurationCount,
+                    _handleDurationCount,
+                    _executeDurationCount,
+                    _submissionSizeCount,
+                    _submissionSizeSum,
                     _firstError);
             }
         }
@@ -441,11 +444,11 @@ public class MetricsIoOverheadBenchmarks
     private readonly record struct MetricSnapshot(
         int ExportCount,
         int ObservedInstrumentCount,
-        long SubmittedRequests,
-        long ProcessedRequests,
-        long ProcessedBatches,
         long BatchSizeCount,
         long BatchSizeSum,
-        long BatchDurationCount,
+        long HandleDurationCount,
+        long ExecuteDurationCount,
+        long SubmissionSizeCount,
+        long SubmissionSizeSum,
         string? FirstError);
 }
