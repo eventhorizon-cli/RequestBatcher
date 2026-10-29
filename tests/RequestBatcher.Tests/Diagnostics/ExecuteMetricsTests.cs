@@ -13,13 +13,26 @@ public sealed class ExecuteMetricsTests
     private static TimeSpan Timeout => TimeSpan.FromSeconds(10);
 
     [Theory]
-    [InlineData(false, false)]
-    [InlineData(false, true)]
-    [InlineData(true, false)]
-    [InlineData(true, true)]
-    public async Task ExecuteAsync_AllPublicShapes_RecordsOnceWithPublicTypeAndSubmissionKind(bool response, bool batch)
+    [InlineData(false, false, false, false)]
+    [InlineData(false, false, false, true)]
+    [InlineData(false, false, true, false)]
+    [InlineData(false, false, true, true)]
+    [InlineData(false, true, false, false)]
+    [InlineData(false, true, false, true)]
+    [InlineData(false, true, true, false)]
+    [InlineData(false, true, true, true)]
+    [InlineData(true, false, false, false)]
+    [InlineData(true, false, false, true)]
+    [InlineData(true, false, true, false)]
+    [InlineData(true, false, true, true)]
+    [InlineData(true, true, false, false)]
+    [InlineData(true, true, false, true)]
+    [InlineData(true, true, true, false)]
+    [InlineData(true, true, true, true)]
+    public async Task ExecuteAsync_AllPublicShapes_RecordsOnlyEnabledMetricsAndTracingWithPublicTypeAndKind(
+        bool response, bool batch, bool metrics, bool tracing)
     {
-        using var capture = new Capture();
+        using var capture = new Capture(metrics, tracing);
         if (response)
         {
             var handler = new Mock<IRequestBatchHandler<int, int>>(MockBehavior.Strict);
@@ -50,9 +63,25 @@ public sealed class ExecuteMetricsTests
             handler.VerifyAll();
         }
 
-        var measurement = Assert.Single(capture.Measurements);
-        Assert.Equal("ms", capture.Instrument!.Unit);
-        AssertMeasurement(measurement, batch ? "multi" : "single", "success", "prices");
+        if (metrics)
+        {
+            var measurement = Assert.Single(capture.Measurements);
+            Assert.Equal("ms", capture.Instrument!.Unit);
+            AssertMeasurement(measurement, batch ? "multi" : "single", "success", "prices");
+        }
+        else
+        {
+            Assert.Empty(capture.Measurements);
+        }
+
+        var callSpans = capture.Spans.Where(span => span.OperationName == "RequestBatcher.Execute prices").ToArray();
+        Assert.Equal(tracing ? 1 : 0, callSpans.Length);
+        if (tracing)
+        {
+            Assert.Equal("Int32", callSpans[0].GetTagItem("requestbatcher.request.type"));
+            Assert.Equal("prices", callSpans[0].GetTagItem("requestbatcher.name"));
+            Assert.Equal(ActivityStatusCode.Unset, callSpans[0].Status);
+        }
     }
 
     [Fact]
@@ -552,8 +581,9 @@ public sealed class ExecuteMetricsTests
     private sealed class Capture : IDisposable
     {
         private readonly MeterListener _listener;
+        private readonly ActivityListener? _activityListener;
 
-        public Capture(bool enabled = true)
+        public Capture(bool metricsEnabled = true, bool tracingEnabled = false)
         {
             _listener = new MeterListener
             {
@@ -562,7 +592,7 @@ public sealed class ExecuteMetricsTests
                     if (instrument.Meter.Name == "RequestBatcher" && instrument.Name == InstrumentName)
                     {
                         Instrument = instrument;
-                        if (enabled)
+                        if (metricsEnabled)
                         {
                             listener.EnableMeasurementEvents(instrument);
                         }
@@ -572,10 +602,21 @@ public sealed class ExecuteMetricsTests
             _listener.SetMeasurementEventCallback<double>((_, value, tags, _) =>
                 Measurements.Enqueue(new Measurement(value, tags.ToArray().ToDictionary(tag => tag.Key, tag => tag.Value))));
             _listener.Start();
+            if (tracingEnabled)
+            {
+                _activityListener = new ActivityListener
+                {
+                    ShouldListenTo = source => source.Name == "RequestBatcher",
+                    Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.AllDataAndRecorded,
+                    ActivityStopped = Spans.Enqueue,
+                };
+                ActivitySource.AddActivityListener(_activityListener);
+            }
         }
 
         public Instrument? Instrument { get; private set; }
         public ConcurrentQueue<Measurement> Measurements { get; } = new();
+        public ConcurrentQueue<Activity> Spans { get; } = new();
 
         public void SetEnabled(bool enabled)
         {
@@ -590,7 +631,11 @@ public sealed class ExecuteMetricsTests
             }
         }
 
-        public void Dispose() => _listener.Dispose();
+        public void Dispose()
+        {
+            _activityListener?.Dispose();
+            _listener.Dispose();
+        }
     }
 
     private sealed record Measurement(double Value, Dictionary<string, object?> Tags);

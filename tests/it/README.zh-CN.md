@@ -42,18 +42,19 @@ Execute 上下文，包括未采样的上下文；Handle 是否导出则根据�
 也可以在 Rider 中构建、运行。测试夹具会向测试提供本次运行生成的 Cart 和 Grafana 地址，不需要固定端口环境变量。
 如果需要手动查看示例，请使用示例 README 中独立的 Compose 步骤，并在结束后停止 Compose 环境。
 
-测试分两轮发送 32 个并发 Cart 请求，每个请求使用独立的 W3C Trace 上下文，包含 2–10 个商品项，
+测试分别通过普通入口和委托入口发送请求，每个入口发送两轮，每轮 32 个并发 Cart 请求。每个请求使用独立的 W3C Trace 上下文，包含 2–10 个商品项，
 并特意包含重复商品。检查内容包括：
 
 - 响应顺序、数量、种子数据价格、重复商品回填和总价。
-- 每个 Cart 请求只有一个 `RequestBatcher.Execute pricing-queries`，父节点是对应的 HTTP 服务端 Span。
-- `RequestBatcher.Handle pricing-queries` 是独立 Trace 的根节点，通过去重的 Links 指向调用方 `Execute`；每个 `Execute` 也有指向处理其请求的
+- 每个 Cart 请求只有一个 `RequestBatcher.Execute` Span，名称对应所用的 Batcher，父节点是对应的 HTTP 服务端 Span。
+- 各 Batcher 的 `RequestBatcher.Handle` Span 是独立 Trace 的根节点，通过去重的 Links 指向调用方 `Execute`；每个 `Execute` 也有指向处理其请求的
   `Handle` 的 Link；
   所有测试调用方都有对应 Link，且观察到至少一个包含多个调用方的批次。
 - 批大小为 1–20 个**商品请求项**。一次 Cart 提交可以拆到多个批次，批次不必填满。
 - Cart HTTP 客户端 → Pricing HTTP 服务端 → Npgsql 查询的父子关系，HTTP 成功状态，以及 Pricing 中没有 Batcher。
 - 第二轮使用新的上下文，防止早先调用方污染后续 Trace。
-- 五项 RequestBatcher 指标已导出，请求类型标签为短名 `Int32`，计数器与直方图 count/sum 持续增长。
+- 四个 RequestBatcher Histogram 均已导出，请求类型标签为短名 `Int32`。按 Batcher 名称分别检查：提交数量和处理数量的 sum 等于输入项数，
+  提交数量和 Execute 耗时的 count 等于调用次数，避免一个入口的指标掩盖另一个入口的漏记或重复记录。
 
 示例新写入的 Telemetry 使用 `service.name=cart` 和 `service.name=pricing`。仪表板的 `Cart calls · Execute` 与
 `Handler execution · Handle` 表格明确展示两种方向：`Handle` 指向调用方 `Execute`，`Execute` 指向处理其请求的 `Handle`。
@@ -62,8 +63,8 @@ Execute 上下文，包括未采样的上下文；Handle 是否导出则根据�
 
 OTLP 导出、Tempo 索引和 Prometheus 抓取是异步的，所以每个验证阶段最多轮询 120 秒。
 失败时会报告缺失的 Trace、Link 或 Metrics 证据；成功输出包含调用方和批次的 Trace ID，方便在 Grafana 查看。
-链路检索仅匹配本次测试生成的 Trace ID，允许其他示例流量同时存在。Metrics 是具名 Batcher 的累计值，
-流量生成器也可能贡献其增长。测试使用示例中 ID 为 1–100、价格为 `id × 1.25` 的种子数据，不修改数据库内容。
+链路检索仅匹配本次测试生成的 Trace ID。Metrics 是各命名 Batcher 的累计值，测试夹具不启动流量生成器，确保能精确核对数量。
+测试使用示例中 ID 为 1–100、价格为 `id × 1.25` 的种子数据，不修改数据库内容。
 
 | 环境变量 | 默认值 | 用途 |
 | --- | --- | --- |

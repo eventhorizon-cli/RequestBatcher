@@ -95,3 +95,8 @@ REQUESTBATCHER_RUN_INTEGRATION_TESTS=1 dotnet test \
 
 The probe reuses the benchmark workload directly; these are bounded diagnostics rather than BenchmarkDotNet
 confidence-interval results. Use the benchmark index for the full periodic-reader benchmark matrix.
+
+## Shared call boundary
+
+The subsequent [shared call diagnostics validation](call-diagnostics.md) covers the unified ordinary/delegate wrapper,
+independent metric/tracing switches, both APIs through live OTLP export, and bounded .NET 10 hot-path measurements.

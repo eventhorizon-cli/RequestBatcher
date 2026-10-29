@@ -8,27 +8,17 @@ internal sealed class ResponseRequestBatcher<TRequest, TResponse>(
     : IRequestBatcher<TRequest, TResponse>
 {
     private static readonly string _telemetryRequestTypeName = RequestBatcherRequestType.GetName(typeof(TRequest));
-    private readonly RequestBatcherTraceMetadata _traceMetadata = new(
+    private readonly RequestBatcherCallDiagnostics _callDiagnostics = new(
         _telemetryRequestTypeName,
         batcher.BatcherName);
 
     internal string? BatcherName => batcher.BatcherName;
 
     public Task<TResponse> ExecuteAsync(TRequest request, CancellationToken cancellationToken = default) =>
-        RequestBatcherMetrics.ExecuteEnabled
-            ? RequestBatcherMetrics.MeasureExecution(
-                _telemetryRequestTypeName, BatcherName, RequestBatcherMetricTags.SingleSubmission,
-                (Batcher: this, Request: request, Token: cancellationToken),
-                static state => state.Batcher.ExecuteWithTracing(state.Request, state.Token))
-            : ExecuteWithTracing(request, cancellationToken);
-
-    private Task<TResponse> ExecuteWithTracing(TRequest request, CancellationToken cancellationToken) =>
-        RequestBatcherTracing.Source.HasListeners()
-            ? RequestBatcherTracing.TraceCall(
-                _traceMetadata,
-                (Batcher: this, Request: request, Token: cancellationToken),
-                static (state, context, observer) => state.Batcher.ExecuteCoreAsync(state.Request, state.Token, context, observer))
-            : ExecuteCoreAsync(request, cancellationToken);
+        _callDiagnostics.Execute(
+            RequestBatcherMetricTags.SingleSubmission,
+            (Batcher: this, Request: request, Token: cancellationToken),
+            static (state, context, observer) => state.Batcher.ExecuteCoreAsync(state.Request, state.Token, context, observer));
 
     internal Task<TResponse> ExecuteCoreAsync(
         TRequest request,
@@ -51,22 +41,12 @@ internal sealed class ResponseRequestBatcher<TRequest, TResponse>(
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(requests);
-        return RequestBatcherMetrics.ExecuteEnabled
-            ? RequestBatcherMetrics.MeasureExecution(
-                _telemetryRequestTypeName, BatcherName, RequestBatcherMetricTags.MultiSubmission,
-                (Batcher: this, Requests: requests, Token: cancellationToken),
-                static state => state.Batcher.ExecuteWithTracing(state.Requests, state.Token))
-            : ExecuteWithTracing(requests, cancellationToken);
-    }
-
-    private Task<IReadOnlyList<TResponse>> ExecuteWithTracing(IEnumerable<TRequest> requests, CancellationToken cancellationToken)
-    {
-        return RequestBatcherTracing.Source.HasListeners()
-            ? RequestBatcherTracing.TraceCall(
-                _traceMetadata,
-                (Batcher: this, Requests: requests, Token: cancellationToken),
-                static (state, context) => state.Batcher.ExecuteCoreAsync(state.Requests, state.Token, context))
-            : ExecuteCoreAsync(requests, cancellationToken);
+        // The call includes response-array assembly after queue completion, so observe the returned Task instead.
+        return _callDiagnostics.Execute(
+            RequestBatcherMetricTags.MultiSubmission,
+            (Batcher: this, Requests: requests, Token: cancellationToken),
+            static (state, context, _) => state.Batcher.ExecuteCoreAsync(state.Requests, state.Token, context),
+            observeCompletion: false);
     }
 
     internal Task<IReadOnlyList<TResponse>> ExecuteCoreAsync(

@@ -12,18 +12,26 @@ public sealed class DelegateExecuteMetricsTests
     private static TimeSpan Timeout => TimeSpan.FromSeconds(10);
 
     [Theory]
-    [InlineData(false, false, false)]
-    [InlineData(false, false, true)]
-    [InlineData(false, true, false)]
-    [InlineData(false, true, true)]
-    [InlineData(true, false, false)]
-    [InlineData(true, false, true)]
-    [InlineData(true, true, false)]
-    [InlineData(true, true, true)]
-    public async Task ExecuteAsync_AllDelegateShapes_RecordsOnceAfterCompletionWithOrWithoutTracing(
-        bool response, bool multi, bool tracing)
+    [InlineData(false, false, false, false)]
+    [InlineData(false, false, false, true)]
+    [InlineData(false, false, true, false)]
+    [InlineData(false, false, true, true)]
+    [InlineData(false, true, false, false)]
+    [InlineData(false, true, false, true)]
+    [InlineData(false, true, true, false)]
+    [InlineData(false, true, true, true)]
+    [InlineData(true, false, false, false)]
+    [InlineData(true, false, false, true)]
+    [InlineData(true, false, true, false)]
+    [InlineData(true, false, true, true)]
+    [InlineData(true, true, false, false)]
+    [InlineData(true, true, false, true)]
+    [InlineData(true, true, true, false)]
+    [InlineData(true, true, true, true)]
+    public async Task ExecuteAsync_AllDelegateShapes_RecordsOnlyEnabledMetricsAndTracing(
+        bool response, bool multi, bool metrics, bool tracing)
     {
-        using var capture = new Capture(tracing);
+        using var capture = new Capture(metrics, tracing);
         var entered = NewSource();
         var release = NewSource();
         var services = new ServiceCollection();
@@ -91,8 +99,23 @@ public sealed class DelegateExecuteMetricsTests
             handler.VerifyAll();
         }
 
-        AssertMeasurement(Assert.Single(capture.Measurements), multi ? "multi" : "single", "success", "prices");
-        Assert.Equal(tracing ? 1 : 0, capture.Spans.Count(span => span.OperationName == "RequestBatcher.Execute prices"));
+        if (metrics)
+        {
+            AssertMeasurement(Assert.Single(capture.Measurements), multi ? "multi" : "single", "success", "prices");
+        }
+        else
+        {
+            Assert.Empty(capture.Measurements);
+        }
+
+        var callSpans = capture.Spans.Where(span => span.OperationName == "RequestBatcher.Execute prices").ToArray();
+        Assert.Equal(tracing ? 1 : 0, callSpans.Length);
+        if (tracing)
+        {
+            Assert.Equal("Int32", callSpans[0].GetTagItem("requestbatcher.request.type"));
+            Assert.Equal("prices", callSpans[0].GetTagItem("requestbatcher.name"));
+            Assert.Equal(ActivityStatusCode.Unset, callSpans[0].Status);
+        }
     }
 
     [Theory]
@@ -132,21 +155,21 @@ public sealed class DelegateExecuteMetricsTests
     [InlineData(true, true)]
     public async Task ExecuteAsync_BindingFailureAndPreCancellation_RecordActualOutcomes(bool response, bool tracing)
     {
-        using var capture = new Capture(tracing);
+        using var capture = new Capture(metrics: true, tracing: tracing);
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
         Delegate invalid = static (int first, int second) => Assert.Fail("An invalid delegate must never execute.");
         var services = new ServiceCollection();
         if (response)
         {
-            services.AddDelegateRequestBatcher<int, int>();
+            services.AddDelegateRequestBatcher<int, int>("prices");
             await using var provider = services.BuildServiceProvider();
-            var batcher = provider.GetRequiredService<IRequestBatcher<int, int>>();
+            var batcher = provider.GetRequiredKeyedService<IRequestBatcher<int, int>>("prices");
             Assert.Throws<ArgumentException>(() => { _ = batcher.ExecuteAsync(1, invalid); });
             Assert.Throws<ArgumentException>(() => { _ = batcher.ExecuteAsync(new[] { 1 }, invalid); });
-            Delegate callback = static (IReadOnlyList<RequestBatchEntry<int, int>> _) => Assert.Fail("A pre-canceled call must never dispatch.");
-            var single = batcher.ExecuteAsync(1, callback, cancellation.Token);
-            var multi = batcher.ExecuteAsync(new[] { 1 }, callback, cancellation.Token);
+            // The invalid signature would throw if a pre-canceled call attempted to bind it.
+            var single = batcher.ExecuteAsync(1, invalid, cancellation.Token);
+            var multi = batcher.ExecuteAsync(new[] { 1 }, invalid, cancellation.Token);
             Assert.Equal(cancellation.Token, (await Assert.ThrowsAnyAsync<OperationCanceledException>(() => single)).CancellationToken);
             Assert.Equal(cancellation.Token, (await Assert.ThrowsAnyAsync<OperationCanceledException>(() => multi)).CancellationToken);
             Assert.True(single.IsCanceled);
@@ -154,14 +177,13 @@ public sealed class DelegateExecuteMetricsTests
         }
         else
         {
-            services.AddDelegateRequestBatcher<int>();
+            services.AddDelegateRequestBatcher<int>("prices");
             await using var provider = services.BuildServiceProvider();
-            var batcher = provider.GetRequiredService<IRequestBatcher<int>>();
+            var batcher = provider.GetRequiredKeyedService<IRequestBatcher<int>>("prices");
             Assert.Throws<ArgumentException>(() => { _ = batcher.ExecuteAsync(1, invalid); });
             Assert.Throws<ArgumentException>(() => { _ = batcher.ExecuteAsync(new[] { 1 }, invalid); });
-            Delegate callback = static (IReadOnlyList<int> _) => Assert.Fail("A pre-canceled call must never dispatch.");
-            var single = batcher.ExecuteAsync(1, callback, cancellation.Token);
-            var multi = batcher.ExecuteAsync(new[] { 1 }, callback, cancellation.Token);
+            var single = batcher.ExecuteAsync(1, invalid, cancellation.Token);
+            var multi = batcher.ExecuteAsync(new[] { 1 }, invalid, cancellation.Token);
             Assert.Equal(cancellation.Token, (await Assert.ThrowsAnyAsync<OperationCanceledException>(() => single)).CancellationToken);
             Assert.Equal(cancellation.Token, (await Assert.ThrowsAnyAsync<OperationCanceledException>(() => multi)).CancellationToken);
             Assert.True(single.IsCanceled);
@@ -170,10 +192,28 @@ public sealed class DelegateExecuteMetricsTests
 
         var measurements = capture.Measurements.ToArray();
         Assert.Equal(4, measurements.Length);
-        AssertMeasurement(measurements[0], "single", "error");
-        AssertMeasurement(measurements[1], "multi", "error");
-        AssertMeasurement(measurements[2], "single", "canceled");
-        AssertMeasurement(measurements[3], "multi", "canceled");
+        AssertMeasurement(measurements[0], "single", "error", "prices");
+        AssertMeasurement(measurements[1], "multi", "error", "prices");
+        AssertMeasurement(measurements[2], "single", "canceled", "prices");
+        AssertMeasurement(measurements[3], "multi", "canceled", "prices");
+        var callSpans = capture.Spans.Where(span => span.OperationName == "RequestBatcher.Execute prices").ToArray();
+        Assert.Equal(tracing ? 4 : 0, callSpans.Length);
+        if (tracing)
+        {
+            Assert.Equal(ActivityStatusCode.Error, callSpans[0].Status);
+            Assert.Equal("System.ArgumentException", callSpans[0].GetTagItem("error.type"));
+            Assert.Equal(ActivityStatusCode.Error, callSpans[1].Status);
+            Assert.Equal("System.ArgumentException", callSpans[1].GetTagItem("error.type"));
+            Assert.Equal(ActivityStatusCode.Unset, callSpans[2].Status);
+            Assert.Equal(true, callSpans[2].GetTagItem("requestbatcher.canceled"));
+            Assert.Equal(ActivityStatusCode.Unset, callSpans[3].Status);
+            Assert.Equal(true, callSpans[3].GetTagItem("requestbatcher.canceled"));
+            Assert.All(callSpans, span =>
+            {
+                Assert.Equal("Int32", span.GetTagItem("requestbatcher.request.type"));
+                Assert.Equal("prices", span.GetTagItem("requestbatcher.name"));
+            });
+        }
     }
 
     private static async Task AssertPendingAndReleaseAsync(
@@ -211,15 +251,18 @@ public sealed class DelegateExecuteMetricsTests
         private readonly MeterListener _meterListener;
         private readonly ActivityListener? _activityListener;
 
-        public Capture(bool tracing)
+        public Capture(bool metrics = true, bool tracing = false)
         {
             _meterListener = new MeterListener
             {
-                InstrumentPublished = static (instrument, listener) =>
+                InstrumentPublished = (instrument, listener) =>
                 {
                     if (instrument.Meter.Name == "RequestBatcher" && instrument.Name == "requestbatcher.execute.duration")
                     {
-                        listener.EnableMeasurementEvents(instrument);
+                        if (metrics)
+                        {
+                            listener.EnableMeasurementEvents(instrument);
+                        }
                     }
                 },
             };

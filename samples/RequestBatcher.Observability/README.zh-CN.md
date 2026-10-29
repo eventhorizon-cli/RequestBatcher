@@ -53,7 +53,13 @@ curl --fail http://127.0.0.1:5082/health
 curl --fail --request POST http://127.0.0.1:5081/cart/quote \
   --header 'Content-Type: application/json' \
   --data '[{"productId":1,"quantity":2},{"productId":2,"quantity":1}]'
+curl --fail --request POST http://127.0.0.1:5081/cart/quote/ordinary \
+  --header 'Content-Type: application/json' \
+  --data '[{"productId":1,"quantity":2},{"productId":2,"quantity":1}]'
 ```
+
+`/cart/quote` 使用 `pricing-queries` 委托管线；`/cart/quote/ordinary` 使用注册 Handler 类型的
+`pricing-queries-ordinary` 管线。两者复用相同的商品查询逻辑。
 
 ## 在 Grafana 中查看
 
@@ -62,7 +68,8 @@ curl --fail --request POST http://127.0.0.1:5081/cart/quote \
 批次大小和批次耗时，日志和 Trace 面板分别显示两个服务的日志和 Tempo Trace。
 
 在 Grafana Explore 中选择 Tempo，时间范围使用最近 5 分钟或 15 分钟。一次请求的 Trace 从 Cart ASP.NET Core Span 开始，
-每个 Cart 请求只创建一个 `RequestBatcher.Execute pricing-queries` Span，并通过原生批量 API 提交完整的 2–10 个商品 ID。共享的
+每个 Cart 请求只创建一个 `RequestBatcher.Execute` Span，名称后缀对应所用的 Batcher（`pricing-queries` 或 `pricing-queries-ordinary`），
+并通过批量 API 提交完整的 2–10 个商品 ID。共享的
 Cart Batch Handler 最多接收 20 个商品请求，可以混合多个并发 Cart 调用，合并并去重商品 ID 后只调用一次 Pricing。每个
 `Handle` Span 会通过 ActivityLink 指向参与其中的调用方 `Execute`，并包含 Cart 到 Pricing 的 HTTP 客户端子 Span。Pricing 的 HTTP 服务端 Span 下会看到
 Npgsql 官方 Instrument 创建的 PostgreSQL Span。`requestbatcher.batch.size` 记录批次中的商品请求数。
@@ -78,6 +85,8 @@ Npgsql 官方 Instrument 创建的 PostgreSQL Span。`requestbatcher.batch.size`
 `Execute` Span；每个 `Execute` Span 也会通过 Link 关联到处理其请求的所有 `Handle` Span。可以参考 Grafana 的
 [TraceQL Link 查询文档](https://grafana.com/docs/tempo/latest/traceql/construct-traceql-queries/)了解
 `link:traceID` 和 `link:spanID` 选择器。
+
+以下以默认的 `/cart/quote` 入口为例。
 
 直接导航时，从仪表板的 `Handler execution · Handle` 表格打开一条 `Handle` Trace，点击
 `RequestBatcher.Handle pricing-queries` Span 行，在 Span 详情中展开 `References`，即可看到参与该批次的多个
@@ -102,4 +111,5 @@ RequestBatcher 在进程内运行，进程故障后不会恢复待处理请求�
 
 如需执行可选的端到端验证，请查看[集成测试说明](../../tests/it/README.zh-CN.md)（[English](../../tests/it/README.md)）。显式设置
 `REQUESTBATCHER_RUN_INTEGRATION_TESTS=1` 后，集成测试夹具会通过 Testcontainers 创建隔离环境，并在验证完成后自动清理；
-测试验证每个 Cart HTTP 请求只有一个 `Execute`、跨 Trace 的批次 Link、Pricing/数据库父子 Span 和 Metrics。
+测试分别验证普通入口和委托入口：每个 Cart HTTP 请求只有一个 `Execute`，跨 Trace 的批次 Link 和 Pricing/数据库父子 Span 正确，
+并按 Batcher 名称核对 Histogram 的调用次数和请求项数。

@@ -28,7 +28,7 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
     private readonly object _lifecycleLock = new();
     private readonly ILogger<RequestBatchCoordinator<TRequest>> _logger;
     private readonly RequestBatchOptions<TRequest> _options;
-    private readonly RequestBatcherTraceMetadata _traceMetadata;
+    private readonly RequestBatcherCallDiagnostics _callDiagnostics;
     private readonly ConcurrentDictionary<PendingBatchRequest<TRequest>, byte> _pendingRequests = new();
     private readonly Action<PendingBatchRequest<TRequest>> _onRequestFinished;
     private readonly PendingRequestProducer<TRequest> _producer;
@@ -53,7 +53,7 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
         string? batcherName = null)
     {
         BatcherName = batcherName;
-        _traceMetadata = new(_telemetryRequestTypeName, batcherName);
+        _callDiagnostics = new(_telemetryRequestTypeName, batcherName);
         _logger = logger;
         _options = options.Value.ValidateAndClone();
         _onRequestFinished = OnRequestFinished;
@@ -103,20 +103,10 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
 
     /// <inheritdoc />
     public Task ExecuteAsync(TRequest request, CancellationToken cancellationToken = default) =>
-        RequestBatcherMetrics.ExecuteEnabled
-            ? RequestBatcherMetrics.MeasureExecution(
-                _telemetryRequestTypeName, BatcherName, RequestBatcherMetricTags.SingleSubmission,
-                (Batcher: this, Request: request, Token: cancellationToken),
-                static state => state.Batcher.ExecuteWithTracing(state.Request, state.Token))
-            : ExecuteWithTracing(request, cancellationToken);
-
-    private Task ExecuteWithTracing(TRequest request, CancellationToken cancellationToken) =>
-        RequestBatcherTracing.Source.HasListeners()
-            ? RequestBatcherTracing.TraceCall(
-                _traceMetadata,
-                (Batcher: this, Request: request, Token: cancellationToken),
-                static (state, context, observer) => state.Batcher.ExecuteCoreAsync(state.Request, null, state.Token, context, observer))
-            : ExecuteCoreAsync(request, null, cancellationToken);
+        _callDiagnostics.Execute(
+            RequestBatcherMetricTags.SingleSubmission,
+            (Batcher: this, Request: request, Token: cancellationToken),
+            static (state, context, observer) => state.Batcher.ExecuteCoreAsync(state.Request, null, state.Token, context, observer));
 
     internal Task ExecuteCoreAsync(
         TRequest request,
@@ -144,22 +134,10 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(requests);
-        return RequestBatcherMetrics.ExecuteEnabled
-            ? RequestBatcherMetrics.MeasureExecution(
-                _telemetryRequestTypeName, BatcherName, RequestBatcherMetricTags.MultiSubmission,
-                (Batcher: this, Requests: requests, Token: cancellationToken),
-                static state => state.Batcher.ExecuteWithTracing(state.Requests, state.Token))
-            : ExecuteWithTracing(requests, cancellationToken);
-    }
-
-    private Task ExecuteWithTracing(IEnumerable<TRequest> requests, CancellationToken cancellationToken)
-    {
-        return RequestBatcherTracing.Source.HasListeners()
-            ? RequestBatcherTracing.TraceCall(
-                _traceMetadata,
-                (Batcher: this, Requests: requests, Token: cancellationToken),
-                static (state, context, observer) => state.Batcher.ExecuteCoreAsync(state.Requests, state.Token, context, observer))
-            : ExecuteCoreAsync(requests, cancellationToken);
+        return _callDiagnostics.Execute(
+            RequestBatcherMetricTags.MultiSubmission,
+            (Batcher: this, Requests: requests, Token: cancellationToken),
+            static (state, context, observer) => state.Batcher.ExecuteCoreAsync(state.Requests, state.Token, context, observer));
     }
 
     internal Task ExecuteCoreAsync(

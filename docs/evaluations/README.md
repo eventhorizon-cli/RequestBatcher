@@ -51,3 +51,5 @@ with tracing disabled, using the same 1,024-request waves and simulated 20 ms ca
 
 The [Execute and submission metrics evaluation](execute-metrics/README.md) compares the four-histogram implementation
 against its previous metric contract on .NET 10, including public-call completion and submission-size recording.
+The [shared call diagnostics validation](execute-metrics/call-diagnostics.md) covers the unified ordinary/delegate
+boundary, both APIs through real OTLP export, and bounded .NET 10 metrics/tracing workloads.

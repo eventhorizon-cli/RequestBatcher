@@ -6,123 +6,97 @@ internal static class CartEndpoints
 {
     internal static void MapCartEndpoints(this WebApplication app)
     {
-        app.MapPost("/cart/quote", async (
+        app.MapPost("/cart/quote", (
             CartItem?[]? items,
             [FromKeyedServices("pricing-queries")] IRequestBatcher<int, Product?> pricingBatcher,
             CancellationToken cancellationToken) =>
+            QuoteAsync(items, (ids, token) => pricingBatcher.ExecuteAsync(
+                ids,
+                static (IReadOnlyList<RequestBatchEntry<int, Product?>> entries,
+                    IHttpClientFactory clientFactory,
+                    CancellationToken batchCancellationToken) =>
+                    PricingQueries.HandleAsync(entries, clientFactory, batchCancellationToken),
+                token), cancellationToken));
+
+        app.MapPost("/cart/quote/ordinary", (
+            CartItem?[]? items,
+            [FromKeyedServices("pricing-queries-ordinary")] IRequestBatcher<int, Product?> pricingBatcher,
+            CancellationToken cancellationToken) =>
+            QuoteAsync(items, (ids, token) => pricingBatcher.ExecuteAsync(ids, token), cancellationToken));
+    }
+
+    private static async Task<IResult> QuoteAsync(
+        CartItem?[]? items,
+        Func<int[], CancellationToken, Task<IReadOnlyList<Product?>>> execute,
+        CancellationToken cancellationToken)
+    {
+        var validationError = Validate(items);
+        if (validationError is not null)
         {
-            var validationError = Validate(items);
-            if (validationError is not null)
+            return Results.BadRequest(validationError);
+        }
+
+        var validItems = items!.Select(item => item!).ToArray();
+        var ids = validItems.Select(item => item.ProductId).ToArray();
+        IReadOnlyList<Product?> products;
+        try
+        {
+            products = await execute(ids, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (OperationCanceledException)
+        {
+            return Results.Problem(
+                "The pricing service timed out.",
+                statusCode: StatusCodes.Status504GatewayTimeout);
+        }
+        catch (HttpRequestException)
+        {
+            return Results.Problem(
+                "The pricing service could not be reached.",
+                statusCode: StatusCodes.Status502BadGateway);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or JsonException)
+        {
+            return Results.Problem(
+                "The pricing service returned an invalid response.",
+                statusCode: StatusCodes.Status502BadGateway);
+        }
+
+        if (products.Count != validItems.Length)
+        {
+            return Results.Problem(
+                "The pricing service returned an invalid product count.",
+                statusCode: StatusCodes.Status502BadGateway);
+        }
+
+        var lines = new QuoteLine[validItems.Length];
+        var total = 0m;
+        for (var index = 0; index < validItems.Length; index++)
+        {
+            var product = products[index];
+            if (product is null)
             {
-                return Results.BadRequest(validationError);
+                return Results.NotFound($"Product {validItems[index].ProductId} was not found.");
             }
 
-            var validItems = items!.Select(item => item!).ToArray();
-            var ids = validItems.Select(item => item.ProductId).ToArray();
-            IReadOnlyList<Product?> products;
-            try
-            {
-                // The native batch overload creates one call span for the entire Cart submission.
-                products = await pricingBatcher.ExecuteAsync(
-                    ids,
-                    static async ValueTask (
-                        IReadOnlyList<RequestBatchEntry<int, Product?>> entries,
-                        IHttpClientFactory clientFactory,
-                        CancellationToken batchCancellationToken) =>
-                    {
-                        var batchIds = entries.Select(entry => entry.Request).Distinct().ToArray();
-                        using var response = await clientFactory.CreateClient("pricing")
-                            .GetAsync($"prices?ids={string.Join(',', batchIds)}", batchCancellationToken)
-                            .ConfigureAwait(false);
-                        if (!response.IsSuccessStatusCode)
-                        {
-                            throw new HttpRequestException(
-                                "The pricing service did not accept the product lookup.",
-                                inner: null,
-                                response.StatusCode);
-                        }
-
-                        var batchProducts = await response.Content
-                            .ReadFromJsonAsync<Product?[]>(cancellationToken: batchCancellationToken)
-                            .ConfigureAwait(false);
-                        if (batchProducts is null || batchProducts.Length != batchIds.Length)
-                        {
-                            throw new InvalidOperationException(
-                                "The pricing service returned an invalid product count.");
-                        }
-
-                        var productsById = new Dictionary<int, Product?>();
-                        for (var index = 0; index < batchIds.Length; index++)
-                        {
-                            var product = batchProducts[index];
-                            if (product is not null && (product.Id != batchIds[index] || product.Price < 0))
-                            {
-                                throw new InvalidOperationException("The pricing service returned an invalid product.");
-                            }
-
-                            productsById.Add(batchIds[index], product);
-                        }
-
-                        entries.SetResponses(id => productsById[id]);
-                    },
-                    cancellationToken)
-                    .ConfigureAwait(false);
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (OperationCanceledException)
+            var item = validItems[index];
+            if (product.Id != item.ProductId || product.Price < 0)
             {
                 return Results.Problem(
-                    "The pricing service timed out.",
-                    statusCode: StatusCodes.Status504GatewayTimeout);
-            }
-            catch (HttpRequestException)
-            {
-                return Results.Problem(
-                    "The pricing service could not be reached.",
-                    statusCode: StatusCodes.Status502BadGateway);
-            }
-            catch (Exception exception) when (exception is InvalidOperationException or JsonException)
-            {
-                return Results.Problem(
-                    "The pricing service returned an invalid response.",
+                    "The pricing service returned an invalid product.",
                     statusCode: StatusCodes.Status502BadGateway);
             }
 
-            if (products.Count != validItems.Length)
-            {
-                return Results.Problem(
-                    "The pricing service returned an invalid product count.",
-                    statusCode: StatusCodes.Status502BadGateway);
-            }
+            var lineTotal = product.Price * item.Quantity;
+            lines[index] = new QuoteLine(product.Id, product.Name, product.Price, item.Quantity, lineTotal);
+            total += lineTotal;
+        }
 
-            var lines = new QuoteLine[validItems.Length];
-            var total = 0m;
-            for (var index = 0; index < validItems.Length; index++)
-            {
-                var product = products[index];
-                if (product is null)
-                {
-                    return Results.NotFound($"Product {validItems[index].ProductId} was not found.");
-                }
-
-                var item = validItems[index];
-                if (product.Id != item.ProductId || product.Price < 0)
-                {
-                    return Results.Problem(
-                        "The pricing service returned an invalid product.",
-                        statusCode: StatusCodes.Status502BadGateway);
-                }
-
-                var lineTotal = product.Price * item.Quantity;
-                lines[index] = new QuoteLine(product.Id, product.Name, product.Price, item.Quantity, lineTotal);
-                total += lineTotal;
-            }
-
-            return Results.Ok(new CartQuote(lines, total));
-        });
+        return Results.Ok(new CartQuote(lines, total));
     }
 
     private static string? Validate(CartItem?[]? items)

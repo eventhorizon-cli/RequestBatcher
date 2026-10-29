@@ -123,8 +123,11 @@ admission rejection, enumeration failure, or shutdown rejection. A null collecti
 instrumentation and is not measured. Request-only and response APIs are instrumented at their public boundary only;
 internal forwarding does not record another observation. Delegate adapters measure their SubmitAsync entry before
 binding the Handler and invoking the internal submission core. This includes binding failures and avoids calling the
-ordinary public entry a second time, which would duplicate metrics and tracing. All public entry adapters reuse the
-same measurement helper. Delegate extension argument checks (including null collections or callbacks) and unsupported
+ordinary public entry a second time, which would duplicate metrics and tracing. All public entry adapters call
+`RequestBatcherCallDiagnostics.Execute`, the shared outer boundary that composes metrics around tracing and then invokes
+the adapter's submission operation. Delegate binding remains inside that operation. Response-group operations include
+response-array assembly and do not attach the tracing observer to an earlier queue completion. Delegate extension
+argument checks (including null collections or callbacks) and unsupported
 batcher validation occur before this boundary and are not measured.
 
 Its additional tags are `requestbatcher.submission.kind` (`single` or `multi`) and `requestbatcher.outcome`
@@ -344,8 +347,10 @@ integration extension changes the SDK's batch decision when it is registered.
 
 ## Internal flow and performance
 
-Diagnostics owns a shared ActivitySource and tracing helpers. Public entry points
-check HasListeners before creating closures or tracing state. With no listener,
+Diagnostics owns a shared ActivitySource and tracing helpers. Ordinary and delegate entry points use the same
+`RequestBatcherCallDiagnostics` wrapper, which owns cached call metadata and checks metric and tracing subscriptions.
+It composes the existing measurement and tracing helpers without introducing an additional completion bridge.
+Static callbacks and value-type state avoid per-call closure allocations. With no listener,
 the existing task path is used without an async wrapper, span, link collection,
 or extra per-item tracing allocation. Traced pending requests use an internal
 subclass that stores shared submission tracing state, keeping the untraced pending object's size unchanged.
@@ -392,6 +397,8 @@ faults, and cancellation semantics while optimizing the ordinary admission path.
 only the final aggregate publication, never an individual item's completion. No Task.Run or extra thread is added per call/batch.
 Response and delegate adapters invoke uninstrumented core methods under their
 outer call span to avoid duplicate spans and include their own preparation.
+The shared wrapper preserves synchronous exceptions, original Task outcomes and cancellation tokens, and the
+existing no-listener Task path. Public APIs, metric names/tags, span boundaries, and Handler scheduling are unchanged.
 
 ## Validation and compatibility
 
@@ -407,6 +414,9 @@ adapter registration/null validation. Named and unnamed class/delegate registrat
 with and without responses, must expose the correct name on both spans without mixing
 concurrent pipelines. Tests with global listeners are isolated
 from unrelated Activity-sensitive tests.
+Entry-point regression tests exercise ordinary and delegate single/group calls, with and without responses, across
+independent metric/tracing subscription combinations. They assert exactly one call measurement/span when enabled,
+binding failures inside the boundary, and no early completion before response materialization.
 
 Matched measurements compare the previous release implementation plus context
 isolation with the new implementation without listeners, and compare disabled,
@@ -445,8 +455,9 @@ proxies, and unique W3C trace IDs to isolate its evidence from other sample traf
 available for manual inspection but is not started by the automated integration project. No production dependency or
 public API changes are required.
 
-Concurrent Cart requests each submit 2–10 product IDs through the native enumerable API. The suite verifies ordered
-prices including duplicates, exactly one Execute span per HTTP request, its HTTP parent, and independent Handle
+Concurrent Cart requests each submit 2–10 product IDs through both the ordinary handler-type API and the delegate API,
+using separate batcher names and endpoints but the same Pricing lookup implementation. For each name independently,
+the suite verifies ordered prices including duplicates, exactly one Execute span per HTTP request, its HTTP parent, and independent Handle
 roots linked to the corresponding Execute contexts. Each Execute must link back to exactly those batch contexts;
 both directions must be unique and symmetric, with no unrelated batch links. Every submitted caller
 must be represented, and a concurrent burst must demonstrate a batch containing multiple callers. Batch size counts
@@ -456,6 +467,8 @@ Pricing batcher or error spans. Repeated fresh bursts also detect accidental reu
 
 Telemetry assertions poll for complete evidence with a bounded deadline, accounting for asynchronous export and
 indexing. Failures identify missing trace IDs, links, or metrics rather than passing on partial data. Prometheus checks
-verify all five RequestBatcher instruments for the configured name and positive post-request increments for submitted,
-processed, and batch counters. Histogram counts and sums must also advance. Integration runs are explicitly enabled;
+verify all four RequestBatcher histograms independently for each configured name. Submission-size and batch-size sums
+must match the input item count, and submission-size and Execute-duration histogram counts must each match the number of HTTP calls exactly;
+this prevents duplicate or missing ordinary-path measurements from being masked by delegate measurements. Handler
+batch counts and duration sums must also advance. Integration runs are explicitly enabled;
 without the opt-in environment variable, tests are reported as skipped.
