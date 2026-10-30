@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using RequestBatcher.Diagnostics;
+using RequestBatcher.Diagnostics.Tracing;
 using RequestBatcher.PendingRequests;
 
 namespace RequestBatcher.Tests.Diagnostics;
@@ -16,7 +17,7 @@ public sealed class SharedCompletionTests
         using var capture = new ActivityCapture();
         TracedRequestCompletion? completion = null;
         var task = RequestBatcherTracing.TraceCall(
-            new RequestBatcherTraceMetadata("test"),
+            new RequestBatcherMetadata("test"),
             completeBeforeAttach,
             (completeBeforeReturn, _, observer) =>
             {
@@ -207,7 +208,7 @@ public sealed class SharedCompletionTests
         Assert.True(completion.Task.IsFaulted);
         var span = Assert.Single(capture.Stopped);
         Assert.Equal(ActivityStatusCode.Error, span.Status);
-        Assert.Equal(typeof(InvalidOperationException).FullName, span.GetTagItem("error.type"));
+        Assert.Equal(nameof(InvalidOperationException), span.GetTagItem("error.type"));
     }
 
     [Fact]
@@ -235,7 +236,7 @@ public sealed class SharedCompletionTests
         using var capture = new ActivityCapture();
         TracedResponseCompletion<int, string>? completion = null;
         var returned = RequestBatcherTracing.TraceCall(
-            new RequestBatcherTraceMetadata("typed-observed"),
+            new RequestBatcherMetadata("typed-observed"),
             7,
             (request, _, observer) =>
             {
@@ -348,14 +349,14 @@ public sealed class SharedCompletionTests
         var expected = new InvalidOperationException("submission failed");
 
         var actual = await Assert.ThrowsAsync<InvalidOperationException>(() => RequestBatcherTracing.TraceCall(
-            new RequestBatcherTraceMetadata("observed-failure"),
+            new RequestBatcherMetadata("observed-failure"),
             expected,
             (exception, _, _) => throw exception));
 
         Assert.Same(expected, actual);
         var span = Assert.Single(capture.Stopped);
         Assert.Equal(ActivityStatusCode.Error, span.Status);
-        Assert.Equal(typeof(InvalidOperationException).FullName, span.GetTagItem("error.type"));
+        Assert.Equal(nameof(InvalidOperationException), span.GetTagItem("error.type"));
     }
 
     [Fact]
@@ -365,14 +366,14 @@ public sealed class SharedCompletionTests
         var expected = new InvalidOperationException("generic submission failed");
 
         var actual = await Assert.ThrowsAsync<InvalidOperationException>(() => RequestBatcherTracing.TraceCall<int, string>(
-            new RequestBatcherTraceMetadata("generic-observed-failure"),
+            new RequestBatcherMetadata("generic-observed-failure"),
             42,
             (value, _, _) => throw expected));
 
         Assert.Same(expected, actual);
         var span = Assert.Single(capture.Stopped);
         Assert.Equal(ActivityStatusCode.Error, span.Status);
-        Assert.Equal(typeof(InvalidOperationException).FullName, span.GetTagItem("error.type"));
+        Assert.Equal(nameof(InvalidOperationException), span.GetTagItem("error.type"));
     }
 
     [Fact]

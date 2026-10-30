@@ -1,4 +1,4 @@
-namespace RequestBatcher.Diagnostics;
+namespace RequestBatcher.Diagnostics.Metrics;
 
 /// <summary>
 /// Defines the names of RequestBatcher metric instruments.

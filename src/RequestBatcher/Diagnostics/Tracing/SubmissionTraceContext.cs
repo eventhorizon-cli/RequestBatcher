@@ -1,6 +1,6 @@
 using System.Diagnostics;
 
-namespace RequestBatcher.Diagnostics;
+namespace RequestBatcher.Diagnostics.Tracing;
 
 internal class SubmissionTraceContext
 {

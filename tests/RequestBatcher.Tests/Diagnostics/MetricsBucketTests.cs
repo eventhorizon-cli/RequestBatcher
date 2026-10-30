@@ -2,7 +2,7 @@ using System.Diagnostics.Metrics;
 using Microsoft.Extensions.DependencyInjection;
 using OpenTelemetry;
 using OpenTelemetry.Metrics;
-using RequestBatcher.Diagnostics;
+using RequestBatcher.Diagnostics.Metrics;
 
 namespace RequestBatcher.Tests.Diagnostics;
 
@@ -15,9 +15,9 @@ public sealed class MetricsBucketTests
     [Theory]
     [InlineData(1)]
     [InlineData(3)]
-    public void SizeHistograms_SmallBatchSize_PreserveEveryIntegerBoundary(int batchSize)
+    public async Task SizeHistograms_SmallBatchSize_PreserveEveryIntegerBoundary(int batchSize)
     {
-        using var capture = new Capture(services => Register(services, batchSize));
+        await using var capture = new Capture(services => Register(services, batchSize));
         capture.Metrics.RecordSubmissionSize("Int32", null, "multi", 0);
         capture.Metrics.RecordSubmissionSize("Int32", null, "multi", batchSize);
         RecordBatch(capture.Metrics, batchSize);
@@ -37,9 +37,9 @@ public sealed class MetricsBucketTests
     }
 
     [Fact]
-    public void SizeHistograms_BatchSize100_ExportExplicitBucketsAndExactTotals()
+    public async Task SizeHistograms_BatchSize100_ExportExplicitBucketsAndExactTotals()
     {
-        using var capture = new Capture(services => Register(services, 100));
+        await using var capture = new Capture(services => Register(services, 100));
         foreach (var size in new[] { 0, 1, 3, 100, 101, 3201 })
         {
             capture.Metrics.RecordSubmissionSize("Int32", null, "multi", size);
@@ -70,9 +70,9 @@ public sealed class MetricsBucketTests
     }
 
     [Fact]
-    public void SizeHistograms_MaximumBatchSize_AvoidOverflowWithoutResolvingPipeline()
+    public async Task SizeHistograms_MaximumBatchSize_AvoidOverflowWithoutResolvingBatcher()
     {
-        using var capture = new Capture(services => Register(services, int.MaxValue));
+        await using var capture = new Capture(services => Register(services, int.MaxValue));
         capture.Metrics.RecordSubmissionSize("Int32", null, "multi", int.MaxValue);
         RecordBatch(capture.Metrics, int.MaxValue);
         capture.Collect();
@@ -97,9 +97,9 @@ public sealed class MetricsBucketTests
     [InlineData(1, true)]
     [InlineData(2, false)]
     [InlineData(3, true)]
-    public void Instrumentation_AllRegistrationShapes_ReadsOptionsWithoutResolvingHandlers(int shape, bool instrumentationFirst)
+    public async Task Instrumentation_AllRegistrationShapes_ReadsOptionsWithoutResolvingHandlers(int shape, bool instrumentationFirst)
     {
-        using var capture = new Capture(services =>
+        await using var capture = new Capture(services =>
         {
             switch (shape)
             {
@@ -123,9 +123,9 @@ public sealed class MetricsBucketTests
     }
 
     [Fact]
-    public void Instrumentation_NamedPipelinesAndRepeatedRegistration_UsesMaximumBatchSizeSchema()
+    public async Task Instrumentation_NamedBatchersAndRepeatedRegistration_UsesMaximumBatchSizeSchema()
     {
-        using var capture = new Capture(services =>
+        await using var capture = new Capture(services =>
         {
             services.AddRequestBatcher<int, UnresolvedHandler>("small", ServiceLifetime.Scoped, options => options.BatchSize = 40);
             services.AddRequestBatcher<int, int, UnresolvedResponseHandler>("large", ServiceLifetime.Scoped, options => options.BatchSize = 120);
@@ -158,10 +158,10 @@ public sealed class MetricsBucketTests
     }
 
     [Fact]
-    public void Instrumentation_ManyDifferentBatchSizes_KeepsSameBucketBudgetAsMaximumAlone()
+    public async Task Instrumentation_ManyDifferentBatchSizes_KeepsSameBucketBudgetAsMaximumAlone()
     {
         Snapshot[] expectedPoints;
-        using (var maximumOnly = new Capture(services => Register(services, 120)))
+        await using (var maximumOnly = new Capture(services => Register(services, 120)))
         {
             foreach (var size in new[] { 40, 120 })
             {
@@ -171,7 +171,7 @@ public sealed class MetricsBucketTests
             maximumOnly.Collect();
             expectedPoints = maximumOnly.Exporter.Points.ToArray();
         }
-        using var many = new Capture(services =>
+        await using var many = new Capture(services =>
         {
             for (var size = 1; size <= 120; size++)
             {
@@ -202,10 +202,10 @@ public sealed class MetricsBucketTests
     }
 
     [Fact]
-    public void Instrumentation_MetersWithDifferentOptions_KeepIndependentAdvice()
+    public async Task Instrumentation_MetersWithDifferentOptions_KeepIndependentAdvice()
     {
-        using var first = new Capture(services => Register(services, 1));
-        using var second = new Capture(services => Register(services, 3));
+        await using var first = new Capture(services => Register(services, 1));
+        await using var second = new Capture(services => Register(services, 3));
         var instruments = new List<Histogram<long>>();
         var measurements = new List<long>();
         using var listener = new MeterListener
@@ -229,16 +229,16 @@ public sealed class MetricsBucketTests
         Assert.Contains(instruments, instrument => instrument.Advice!.HistogramBucketBoundaries!.SequenceEqual(new long[] { 0, 1, 2, 3 }));
 
         RecordBatch(first.Metrics, 1);
-        first.Dispose();
+        await first.DisposeAsync();
         RecordBatch(first.Metrics, 1);
         RecordBatch(second.Metrics, 3);
         Assert.Equal(new long[] { 1, 3 }, measurements);
     }
 
     [Fact]
-    public void SizeHistograms_WithMeterListener_ExposeAdviceAndRawMeasurements()
+    public async Task SizeHistograms_WithMeterListener_ExposeAdviceAndRawMeasurements()
     {
-        using var metrics = new RequestBatcherMetrics(120);
+        await using var metrics = new RequestBatcherMetrics([new(120)]);
         var observations = new Dictionary<string, (long[] Advice, List<long> Values)>();
         using var listener = new MeterListener
         {
@@ -267,9 +267,9 @@ public sealed class MetricsBucketTests
     }
 
     [Fact]
-    public void SizeHistograms_WithExplicitView_OverrideCoreAdvice()
+    public async Task SizeHistograms_WithExplicitView_OverrideCoreAdvice()
     {
-        using var metrics = new RequestBatcherMetrics(120);
+        await using var metrics = new RequestBatcherMetrics([new(120)]);
         var exporter = new SnapshotExporter();
         var reader = new BaseExportingMetricReader(exporter);
         using var provider = Sdk.CreateMeterProviderBuilder()
@@ -293,7 +293,7 @@ public sealed class MetricsBucketTests
     [Fact]
     public async Task Instrumentation_DirectMeter_UsesAdviceAndRetainsOtherDefaults()
     {
-        using var direct = new Capture(services => Register(services, 3), directMeter: true);
+        await using var direct = new Capture(services => Register(services, 3), directMeter: true);
         using var foreign = new Meter("BucketTests.Foreign");
         foreign.CreateHistogram<long>(BatchSize).Record(3);
         foreign.CreateHistogram<long>(SubmissionSize).Record(3);
@@ -325,7 +325,7 @@ public sealed class MetricsBucketTests
         using var scope = metrics.StartBatch("Int32", null, size);
     }
 
-    private sealed class Capture : IDisposable
+    private sealed class Capture : IAsyncDisposable
     {
         private readonly BaseExportingMetricReader _reader;
         private readonly MeterProvider _provider;
@@ -368,10 +368,10 @@ public sealed class MetricsBucketTests
         public void Collect() => Assert.True(_reader.Collect(10000));
         public Snapshot Get(string name, string meter = "RequestBatcher") =>
             Assert.Single(Exporter.Points, point => point.Name == name && point.Meter == meter);
-        public void Dispose()
+        public async ValueTask DisposeAsync()
         {
             _provider.Dispose();
-            _services.Dispose();
+            await _services.DisposeAsync();
         }
     }
 

@@ -438,7 +438,7 @@ public sealed class RequestResponseBatcherTests
     }
 
     [Fact]
-    public void AddRequestBatcher_ResponseAndVoidForSameRequestType_RejectsDuplicatePipeline()
+    public void AddRequestBatcher_ResponseAndVoidForSameRequestType_RejectsDuplicateBatcher()
     {
         var services = new ServiceCollection();
         AddResponseHandler<int, string>(
@@ -456,7 +456,7 @@ public sealed class RequestResponseBatcherTests
     }
 
     [Fact]
-    public void AddRequestBatcher_DuplicateResponseRegistration_DoesNotChangeExistingPipeline()
+    public void AddRequestBatcher_DuplicateResponseRegistration_DoesNotChangeExistingBatcher()
     {
         var services = new ServiceCollection();
         AddResponseHandler<int, string>(

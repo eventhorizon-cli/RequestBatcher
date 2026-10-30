@@ -1,4 +1,4 @@
-namespace RequestBatcher.Diagnostics;
+namespace RequestBatcher.Diagnostics.Tracing;
 
 internal static class RequestBatcherTraceTags
 {

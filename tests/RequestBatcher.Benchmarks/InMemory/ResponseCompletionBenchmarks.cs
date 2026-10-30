@@ -7,7 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace RequestBatcher.Benchmarks.InMemory;
 
 /// <summary>
-/// Measures response completion through the public dependency-injection pipeline.
+/// Measures response completion through the public dependency-injection batcher.
 /// </summary>
 [MemoryDiagnoser]
 [RankColumn]

@@ -201,9 +201,9 @@ public sealed class DelegateExecuteMetricsTests
         if (tracing)
         {
             Assert.Equal(ActivityStatusCode.Error, callSpans[0].Status);
-            Assert.Equal("System.ArgumentException", callSpans[0].GetTagItem("error.type"));
+            Assert.Equal(nameof(ArgumentException), callSpans[0].GetTagItem("error.type"));
             Assert.Equal(ActivityStatusCode.Error, callSpans[1].Status);
-            Assert.Equal("System.ArgumentException", callSpans[1].GetTagItem("error.type"));
+            Assert.Equal(nameof(ArgumentException), callSpans[1].GetTagItem("error.type"));
             Assert.Equal(ActivityStatusCode.Unset, callSpans[2].Status);
             Assert.Equal(true, callSpans[2].GetTagItem("requestbatcher.canceled"));
             Assert.Equal(ActivityStatusCode.Unset, callSpans[3].Status);

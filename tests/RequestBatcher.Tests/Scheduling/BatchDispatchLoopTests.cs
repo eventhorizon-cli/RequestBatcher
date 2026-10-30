@@ -3,15 +3,19 @@ using BufferQueue;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using RequestBatcher.Diagnostics;
+using RequestBatcher.Diagnostics.Metrics;
 using RequestBatcher.PendingRequests;
 using RequestBatcher.Scheduling;
 
 namespace RequestBatcher.Tests.Scheduling;
 
-public sealed class BatchDispatchLoopTests : IDisposable
+public sealed class BatchDispatchLoopTests : IAsyncLifetime
 {
-    private readonly RequestBatcherMetrics _metrics = new(128);
-    public void Dispose() => _metrics.Dispose();
+    private readonly RequestBatcherMetrics _metrics = new([new(128)]);
+
+    public Task InitializeAsync() => Task.CompletedTask;
+
+    public Task DisposeAsync() => _metrics.DisposeAsync().AsTask();
 
     [Fact]
     public async Task RunAsync_ExhaustedConsumer_ReleasesSlotAndDisposesEnumerator()
@@ -27,7 +31,7 @@ public sealed class BatchDispatchLoopTests : IDisposable
             (_, _) => ValueTask.CompletedTask,
             1,
             NullLogger.Instance,
-            typeof(int).FullName!,
+            new RequestBatcherMetadata("Int32"),
             _metrics);
 
         await subject.RunAsync(consumer.Object, CancellationToken.None)
@@ -72,7 +76,7 @@ public sealed class BatchDispatchLoopTests : IDisposable
             },
             2,
             NullLogger.Instance,
-            typeof(int).FullName!,
+            new RequestBatcherMetadata("Int32"),
             _metrics);
 
         var running = subject.RunAsync(consumer.Object, CancellationToken.None);
@@ -125,7 +129,7 @@ public sealed class BatchDispatchLoopTests : IDisposable
             },
             1,
             NullLogger.Instance,
-            typeof(int).FullName!,
+            new RequestBatcherMetadata("Int32"),
             _metrics);
 
         var running = subject.RunAsync(consumer.Object, cancellation.Token);
@@ -182,7 +186,7 @@ public sealed class BatchDispatchLoopTests : IDisposable
             },
             2,
             NullLogger.Instance,
-            typeof(int).FullName!,
+            new RequestBatcherMetadata("Int32"),
             _metrics);
 
         var running = subject.RunAsync(consumer.Object, cancellation.Token);

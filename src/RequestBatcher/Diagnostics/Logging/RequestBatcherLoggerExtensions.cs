@@ -1,6 +1,6 @@
 using Microsoft.Extensions.Logging;
 
-namespace RequestBatcher.Diagnostics;
+namespace RequestBatcher.Diagnostics.Logging;
 
 internal static partial class RequestBatcherLoggerExtensions
 {

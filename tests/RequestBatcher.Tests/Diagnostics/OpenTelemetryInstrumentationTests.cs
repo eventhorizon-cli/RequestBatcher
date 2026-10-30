@@ -3,7 +3,7 @@ using System.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using OpenTelemetry;
 using OpenTelemetry.Trace;
-using RequestBatcher.Diagnostics;
+using RequestBatcher.Diagnostics.Tracing;
 
 namespace RequestBatcher.Tests.Diagnostics;
 

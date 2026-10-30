@@ -1,6 +1,6 @@
 using RequestBatcher.PendingRequests;
 
-namespace RequestBatcher.Diagnostics;
+namespace RequestBatcher.Diagnostics.Tracing;
 
 internal sealed class TracedRequestCompletion : RequestCompletion, IRequestCompletionNotification
 {

@@ -46,6 +46,8 @@ RequestBatcher 通过 `MaxConcurrency` 限制 Handler 批次并发，消费循�
 消费流程先占用一个执行名额，再通过拉取 API 从一个 Partition 拉取最多 `BatchSize` 条请求（默认 128 条），随后分发这一批。
 如果当前不足一批，就直接取出已有请求，不额外等待凑满。
 
+`RequestBatchCoordinator<TRequest>` 已改为内部类型，原来直接引用它的代码需改用公开的 `IRequestBatcher<TRequest>` 接口。
+
 调用方通过 DI 获取 `IRequestBatcher<TRequest>` 或 `IRequestBatcher<TRequest, TResponse>`，提交请求并等待各自的结果。
 
 调度循环分发一个批次后会继续运行。只要还有空闲名额，就可以继续拉取和分发下一批，无需等待刚分发的批次完成。
@@ -922,6 +924,8 @@ var prices = await store.FindAsync(keys, batchTimeout.Token).ConfigureAwait(fals
 
 `DisposeAsync` 会停止接收新请求，处理完已经接收的所有提交（包括仍在等待容量的提交），然后释放协调器持有的资源。
 并发或重复调用会共享同一次释放操作。通过 `AddRequestBatcher` 注册时，由应用容器负责异步释放。
+Handler 需要 DI 作用域时，应先停止提交并等待未完成的调用结束，再释放容器。
+容器开始释放后，待执行的批次无法再创建作用域来解析服务。
 
 正常释放会先排空已接收工作，再取消消费循环，不会通过取消正在执行的 Handler 来结束处理。如果下游操作长期不返回，
 `DisposeAsync` 也可能持续等待。因此，下游超时应由 Handler 或下游客户端单独配置，不能依赖调用方取消或释放操作代替。

@@ -52,6 +52,9 @@ This is **opportunistic batching**: writing a request to BufferQueue sends a pus
 consumer. It first acquires one execution slot, then pulls up to `BatchSize` requests (default: 128) from one partition
 and dispatches that batch. If fewer requests are available, it takes those immediately without waiting to fill the batch.
 
+`RequestBatchCoordinator<TRequest>` is internal. Code that previously referenced it directly must use the public
+`IRequestBatcher<TRequest>` abstraction instead.
+
 Callers obtain `IRequestBatcher<TRequest>` or `IRequestBatcher<TRequest, TResponse>` through DI, submit requests, and
 await their individual results.
 
@@ -1004,6 +1007,8 @@ faults, otherwise it is canceled when at least one item was canceled. Completed 
 capacity) before canceling the consumer, then releases coordinator-owned resources. A stalled downstream call can keep
 disposal waiting. Concurrent and repeated disposal calls share the same operation.
 When registered through `AddRequestBatcher`, the application container owns async disposal.
+Stop producers and await outstanding calls before disposing the container when handlers need DI scopes.
+Once container disposal begins, pending batches cannot create new scopes to resolve their services.
 
 ## Performance Tuning and Benchmarks
 

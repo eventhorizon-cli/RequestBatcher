@@ -39,13 +39,13 @@ public class DelegateServiceInjectionBenchmarks
     public bool KeyedService { get; set; }
 
     /// <summary>
-    /// Builds the typed scoped-handler pipeline and warms its first submission outside measurement.
+    /// Builds the typed scoped-handler batcher and warms its first submission outside measurement.
     /// </summary>
     [GlobalSetup(Target = nameof(TypedBatchSubmission))]
     public void SetupTyped() => Setup(useDelegate: false);
 
     /// <summary>
-    /// Builds the singleton delegate-forwarding pipeline and binds its selected static lambda outside measurement.
+    /// Builds the singleton delegate-forwarding batcher and binds its selected static lambda outside measurement.
     /// The forwarding handler resolves the dependency in an async scope owned by each dispatched batch.
     /// </summary>
     [GlobalSetup(Target = nameof(DelegateBatchSubmission))]

@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using RequestBatcher.PendingRequests;
 
-namespace RequestBatcher.Diagnostics;
+namespace RequestBatcher.Diagnostics.Tracing;
 
 internal static class RequestBatcherTracing
 {
@@ -11,19 +11,19 @@ internal static class RequestBatcherTracing
     internal static readonly ActivitySource Source = new(SourceName);
 
     public static Task TraceCall<TState>(
-        RequestBatcherTraceMetadata metadata,
+        RequestBatcherMetadata metadata,
         TState state,
         Func<TState, SubmissionTraceContext?, Task> submit) =>
         TraceCall(metadata, (state, submit), static (args, context, _) => args.submit(args.state, context), observeCompletion: false);
 
     public static Task<TResult> TraceCall<TState, TResult>(
-        RequestBatcherTraceMetadata metadata,
+        RequestBatcherMetadata metadata,
         TState state,
         Func<TState, SubmissionTraceContext?, Task<TResult>> submit) =>
         TraceCall(metadata, (state, submit), static (args, context, _) => args.submit(args.state, context), observeCompletion: false);
 
     public static Task TraceCall<TState>(
-        RequestBatcherTraceMetadata metadata,
+        RequestBatcherMetadata metadata,
         TState state,
         Func<TState, SubmissionTraceContext?, IRequestCompletionObserver?, Task> submit,
         bool observeCompletion = true)
@@ -73,7 +73,7 @@ internal static class RequestBatcherTracing
     }
 
     public static Task<TResult> TraceCall<TState, TResult>(
-        RequestBatcherTraceMetadata metadata,
+        RequestBatcherMetadata metadata,
         TState state,
         Func<TState, SubmissionTraceContext?, IRequestCompletionObserver?, Task<TResult>> submit,
         bool observeCompletion = true)
@@ -225,14 +225,14 @@ internal static class RequestBatcherTracing
     public static void RecordFailure(Activity? activity, Exception exception)
     {
         activity?.SetStatus(ActivityStatusCode.Error);
-        activity?.SetTag(RequestBatcherTraceTags.ErrorType, exception.GetType().FullName);
+        activity?.SetTag(RequestBatcherTraceTags.ErrorType, exception.GetType().Name);
     }
 
-    private static Activity? StartCall(RequestBatcherTraceMetadata metadata) => Source.StartActivity(
-        metadata.CallName,
+    private static Activity? StartCall(RequestBatcherMetadata metadata) => Source.StartActivity(
+        metadata.TraceCallName,
         ActivityKind.Internal,
         parentContext: Activity.Current?.Context ?? default,
-        tags: metadata.Tags);
+        tags: metadata.TraceTags);
 
     internal static string GetCallName(string? batcherName) => GetSpanName(CallName, batcherName);
 

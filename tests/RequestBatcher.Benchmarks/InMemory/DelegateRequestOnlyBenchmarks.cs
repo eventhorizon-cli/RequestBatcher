@@ -39,11 +39,11 @@ public class DelegateRequestOnlyBenchmarks
     [Params(false, true)]
     public bool ExplicitSubmission { get; set; }
 
-    /// <summary>Builds, binds, and warms the typed singleton pipeline outside measurement.</summary>
+    /// <summary>Builds, binds, and warms the typed singleton batcher outside measurement.</summary>
     [GlobalSetup(Target = nameof(TypedSingleton))]
     public void SetupTypedSingleton() => Setup(useDelegate: false);
 
-    /// <summary>Builds, binds, and warms the static delegate pipeline outside measurement.</summary>
+    /// <summary>Builds, binds, and warms the static delegate batcher outside measurement.</summary>
     [GlobalSetup(Target = nameof(StaticDelegate))]
     public void SetupStaticDelegate() => Setup(useDelegate: true);
 
@@ -100,7 +100,7 @@ public class DelegateRequestOnlyBenchmarks
             _submitExplicit = SubmitTypedExplicit;
         }
 
-        // Bind the selected delegate and warm the pipeline before BenchmarkDotNet measures it.
+        // Bind the selected delegate and warm the batcher before BenchmarkDotNet measures it.
         RunWaveAsync().GetAwaiter().GetResult();
     }
 

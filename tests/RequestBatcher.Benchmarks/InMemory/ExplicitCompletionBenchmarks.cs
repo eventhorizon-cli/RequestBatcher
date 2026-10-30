@@ -7,7 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace RequestBatcher.Benchmarks.InMemory;
 
 /// <summary>
-/// Measures shared completion through the public dependency-injection request pipeline.
+/// Measures shared completion through the public dependency-injection request batcher.
 /// </summary>
 [MemoryDiagnoser]
 [RankColumn]
@@ -28,41 +28,41 @@ public class ExplicitCompletionBenchmarks
     private const int BlockerRequestId = -1;
 
     private int[] _requests = [];
-    private Pipeline<SuccessHandler>? _success;
-    private Pipeline<FailureHandler>? _failure;
-    private Pipeline<PartialCancellationHandler>? _partialCancellation;
-    private Pipeline<CapacityHandler>? _capacity;
-    private Pipeline<SuccessHandler>? _mixed;
+    private BatcherFixture<SuccessHandler>? _success;
+    private BatcherFixture<FailureHandler>? _failure;
+    private BatcherFixture<PartialCancellationHandler>? _partialCancellation;
+    private BatcherFixture<CapacityHandler>? _capacity;
+    private BatcherFixture<SuccessHandler>? _mixed;
 
     [Params(10, 1_000)]
     public int GroupSize { get; set; }
 
-    private Pipeline<SuccessHandler> Success =>
-        _success ?? throw new InvalidOperationException("The success pipeline has not been initialized.");
+    private BatcherFixture<SuccessHandler> Success =>
+        _success ?? throw new InvalidOperationException("The success batcher has not been initialized.");
 
-    private Pipeline<FailureHandler> Failure =>
-        _failure ?? throw new InvalidOperationException("The failure pipeline has not been initialized.");
+    private BatcherFixture<FailureHandler> Failure =>
+        _failure ?? throw new InvalidOperationException("The failure batcher has not been initialized.");
 
-    private Pipeline<PartialCancellationHandler> PartialCancellation =>
+    private BatcherFixture<PartialCancellationHandler> PartialCancellation =>
         _partialCancellation ?? throw new InvalidOperationException(
-            "The partial cancellation pipeline has not been initialized.");
+            "The partial cancellation batcher has not been initialized.");
 
-    private Pipeline<CapacityHandler> Capacity =>
-        _capacity ?? throw new InvalidOperationException("The capacity pipeline has not been initialized.");
+    private BatcherFixture<CapacityHandler> Capacity =>
+        _capacity ?? throw new InvalidOperationException("The capacity batcher has not been initialized.");
 
-    private Pipeline<SuccessHandler> Mixed =>
-        _mixed ?? throw new InvalidOperationException("The mixed pipeline has not been initialized.");
+    private BatcherFixture<SuccessHandler> Mixed =>
+        _mixed ?? throw new InvalidOperationException("The mixed batcher has not been initialized.");
 
     [GlobalSetup]
     public void GlobalSetup()
     {
         _requests = Enumerable.Range(0, GroupSize).ToArray();
 
-        _success = CreatePipeline<SuccessHandler>(ConfigureStandard);
-        _failure = CreatePipeline<FailureHandler>(ConfigureStandard);
-        _partialCancellation = CreatePipeline<PartialCancellationHandler>(ConfigurePartialCancellation);
-        _capacity = CreatePipeline<CapacityHandler>(ConfigureCapacity);
-        _mixed = CreatePipeline<SuccessHandler>(ConfigureStandard);
+        _success = CreateBatcherFixture<SuccessHandler>(ConfigureStandard);
+        _failure = CreateBatcherFixture<FailureHandler>(ConfigureStandard);
+        _partialCancellation = CreateBatcherFixture<PartialCancellationHandler>(ConfigurePartialCancellation);
+        _capacity = CreateBatcherFixture<CapacityHandler>(ConfigureCapacity);
+        _mixed = CreateBatcherFixture<SuccessHandler>(ConfigureStandard);
     }
 
     [Benchmark(Description = "Explicit group success")]
@@ -149,11 +149,11 @@ public class ExplicitCompletionBenchmarks
     [GlobalCleanup]
     public async Task GlobalCleanupAsync()
     {
-        await DisposePipelineAsync(_success).ConfigureAwait(false);
-        await DisposePipelineAsync(_failure).ConfigureAwait(false);
-        await DisposePipelineAsync(_partialCancellation).ConfigureAwait(false);
-        await DisposePipelineAsync(_capacity).ConfigureAwait(false);
-        await DisposePipelineAsync(_mixed).ConfigureAwait(false);
+        await DisposeBatcherFixtureAsync(_success).ConfigureAwait(false);
+        await DisposeBatcherFixtureAsync(_failure).ConfigureAwait(false);
+        await DisposeBatcherFixtureAsync(_partialCancellation).ConfigureAwait(false);
+        await DisposeBatcherFixtureAsync(_capacity).ConfigureAwait(false);
+        await DisposeBatcherFixtureAsync(_mixed).ConfigureAwait(false);
         _success = null;
         _failure = null;
         _partialCancellation = null;
@@ -185,7 +185,7 @@ public class ExplicitCompletionBenchmarks
         options.UsePartitionKey(static _ => 0, PartitionCount);
     }
 
-    private Pipeline<THandler> CreatePipeline<THandler>(Action<RequestBatchOptions<int>, int> configure)
+    private BatcherFixture<THandler> CreateBatcherFixture<THandler>(Action<RequestBatchOptions<int>, int> configure)
         where THandler : class, IRequestBatchHandler<int>
     {
         var services = new ServiceCollection();
@@ -202,7 +202,7 @@ public class ExplicitCompletionBenchmarks
         var handler = provider.GetRequiredService<IRequestBatchHandler<int>>() as THandler ??
             throw new InvalidOperationException("The benchmark handler was not resolved through its public interface.");
         var batcher = provider.GetRequiredService<IRequestBatcher<int>>();
-        return new Pipeline<THandler>(provider, batcher, handler);
+        return new BatcherFixture<THandler>(provider, batcher, handler);
     }
 
     private static async Task ObserveSuccessAsync(Task operation) =>
@@ -241,16 +241,16 @@ public class ExplicitCompletionBenchmarks
         throw new InvalidOperationException("The explicit group did not observe caller cancellation.");
     }
 
-    private static async ValueTask DisposePipelineAsync<THandler>(Pipeline<THandler>? pipeline)
+    private static async ValueTask DisposeBatcherFixtureAsync<THandler>(BatcherFixture<THandler>? fixture)
         where THandler : class, IRequestBatchHandler<int>
     {
-        if (pipeline is not null)
+        if (fixture is not null)
         {
-            await pipeline.DisposeAsync().ConfigureAwait(false);
+            await fixture.DisposeAsync().ConfigureAwait(false);
         }
     }
 
-    private sealed class Pipeline<THandler>(
+    private sealed class BatcherFixture<THandler>(
         ServiceProvider provider,
         IRequestBatcher<int> batcher,
         THandler handler) : IAsyncDisposable

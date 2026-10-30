@@ -1,6 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
-using RequestBatcher.DelegateHandlers;
+using RequestBatcher.Handlers.Delegate;
 
 namespace RequestBatcher;
 
@@ -10,7 +10,7 @@ public static partial class RequestBatcherServiceCollectionExtensions
     /// Registers a default singleton batcher whose static delegate handler is supplied at execution time.
     /// </summary>
     /// <remarks>
-    /// The handler and bound delegate are singleton per pipeline. Service parameters retain their registered
+    /// The handler and bound delegate are singleton per batcher. Service parameters retain their registered
     /// lifetimes and are resolved in an async scope per batch. Batches without service parameters create no scope.
     /// </remarks>
     /// <typeparam name="TRequest">The request type.</typeparam>
@@ -26,13 +26,13 @@ public static partial class RequestBatcherServiceCollectionExtensions
     /// Registers a named singleton batcher whose static delegate handler is supplied at execution time.
     /// </summary>
     /// <remarks>
-    /// The handler and bound delegate are singleton per pipeline. Service parameters retain their registered
+    /// The handler and bound delegate are singleton per batcher. Service parameters retain their registered
     /// lifetimes and are resolved in an async scope per batch. Batches without service parameters create no scope.
     /// </remarks>
     /// <typeparam name="TRequest">The request type.</typeparam>
     /// <param name="services">The application-owned service collection.</param>
     /// <param name="batcherName">The non-empty, case-sensitive batcher name used for keyed resolution.</param>
-    /// <param name="configure">An optional callback that configures this pipeline.</param>
+    /// <param name="configure">An optional callback that configures this batcher.</param>
     /// <returns>The service collection.</returns>
     public static IServiceCollection AddDelegateRequestBatcher<TRequest>(
         this IServiceCollection services,
@@ -47,7 +47,7 @@ public static partial class RequestBatcherServiceCollectionExtensions
     /// Registers a default singleton response batcher whose static delegate handler is supplied at execution time.
     /// </summary>
     /// <remarks>
-    /// The handler and bound delegate are singleton per pipeline. Service parameters retain their registered
+    /// The handler and bound delegate are singleton per batcher. Service parameters retain their registered
     /// lifetimes and are resolved in an async scope per batch. Batches without service parameters create no scope.
     /// </remarks>
     /// <typeparam name="TRequest">The request type.</typeparam>
@@ -64,14 +64,14 @@ public static partial class RequestBatcherServiceCollectionExtensions
     /// Registers a named singleton response batcher whose static delegate handler is supplied at execution time.
     /// </summary>
     /// <remarks>
-    /// The handler and bound delegate are singleton per pipeline. Service parameters retain their registered
+    /// The handler and bound delegate are singleton per batcher. Service parameters retain their registered
     /// lifetimes and are resolved in an async scope per batch. Batches without service parameters create no scope.
     /// </remarks>
     /// <typeparam name="TRequest">The request type.</typeparam>
     /// <typeparam name="TResponse">The response type.</typeparam>
     /// <param name="services">The application-owned service collection.</param>
     /// <param name="batcherName">The non-empty, case-sensitive batcher name used for keyed resolution.</param>
-    /// <param name="configure">An optional callback that configures this pipeline.</param>
+    /// <param name="configure">An optional callback that configures this batcher.</param>
     /// <returns>The service collection.</returns>
     public static IServiceCollection AddDelegateRequestBatcher<TRequest, TResponse>(
         this IServiceCollection services,
@@ -88,19 +88,19 @@ public static partial class RequestBatcherServiceCollectionExtensions
         Action<RequestBatchOptions<TRequest>>? configure)
     {
         var options = RegisterDelegateOptions(services, batcherName, configure);
-        var pipelineKey = RegisterDelegatePipeline(services, options, batcherName);
+        var batcherKey = RegisterDelegateBatcher(services, options, batcherName);
 
-        DelegateRequestBatcher<TRequest> CreateBatcher(IServiceProvider provider) => new(
-            provider.GetRequiredKeyedService<RequestBatchCoordinator<TRequest>>(pipelineKey),
-            provider.GetRequiredKeyedService<DelegateRequestBatchHandler<TRequest>>(pipelineKey));
+        services.AddKeyedSingleton<DelegateRequestBatcher<TRequest>>(batcherKey);
 
         if (batcherName is null)
         {
-            services.AddSingleton<IRequestBatcher<TRequest>>(CreateBatcher);
+            services.AddSingleton<IRequestBatcher<TRequest>>(
+                provider => provider.GetRequiredKeyedService<DelegateRequestBatcher<TRequest>>(batcherKey));
         }
         else
         {
-            services.AddKeyedSingleton<IRequestBatcher<TRequest>>(batcherName, (provider, _) => CreateBatcher(provider));
+            services.AddKeyedSingleton<IRequestBatcher<TRequest>>(
+                batcherName, (provider, _) => provider.GetRequiredKeyedService<DelegateRequestBatcher<TRequest>>(batcherKey));
         }
 
         return services;
@@ -113,23 +113,20 @@ public static partial class RequestBatcherServiceCollectionExtensions
     {
         var options = RegisterDelegateOptions(services, batcherName, configure);
         var entryOptions = options.Project<RequestBatchEntry<TRequest, TResponse>>(static entry => entry.Request);
-        var pipelineKey = RegisterDelegatePipeline(services, entryOptions, batcherName, ValidateResponses<TRequest, TResponse>);
+        var batcherKey = RegisterDelegateBatcher(services, entryOptions, batcherName, ValidateResponses<TRequest, TResponse>);
 
-        DelegateRequestBatcher<TRequest, TResponse> CreateBatcher(IServiceProvider provider) => new(
-            new ResponseRequestBatcher<TRequest, TResponse>(
-                provider.GetRequiredKeyedService<RequestBatchCoordinator<RequestBatchEntry<TRequest, TResponse>>>(
-                    pipelineKey)),
-            provider.GetRequiredKeyedService<DelegateRequestBatchHandler<RequestBatchEntry<TRequest, TResponse>>>(
-                pipelineKey));
+        services.AddKeyedSingleton<ResponseRequestBatcher<TRequest, TResponse>>(batcherKey);
+        services.AddKeyedSingleton<DelegateRequestBatcher<TRequest, TResponse>>(batcherKey);
 
         if (batcherName is null)
         {
-            services.AddSingleton<IRequestBatcher<TRequest, TResponse>>(CreateBatcher);
+            services.AddSingleton<IRequestBatcher<TRequest, TResponse>>(
+                provider => provider.GetRequiredKeyedService<DelegateRequestBatcher<TRequest, TResponse>>(batcherKey));
         }
         else
         {
             services.AddKeyedSingleton<IRequestBatcher<TRequest, TResponse>>(
-                batcherName, (provider, _) => CreateBatcher(provider));
+                batcherName, (provider, _) => provider.GetRequiredKeyedService<DelegateRequestBatcher<TRequest, TResponse>>(batcherKey));
         }
 
         return services;
@@ -156,11 +153,11 @@ public static partial class RequestBatcherServiceCollectionExtensions
         var options = CreateNamedOptions(configure);
         if (batcherName is null)
         {
-            RegisterBatcherPipeline<TRequest>(services);
+            RegisterDefaultBatcher<TRequest>(services);
         }
         else
         {
-            RegisterNamedPipeline<TRequest>(services, batcherName);
+            RegisterNamedBatcher<TRequest>(services, batcherName);
         }
 
         services.AddLogging();
@@ -169,22 +166,23 @@ public static partial class RequestBatcherServiceCollectionExtensions
         return options;
     }
 
-    private static object RegisterDelegatePipeline<TRequest>(
+    private static object RegisterDelegateBatcher<TRequest>(
         IServiceCollection services,
         RequestBatchOptions<TRequest> options,
         string? batcherName,
         Action<IReadOnlyList<TRequest>>? validateResponses = null)
     {
-        var pipelineKey = new object();
-        services.AddKeyedSingleton<DelegateRequestBatchHandler<TRequest>>(
-            pipelineKey,
-            (provider, _) => new DelegateRequestBatchHandler<TRequest>(
-                provider.GetRequiredService<IServiceScopeFactory>(), validateResponses));
+        var batcherKey = new object();
+        if (validateResponses is not null)
+        {
+            services.AddKeyedSingleton(batcherKey, validateResponses);
+        }
+        services.AddKeyedSingleton<DelegateRequestBatchHandler<TRequest>>(batcherKey);
         services.AddKeyedSingleton<IRequestBatchHandler<TRequest>>(
-            pipelineKey,
+            batcherKey,
             (provider, key) => provider.GetRequiredKeyedService<DelegateRequestBatchHandler<TRequest>>(key));
-        AddKeyedCoordinator(services, pipelineKey, ServiceLifetime.Singleton, options, batcherName);
-        return pipelineKey;
+        AddKeyedCoordinator(services, batcherKey, ServiceLifetime.Singleton, options, batcherName);
+        return batcherKey;
     }
 
     private static void ValidateResponses<TRequest, TResponse>(

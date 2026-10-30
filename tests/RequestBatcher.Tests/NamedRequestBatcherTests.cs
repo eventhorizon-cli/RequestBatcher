@@ -8,7 +8,7 @@ namespace RequestBatcher.Tests;
 public sealed class NamedRequestBatcherTests
 {
     [Fact]
-    public async Task AddRequestBatcher_NamedPipelinesWithSameRequestType_IsolatePipelinesAndOptions()
+    public async Task AddRequestBatcher_NamedBatchersWithSameRequestType_IsolateBatchersAndOptions()
     {
         const string firstName = "price";
         const string secondName = "cost";
@@ -43,7 +43,7 @@ public sealed class NamedRequestBatcherTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task AddRequestBatcher_NamedAndUnkeyedPipelines_CoexistInEitherRegistrationOrder(
+    public async Task AddRequestBatcher_NamedAndUnkeyedBatchers_CoexistInEitherRegistrationOrder(
         bool namedFirst)
     {
         const string firstName = "price";
@@ -211,7 +211,7 @@ public sealed class NamedRequestBatcherTests
     [Theory]
     [InlineData(true)]
     [InlineData(false)]
-    public async Task ExecuteAsync_NamedResponsePipelines_IsolatesHandlersAndUnkeyedRegistration(
+    public async Task ExecuteAsync_NamedResponseBatchers_IsolatesHandlersAndUnkeyedRegistration(
         bool namedFirst)
     {
         const string tensName = "price";
@@ -422,7 +422,7 @@ public sealed class NamedRequestBatcherTests
     }
 
     [Fact]
-    public async Task DisposeAsync_NamedCoordinator_DoesNotStopOtherPipeline()
+    public async Task DisposeAsync_NamedCoordinator_DoesNotStopOtherBatcher()
     {
         const string disposedName = "price";
         const string activeName = "cost";

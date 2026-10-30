@@ -16,7 +16,8 @@ Alternatively, install `RequestBatcher.OpenTelemetry` and use
 `.WithMetrics(metrics => metrics.AddRequestBatcherInstrumentation())`. Both register the Meter and use the size-histogram
 bucket advice supplied by core. Register all batchers before building the service provider. When the first batcher is
 resolved, the shared core metrics service uses the largest registered `BatchSize` to create immutable advice; it does not
-resolve other batchers or handlers. Each container owns its metrics service and disposes it after its batchers drain.
+resolve other batchers or handlers. Each container owns its metrics service and asynchronously disposes it after its
+batchers drain. The service waits for final recording by Execute measurements already in progress before releasing its Meter.
 Independent containers may publish different bucket layouts; do not combine incompatible layouts in one metric stream.
 Once the container disposes the metrics service, calls through retained batcher references emit no further measurements.
 
@@ -63,7 +64,8 @@ value, including zero. If statistics are unavailable, the observation is omitted
 The reader controls collection timing: periodic OpenTelemetry readers, pull exporters, and native `MeterListener`
 all work without a RequestBatcher timer. Short peaks between collections may be missed. The gauge has the request-type
 and optional Batcher-name tags, with no submission-kind, outcome, or partition tags. It remains observable during
-draining and is unregistered when the coordinator is disposed. An in-progress collection can finish during disposal.
+normal draining. The consumer loop owns the registration and unregisters it when the loop exits, including on failure.
+An in-progress collection can finish during unregistration.
 Unlike the histograms, the gauge has no buckets and is not a cumulative total; read its value directly instead of
 applying `rate`. OTLP keeps `requestbatcher.backlog`; the sample's Prometheus query is `requestbatcher_backlog`.
 

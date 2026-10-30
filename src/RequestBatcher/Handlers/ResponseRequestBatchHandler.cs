@@ -1,4 +1,4 @@
-namespace RequestBatcher;
+namespace RequestBatcher.Handlers;
 
 internal sealed class ResponseRequestBatchHandler<TRequest, TResponse>(
     IRequestBatchHandler<TRequest, TResponse> handler)

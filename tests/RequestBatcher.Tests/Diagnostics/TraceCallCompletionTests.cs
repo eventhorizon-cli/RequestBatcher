@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using RequestBatcher.Diagnostics;
+using RequestBatcher.Diagnostics.Tracing;
 
 namespace RequestBatcher.Tests.Diagnostics;
 
@@ -27,14 +28,14 @@ public sealed class TraceCallCompletionTests
                 if (useGeneric)
                 {
                     _ = RequestBatcherTracing.TraceCall<Exception, int>(
-                        new RequestBatcherTraceMetadata("test"),
+                        new RequestBatcherMetadata("test"),
                         expected,
                         static (exception, _) => throw exception);
                 }
                 else
                 {
                     _ = RequestBatcherTracing.TraceCall<Exception>(
-                        new RequestBatcherTraceMetadata("test"),
+                        new RequestBatcherMetadata("test"),
                         expected,
                         static (exception, _) => throw exception);
                 }
@@ -53,7 +54,7 @@ public sealed class TraceCallCompletionTests
                 var span = Assert.Single(capture.Stopped);
                 Assert.Equal(RequestBatcherTracing.CallName, span.OperationName);
                 Assert.Equal(ActivityStatusCode.Error, span.Status);
-                Assert.Equal(typeof(InvalidOperationException).FullName, span.GetTagItem("error.type"));
+                Assert.Equal(nameof(InvalidOperationException), span.GetTagItem("error.type"));
             }
         }
         finally
@@ -154,7 +155,7 @@ public sealed class TraceCallCompletionTests
         var canceled = new OperationCanceledException("faulted cancellation");
         var pending = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
         var returned = RequestBatcherTracing.TraceCall(
-            new RequestBatcherTraceMetadata("pending-fault"),
+            new RequestBatcherMetadata("pending-fault"),
             pending.Task,
             static (task, _) => task);
 
@@ -170,7 +171,7 @@ public sealed class TraceCallCompletionTests
         Assert.Contains(returned.Exception.InnerExceptions, exception => ReferenceEquals(exception, canceled));
         var span = Assert.Single(capture.Stopped);
         Assert.Equal(ActivityStatusCode.Error, span.Status);
-        Assert.Equal(typeof(InvalidOperationException).FullName, span.GetTagItem("error.type"));
+        Assert.Equal(nameof(InvalidOperationException), span.GetTagItem("error.type"));
     }
 
     [Theory]
@@ -277,7 +278,7 @@ public sealed class TraceCallCompletionTests
         Action<ActivityContext>? captureContext = null)
     {
         return RequestBatcherTracing.TraceCall(
-            new RequestBatcherTraceMetadata(requestTypeName),
+            new RequestBatcherMetadata(requestTypeName),
             task,
             (state, context) =>
             {
@@ -292,7 +293,7 @@ public sealed class TraceCallCompletionTests
         Action<ActivityContext>? captureContext = null)
     {
         return RequestBatcherTracing.TraceCall(
-            new RequestBatcherTraceMetadata(requestTypeName),
+            new RequestBatcherMetadata(requestTypeName),
             task,
             (state, context) =>
             {

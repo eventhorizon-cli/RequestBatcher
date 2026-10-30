@@ -1,9 +1,14 @@
 using System.Collections.Concurrent;
 using System.Runtime.ExceptionServices;
 using BufferQueue;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using RequestBatcher.Diagnostics;
+using RequestBatcher.Diagnostics.Logging;
+using RequestBatcher.Diagnostics.Metrics;
+using RequestBatcher.Diagnostics.Tracing;
+using RequestBatcher.Handlers;
 using RequestBatcher.PendingRequests;
 using RequestBatcher.Scheduling;
 
@@ -13,22 +18,19 @@ namespace RequestBatcher;
 /// Transparently coalesces concurrent requests into batches and processes batches with bounded concurrency.
 /// </summary>
 /// <typeparam name="TRequest">The request type.</typeparam>
-public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest>, IAsyncDisposable
+internal sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest>, IAsyncDisposable
 {
     internal const string TopicName = "request-batcher";
     internal const string ConsumerGroupName = "request-batcher-consumers";
     private const int Running = 0;
     private const int Stopping = 1;
     private const int Stopped = 2;
-    private static readonly string _requestTypeName =
-        typeof(TRequest).FullName ?? typeof(TRequest).Name;
-    private static readonly string _telemetryRequestTypeName =
-        RequestBatcherRequestType.GetName(typeof(TRequest));
 
     private readonly object _lifecycleLock = new();
     private readonly ILogger<RequestBatchCoordinator<TRequest>> _logger;
     private readonly RequestBatchOptions<TRequest> _options;
-    private readonly RequestBatcherCallDiagnostics _callDiagnostics;
+    private readonly RequestBatcherMetrics _metrics;
+    private readonly RequestBatcherMetadata _metadata;
     private readonly ConcurrentDictionary<PendingBatchRequest<TRequest>, byte> _pendingRequests = new();
     private readonly Action<PendingBatchRequest<TRequest>> _onRequestFinished;
     private readonly PendingRequestProducer<TRequest> _producer;
@@ -36,7 +38,7 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
     private readonly CancellationTokenSource _consumerCancellation = new();
     private readonly BatchDispatchLoop<TRequest> _batchDispatchLoop;
     private readonly Task _dispatchLoopTask;
-    private readonly ConsumerTaskMonitor _dispatchLoopMonitor;
+    private readonly Task _dispatchLoopMonitorTask;
 
     private Task? _disposeTask;
     private Exception? _consumerFailure;
@@ -44,26 +46,26 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
     private int _pendingRequestCount;
     private int _state;
 
-    internal RequestBatchCoordinator(
+    public RequestBatchCoordinator(
         IBufferQueue bufferQueue,
-        RequestBatchHandler<TRequest> handler,
+        [FromKeyedServices] RequestBatchHandler<TRequest> handler,
         IOptions<RequestBatchOptions<TRequest>> options,
         ILogger<RequestBatchCoordinator<TRequest>> logger,
-        string topicName = TopicName,
-        string? batcherName = null,
-        RequestBatcherMetrics? metrics = null)
+        RequestBatcherMetrics metrics,
+        [FromKeyedServices] RequestBatcherConfiguration<TRequest> configuration)
     {
-        BatcherName = batcherName;
+        ArgumentNullException.ThrowIfNull(metrics);
+        var topicName = configuration.TopicName;
+        _metadata = configuration.Metadata;
         _logger = logger;
-        _options = options.Value.ValidateAndClone();
-        _callDiagnostics = new(_telemetryRequestTypeName, batcherName,
-            metrics ?? new RequestBatcherMetrics(_options.BatchSize), ownsMetrics: metrics is null);
+        _options = (configuration.Options ?? options.Value).ValidateAndClone();
+        _metrics = metrics;
         _onRequestFinished = OnRequestFinished;
 
         _producer = new PendingRequestProducer<TRequest>(
             bufferQueue.GetProducer<PendingBatchRequest<TRequest>>(topicName),
             _logger,
-            _requestTypeName,
+            _metadata.RequestTypeName,
             _options.MaxPendingRequests,
             _producerCancellation.Token);
 
@@ -71,9 +73,8 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
             handler,
             _options.MaxConcurrency,
             _logger,
-            _requestTypeName,
-            _callDiagnostics.Metrics,
-            batcherName);
+            _metadata,
+            _metrics);
         var consumer = bufferQueue.CreatePullConsumers<PendingBatchRequest<TRequest>>(
             new BufferPullConsumerOptions
             {
@@ -89,27 +90,19 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
             () => _batchDispatchLoop.RunAsync(consumer, _consumerCancellation.Token));
 
         _logger.CoordinatorStarted(
-            _requestTypeName,
+            _metadata.RequestTypeName,
             _options.BatchSize,
             _options.MaxConcurrency,
             _options.MaxPendingRequests,
             _options.FullMode);
 
-        _dispatchLoopMonitor = new ConsumerTaskMonitor(
-            [_dispatchLoopTask],
-            _consumerCancellation.Token,
-            _requestTypeName,
-            HandleConsumerFailure);
-        _callDiagnostics.ObserveBacklog(consumer);
+        // An already-completed loop can run failure handling before the monitor's first await yields.
+        _dispatchLoopMonitorTask = ExecutionContextIsolation.Run(MonitorDispatchLoopAsync);
     }
-
-    internal string? BatcherName { get; }
-
-    internal RequestBatcherMetrics Metrics => _callDiagnostics.Metrics;
 
     /// <inheritdoc />
     public Task ExecuteAsync(TRequest request, CancellationToken cancellationToken = default) =>
-        _callDiagnostics.Execute(
+        ExecuteCall(
             RequestBatcherMetricTags.SingleSubmission,
             (Batcher: this, Request: request, Token: cancellationToken),
             static (state, context, observer) => state.Batcher.ExecuteCoreAsync(state.Request, null, state.Token, context, observer));
@@ -140,7 +133,7 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(requests);
-        return _callDiagnostics.Execute(
+        return ExecuteCall(
             RequestBatcherMetricTags.MultiSubmission,
             (Batcher: this, Requests: requests, Token: cancellationToken),
             static (state, context, observer) => state.Batcher.ExecuteCoreAsync(state.Requests, state.Token, context, observer));
@@ -186,7 +179,7 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
 
         if (requestArray.Length == 0)
         {
-            _callDiagnostics.RecordSubmissionSize(RequestBatcherMetricTags.MultiSubmission, 0);
+            _metrics.RecordSubmissionSize(_metadata.RequestTypeName, _metadata.BatcherName, RequestBatcherMetricTags.MultiSubmission, 0);
             return Task.CompletedTask;
         }
 
@@ -236,7 +229,7 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
             _pendingRequests.TryAdd(pendingRequest, 0);
         }
 
-        _callDiagnostics.RecordSubmissionSize(RequestBatcherMetricTags.SingleSubmission, 1);
+        _metrics.RecordSubmissionSize(_metadata.RequestTypeName, _metadata.BatcherName, RequestBatcherMetricTags.SingleSubmission, 1);
         return _producer.ProduceAsync(pendingRequest, cancellationToken);
     }
 
@@ -267,7 +260,7 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
             }
         }
 
-        _callDiagnostics.RecordSubmissionSize(RequestBatcherMetricTags.MultiSubmission, requests.Length);
+        _metrics.RecordSubmissionSize(_metadata.RequestTypeName, _metadata.BatcherName, RequestBatcherMetricTags.MultiSubmission, requests.Length);
         return _producer.ProduceAsync(pendingRequests, cancellationToken);
     }
 
@@ -318,39 +311,52 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
     {
         await Task.Yield();
         _logger.CoordinatorStopping(
-            _requestTypeName,
+            _metadata.RequestTypeName,
             Volatile.Read(ref _pendingRequestCount));
         try
         {
             await pendingRequestsDrained.ConfigureAwait(false);
             await _batchDispatchLoop.DrainAsync().ConfigureAwait(false);
             await _consumerCancellation.CancelAsync().ConfigureAwait(false);
-            await _dispatchLoopTask.ConfigureAwait(false);
+            await _dispatchLoopTask.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+            await _dispatchLoopMonitorTask.ConfigureAwait(false);
 
             if (_consumerFailure is not null)
             {
                 ExceptionDispatchInfo.Capture(_consumerFailure).Throw();
             }
+
+            await _dispatchLoopTask.ConfigureAwait(false);
         }
         finally
         {
             try
             {
-                await _dispatchLoopMonitor.Completion.ConfigureAwait(false);
+                await _dispatchLoopMonitorTask.ConfigureAwait(false);
                 _batchDispatchLoop.Dispose();
                 _producerCancellation.Dispose();
                 _consumerCancellation.Dispose();
             }
             finally
             {
-                _callDiagnostics.Dispose();
                 lock (_lifecycleLock)
                 {
                     _state = Stopped;
                 }
 
-                _logger.CoordinatorStopped(_requestTypeName);
+                _logger.CoordinatorStopped(_metadata.RequestTypeName);
             }
+        }
+    }
+
+    private async Task MonitorDispatchLoopAsync()
+    {
+        await _dispatchLoopTask.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
+        if (!_consumerCancellation.IsCancellationRequested)
+        {
+            HandleConsumerFailure(_dispatchLoopTask.Exception?.GetBaseException() ??
+                new InvalidOperationException(
+                    $"A request batch consumer for '{_metadata.RequestTypeName}' stopped unexpectedly."));
         }
     }
 
@@ -381,6 +387,28 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
 
     private static ObjectDisposedException CreateStoppedException() =>
         new(typeof(RequestBatchCoordinator<TRequest>).FullName);
+
+    private Task ExecuteCall<TState>(
+        string kind,
+        TState state,
+        Func<TState, SubmissionTraceContext?, IRequestCompletionObserver?, Task> submit)
+    {
+        return _metrics.ExecuteEnabled
+            ? _metrics.MeasureExecution(
+                _metadata.RequestTypeName,
+                _metadata.BatcherName,
+                kind,
+                (Coordinator: this, State: state, Submit: submit),
+                static args => args.Coordinator.ExecuteWithTracing(args.State, args.Submit))
+            : ExecuteWithTracing(state, submit);
+    }
+
+    private Task ExecuteWithTracing<TState>(
+        TState state,
+        Func<TState, SubmissionTraceContext?, IRequestCompletionObserver?, Task> submit) =>
+        RequestBatcherTracing.Source.HasListeners()
+            ? RequestBatcherTracing.TraceCall(_metadata, state, submit)
+            : submit(state, null, null);
 
     private static TaskCompletionSource CreateCompletedSource()
     {

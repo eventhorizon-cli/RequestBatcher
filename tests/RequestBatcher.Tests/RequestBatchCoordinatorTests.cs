@@ -790,6 +790,8 @@ public sealed class RequestBatchCoordinatorTests
         Assert.Equal(LogLevel.Error, logEntry.Level);
         Assert.Equal(1005, logEntry.EventId.Id);
         Assert.Contains("Failed to process", logEntry.Message, StringComparison.Ordinal);
+        Assert.Contains("Int32", logEntry.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("System.Int32", logEntry.Message, StringComparison.Ordinal);
         Assert.Same(expected, logEntry.Exception);
     }
 

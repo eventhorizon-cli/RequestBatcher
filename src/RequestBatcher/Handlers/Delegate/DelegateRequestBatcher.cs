@@ -1,18 +1,20 @@
 using System.Diagnostics.CodeAnalysis;
+using Microsoft.Extensions.DependencyInjection;
 using RequestBatcher.Diagnostics;
+using RequestBatcher.Diagnostics.Metrics;
+using RequestBatcher.Diagnostics.Tracing;
 using RequestBatcher.PendingRequests;
 
-namespace RequestBatcher.DelegateHandlers;
+namespace RequestBatcher.Handlers.Delegate;
 
 internal sealed class DelegateRequestBatcher<TRequest>(
-    RequestBatchCoordinator<TRequest> coordinator,
-    DelegateRequestBatchHandler<TRequest> handler) : IRequestBatcher<TRequest>, IDelegateRequestBatcher<TRequest>
+    [FromKeyedServices] RequestBatchCoordinator<TRequest> coordinator,
+    [FromKeyedServices] DelegateRequestBatchHandler<TRequest> handler,
+    RequestBatcherMetrics metrics,
+    [FromKeyedServices] RequestBatcherConfiguration<TRequest> configuration)
+    : IRequestBatcher<TRequest>, IDelegateRequestBatcher<TRequest>
 {
-    private static readonly string _telemetryRequestTypeName = RequestBatcherRequestType.GetName(typeof(TRequest));
-    private readonly RequestBatcherCallDiagnostics _callDiagnostics = new(
-        _telemetryRequestTypeName,
-        coordinator.BatcherName,
-        coordinator.Metrics);
+    private readonly RequestBatcherMetadata _metadata = configuration.Metadata;
 
     public Task ExecuteAsync(TRequest request, CancellationToken cancellationToken = default) =>
         throw MissingHandler();
@@ -22,8 +24,8 @@ internal sealed class DelegateRequestBatcher<TRequest>(
 
     [RequiresDynamicCode("Delegate handlers compile a typed invoker on first use.")]
     [RequiresUnreferencedCode("Delegate handlers inspect the delegate signature and service parameter attributes.")]
-    public Task SubmitAsync(TRequest request, Delegate callback, CancellationToken cancellationToken) =>
-        _callDiagnostics.Execute(
+    public Task SubmitAsync(TRequest request, System.Delegate callback, CancellationToken cancellationToken) =>
+        ExecuteCall(
             RequestBatcherMetricTags.SingleSubmission,
             (Batcher: this, Request: request, Callback: callback, Token: cancellationToken),
             static (state, context, observer) => state.Batcher.SubmitCoreAsync(
@@ -33,7 +35,7 @@ internal sealed class DelegateRequestBatcher<TRequest>(
     [RequiresUnreferencedCode("Delegate handlers inspect the delegate signature and service parameter attributes.")]
     private Task SubmitCoreAsync(
         TRequest request,
-        Delegate callback,
+        System.Delegate callback,
         CancellationToken cancellationToken,
         SubmissionTraceContext? traceContext = default,
         IRequestCompletionObserver? completionObserver = null)
@@ -43,7 +45,7 @@ internal sealed class DelegateRequestBatcher<TRequest>(
             return Task.FromCanceled(cancellationToken);
         }
 
-        // Bind inside the shared boundary so binding failures are traced and measured; forward without wrapping again.
+        // Bind inside the public call boundary so binding failures are traced and measured exactly once.
         handler.Bind(callback);
         return coordinator.ExecuteCoreAsync(request, null, cancellationToken, traceContext, completionObserver);
     }
@@ -52,9 +54,9 @@ internal sealed class DelegateRequestBatcher<TRequest>(
     [RequiresUnreferencedCode("Delegate handlers inspect the delegate signature and service parameter attributes.")]
     public Task SubmitAsync(
         IEnumerable<TRequest> requests,
-        Delegate callback,
+        System.Delegate callback,
         CancellationToken cancellationToken) =>
-        _callDiagnostics.Execute(
+        ExecuteCall(
             RequestBatcherMetricTags.MultiSubmission,
             (Batcher: this, Requests: requests, Callback: callback, Token: cancellationToken),
             static (state, context, observer) => state.Batcher.SubmitCoreAsync(
@@ -64,7 +66,7 @@ internal sealed class DelegateRequestBatcher<TRequest>(
     [RequiresUnreferencedCode("Delegate handlers inspect the delegate signature and service parameter attributes.")]
     private Task SubmitCoreAsync(
         IEnumerable<TRequest> requests,
-        Delegate callback,
+        System.Delegate callback,
         CancellationToken cancellationToken,
         SubmissionTraceContext? traceContext = default,
         IRequestCompletionObserver? completionObserver = null)
@@ -80,4 +82,26 @@ internal sealed class DelegateRequestBatcher<TRequest>(
 
     private static InvalidOperationException MissingHandler() => new(
         "This request batcher requires a delegate handler. Use the ExecuteAsync overload with a handler delegate.");
+
+    private Task ExecuteCall<TState>(
+        string kind,
+        TState state,
+        Func<TState, SubmissionTraceContext?, IRequestCompletionObserver?, Task> submit)
+    {
+        return metrics.ExecuteEnabled
+            ? metrics.MeasureExecution(
+                _metadata.RequestTypeName,
+                _metadata.BatcherName,
+                kind,
+                (Batcher: this, State: state, Submit: submit),
+                static args => args.Batcher.ExecuteWithTracing(args.State, args.Submit))
+            : ExecuteWithTracing(state, submit);
+    }
+
+    private Task ExecuteWithTracing<TState>(
+        TState state,
+        Func<TState, SubmissionTraceContext?, IRequestCompletionObserver?, Task> submit) =>
+        RequestBatcherTracing.Source.HasListeners()
+            ? RequestBatcherTracing.TraceCall(_metadata, state, submit)
+            : submit(state, null, null);
 }

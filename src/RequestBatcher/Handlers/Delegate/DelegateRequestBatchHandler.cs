@@ -4,18 +4,19 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using Microsoft.Extensions.DependencyInjection;
 
-namespace RequestBatcher.DelegateHandlers;
+namespace RequestBatcher.Handlers.Delegate;
 
 internal sealed class DelegateRequestBatchHandler<TRequest>(
     IServiceScopeFactory scopeFactory,
-    Action<IReadOnlyList<TRequest>>? validateResponses = null) : IRequestBatchHandler<TRequest>
+    [FromKeyedServices] Action<IReadOnlyList<TRequest>>? validateResponses = null)
+    : IRequestBatchHandler<TRequest>
 {
     private readonly object _bindingLock = new();
     private Binding? _binding;
 
     [RequiresDynamicCode("Delegate handlers compile a typed invoker on first use.")]
     [RequiresUnreferencedCode("Delegate handlers inspect the delegate signature and service parameter attributes.")]
-    public void Bind(Delegate handler)
+    public void Bind(System.Delegate handler)
     {
         ArgumentNullException.ThrowIfNull(handler);
 
@@ -85,7 +86,7 @@ internal sealed class DelegateRequestBatchHandler<TRequest>(
         validateResponses?.Invoke(requests);
     }
 
-    private static void EnsureSameHandler(Binding binding, Delegate handler)
+    private static void EnsureSameHandler(Binding binding, System.Delegate handler)
     {
         if (!ReferenceEquals(binding.Handler, handler) && !binding.Handler.Equals(handler))
         {
@@ -97,7 +98,7 @@ internal sealed class DelegateRequestBatchHandler<TRequest>(
 
     [RequiresDynamicCode("Delegate handlers compile a typed invoker on first use.")]
     [RequiresUnreferencedCode("Delegate handlers inspect the delegate signature and service parameter attributes.")]
-    private static Binding CreateBinding(Delegate handler)
+    private static Binding CreateBinding(System.Delegate handler)
     {
         var sourceHandler = handler;
         while (true)
@@ -109,7 +110,7 @@ internal sealed class DelegateRequestBatchHandler<TRequest>(
 
             if (sourceHandler.Method.Name != "Invoke" ||
                 sourceHandler.Method.DeclaringType is not { } declaringType ||
-                !typeof(Delegate).IsAssignableFrom(declaringType) || sourceHandler.Target is not Delegate target)
+                !typeof(System.Delegate).IsAssignableFrom(declaringType) || sourceHandler.Target is not System.Delegate target)
             {
                 break;
             }
@@ -223,7 +224,7 @@ internal sealed class DelegateRequestBatchHandler<TRequest>(
     private static ArgumentException InvalidHandler(string message) => new(message, "handler");
 
     private sealed record Binding(
-        Delegate Handler,
+        System.Delegate Handler,
         Func<IReadOnlyList<TRequest>, IServiceProvider, CancellationToken, ValueTask> Invoke,
         bool RequiresServices);
 }

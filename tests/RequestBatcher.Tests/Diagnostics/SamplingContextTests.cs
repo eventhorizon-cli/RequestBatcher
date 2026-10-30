@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using RequestBatcher.Diagnostics;
+using RequestBatcher.Diagnostics.Tracing;
 using RequestBatcher.PendingRequests;
 
 namespace RequestBatcher.Tests.Diagnostics;
@@ -28,14 +29,14 @@ public sealed class SamplingContextTests
             if (useGeneric)
             {
                 returned = RequestBatcherTracing.TraceCall(
-                    new RequestBatcherTraceMetadata("sampled-out"),
+                    new RequestBatcherMetadata("sampled-out"),
                     pending,
                     static (state, _) => state.Task);
             }
             else
             {
                 returned = RequestBatcherTracing.TraceCall(
-                    new RequestBatcherTraceMetadata("sampled-out"),
+                    new RequestBatcherMetadata("sampled-out"),
                     voidPending = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously),
                     static (state, _) => state.Task);
                 Assert.Same(parent, Activity.Current);
@@ -158,13 +159,13 @@ public sealed class SamplingContextTests
     public void TraceMetadata_ReusedForNamedCalls_ExposesReadOnlySamplingTags()
     {
         var sampledTags = new ConcurrentQueue<KeyValuePair<string, object?>[]>();
-        var metadata = new RequestBatcherTraceMetadata("Order", "checkout");
+        var metadata = new RequestBatcherMetadata("Order", "checkout");
         using var listener = new ActivityListener
         {
             ShouldListenTo = static source => source.Name == RequestBatcherTracing.SourceName,
             Sample = (ref ActivityCreationOptions<ActivityContext> options) =>
             {
-                if (options.Name == metadata.CallName)
+                if (options.Name == metadata.TraceCallName)
                 {
                     sampledTags.Enqueue(options.Tags?.ToArray() ?? []);
                 }
@@ -173,13 +174,13 @@ public sealed class SamplingContextTests
             },
         };
         ActivitySource.AddActivityListener(listener);
-        var tags = Assert.IsAssignableFrom<ICollection<KeyValuePair<string, object?>>>(metadata.Tags);
+        var tags = Assert.IsAssignableFrom<ICollection<KeyValuePair<string, object?>>>(metadata.TraceTags);
 
         Assert.True(tags.IsReadOnly);
         Assert.Throws<NotSupportedException>(() => tags.Add(new("unexpected", true)));
         Assert.Equal(
             new[] { "requestbatcher.request.type", "requestbatcher.name" },
-            metadata.Tags.Select(tag => tag.Key));
+            metadata.TraceTags.Select(tag => tag.Key));
 
         var first = RequestBatcherTracing.TraceCall(
             metadata,
@@ -210,7 +211,7 @@ public sealed class SamplingContextTests
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         SubmissionTraceContext? context = null;
         var returned = RequestBatcherTracing.TraceCall(
-            new RequestBatcherTraceMetadata(requestType),
+            new RequestBatcherMetadata(requestType),
             completion,
             (state, traceContext) =>
             {

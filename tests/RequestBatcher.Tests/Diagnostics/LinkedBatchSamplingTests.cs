@@ -3,6 +3,7 @@ using System.Diagnostics;
 using OpenTelemetry;
 using OpenTelemetry.Trace;
 using RequestBatcher.Diagnostics;
+using RequestBatcher.Diagnostics.Tracing;
 using RequestBatcher.PendingRequests;
 
 namespace RequestBatcher.Tests.Diagnostics;
@@ -111,7 +112,7 @@ public sealed class LinkedBatchSamplingTests
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         SubmissionTraceContext? context = null;
         var returned = RequestBatcherTracing.TraceCall(
-            new RequestBatcherTraceMetadata("request"),
+            new RequestBatcherMetadata("request"),
             completion,
             (state, traceContext) =>
             {
@@ -384,7 +385,7 @@ public sealed class LinkedBatchSamplingTests
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         SubmissionTraceContext? traceContext = null;
         var returned = RequestBatcherTracing.TraceCall(
-            new RequestBatcherTraceMetadata(requestType),
+            new RequestBatcherMetadata(requestType),
             completion,
             (state, context) =>
             {

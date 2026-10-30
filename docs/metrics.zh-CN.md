@@ -14,7 +14,8 @@ builder.Services.AddOpenTelemetry()
 也可安装 `RequestBatcher.OpenTelemetry` 并使用
 `.WithMetrics(metrics => metrics.AddRequestBatcherInstrumentation())`。两种方式都会注册 Meter，并使用 core 提供的
 大小 Histogram 建议桶边界（Advice）。应先完成所有 Batcher 注册，再构建服务容器。首次解析 Batcher 时，共享的 Metrics 服务
-根据已注册的最大 `BatchSize` 创建固定的 Advice，无需解析其他 Batcher 或 Handler。容器在 Batcher 排空后释放 Metrics 服务。
+根据已注册的最大 `BatchSize` 创建固定的 Advice，无需解析其他 Batcher 或 Handler。容器在 Batcher 排空后异步释放 Metrics 服务；
+Metrics 会等待已开始的 Execute 测量完成记录，再释放 Meter。
 不同容器可提供不同桶边界；不要将边界不兼容的指标合并到同一指标流中。
 容器释放 Metrics 服务后，通过保留的 Batcher 引用发起调用也不会再记录指标。
 
@@ -52,7 +53,8 @@ Histogram 的 `sum` 累加测量值，`count` 记录测量次数，bucket 描述
 
 采集时机由应用的采集器决定，支持 OpenTelemetry 周期采集、拉取式导出和原生 `MeterListener`，不另开定时器。
 采集间隔内的短暂峰值可能看不到。Gauge 沿用请求类型和可选的 Batcher 名称标签，不增加提交类型、结果或分区标签。
-排空期间仍可采集，Batcher 排空并关闭后注销；已经开始的采集可能在关闭过程中完成。
+消费循环负责注册和注销该 Batcher 的 backlog 观测源：正常排空期间仍可采集，循环退出时注销，包括因异常退出的情况；
+已经开始的采集可能在注销过程中完成。
 
 这个 Gauge 没有桶，也不是累计总数，直接查看它的值即可，不需要使用 `rate`。
 OTLP 保留名称 `requestbatcher.backlog`；项目示例中的 Prometheus 查询为 `requestbatcher_backlog`。

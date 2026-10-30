@@ -1,7 +1,7 @@
 using System.Collections;
 using System.Diagnostics;
 
-namespace RequestBatcher.Diagnostics;
+namespace RequestBatcher.Diagnostics.Tracing;
 
 internal sealed class BatchTraceLinks : IEnumerable<ActivityLink>
 {

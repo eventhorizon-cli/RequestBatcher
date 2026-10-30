@@ -72,6 +72,9 @@ services.AddRequestBatcher<TRequest, THandler>(ServiceLifetime.Scoped);
 services.AddRequestBatcher<TRequest, TResponse, THandler>(ServiceLifetime.Scoped);
 ```
 
+`RequestBatchCoordinator<TRequest>` is internal. Code that previously referenced it directly must use the public
+`IRequestBatcher<TRequest>` abstraction instead.
+
 `AddRequestBatcher` registers the handler, coordinator, and internal queue in the application's existing
 `IServiceCollection`. The application does not register or configure BufferQueue separately. Scoped and transient typed
 handlers are resolved in an async scope once per handler batch; singleton handlers are reused and must be thread-safe
@@ -287,7 +290,8 @@ their parent.
 - Queue capacity excludes executing requests: up to `MaxConcurrency * BatchSize` pulled requests may be in flight in addition.
 - `DisposeAsync` stops new admissions, drains accepted work including submissions waiting for capacity, and releases owned
   resources. Concurrent and repeated disposal calls share one operation. When registered through DI, the application
-  container owns async disposal.
+  container owns async disposal. When handlers need DI scopes, stop producers and await outstanding calls before
+  disposing the container; pending batches cannot create new scopes once container disposal begins.
 
 The default is `FullMode = Wait`. `MaxPendingRequests` bounds queued requests, not callers or submissions waiting for
 capacity, and is not a process-wide memory limit; apply an ingress concurrency or rate limit when total waiting work must

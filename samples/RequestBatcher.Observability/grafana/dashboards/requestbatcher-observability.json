@@ -92,6 +92,19 @@
       "description": "Handler execution traces contain cart → pricing → database spans. Select RequestBatcher.Handle pricing-queries and expand References to navigate to the contributing Execute calls. One batch may combine several calls."
     },
     {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 9
+      },
+      "id": 14,
+      "panels": [],
+      "title": "Service HTTP metrics",
+      "type": "row"
+    },
+    {
       "datasource": {
         "type": "prometheus",
         "uid": "requestbatcher-prometheus"
@@ -109,7 +122,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 9
+        "y": 10
       },
       "id": 1,
       "options": {
@@ -157,7 +170,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 9
+        "y": 10
       },
       "id": 2,
       "options": {
@@ -188,6 +201,399 @@
       "type": "timeseries"
     },
     {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 18
+      },
+      "id": 16,
+      "panels": [],
+      "title": "Pricing database · Npgsql",
+      "type": "row"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "requestbatcher-prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 19
+      },
+      "id": 17,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "requestbatcher-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (db_client_connection_state) (db_client_connection_count{service_name=\"pricing\",db_client_connection_state=~\"idle|used\"})",
+          "legendFormat": "{{db_client_connection_state}}",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "requestbatcher-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(db_client_connection_max{service_name=\"pricing\"})",
+          "legendFormat": "maximum",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "Pool connections · idle, used, max",
+      "type": "timeseries",
+      "description": "Current Pricing connection counts by state and the summed configured maximum. Pool labels are aggregated to keep legends concise."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "requestbatcher-prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 19
+      },
+      "id": 18,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "requestbatcher-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(rate(db_client_operation_duration_seconds_count{service_name=\"pricing\"}[$__rate_interval]))",
+          "legendFormat": "operations/s",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Database operations · rate",
+      "type": "timeseries",
+      "description": "Rate of completed Npgsql operations represented by the operation-duration histogram count."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "requestbatcher-prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 19
+      },
+      "id": 19,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "requestbatcher-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(db_client_operation_duration_seconds_bucket{service_name=\"pricing\"}[$__rate_interval])))",
+          "legendFormat": "p95",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Database operation duration · p95",
+      "type": "timeseries",
+      "description": "P95 Npgsql operation duration estimated from histogram buckets."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "requestbatcher-prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 27
+      },
+      "id": 20,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "requestbatcher-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(db_client_operation_npgsql_executing{service_name=\"pricing\"})",
+          "legendFormat": "executing",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Operations currently executing",
+      "type": "timeseries",
+      "description": "Current count of Npgsql operations executing on Pricing."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "requestbatcher-prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "Bps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 27
+      },
+      "id": 21,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "requestbatcher-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(rate(db_client_operation_npgsql_bytes_read_total{service_name=\"pricing\"}[$__rate_interval]))",
+          "legendFormat": "read",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "requestbatcher-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(rate(db_client_operation_npgsql_bytes_written_total{service_name=\"pricing\"}[$__rate_interval]))",
+          "legendFormat": "written",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "Database I/O · read and written",
+      "type": "timeseries",
+      "description": "Rates of Npgsql bytes read from and written to Pricing database connections."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "requestbatcher-prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 27
+      },
+      "id": 22,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "requestbatcher-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "avg(db_client_operation_npgsql_prepared_ratio{service_name=\"pricing\"})",
+          "legendFormat": "prepared ratio",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Prepared statement ratio",
+      "type": "timeseries",
+      "description": "Average Npgsql prepared ratio across Pricing database pools, where 0 means none and 1 means all."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "requestbatcher-prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 24,
+        "x": 0,
+        "y": 35
+      },
+      "id": 23,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "requestbatcher-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum(db_client_connection_npgsql_create_time_seconds_sum{service_name=\"pricing\"}) / sum(db_client_connection_npgsql_create_time_seconds_count{service_name=\"pricing\"})",
+          "legendFormat": "mean connection creation time",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Connection creation time · lifetime mean",
+      "type": "timeseries",
+      "description": "Lifetime cumulative sum divided by lifetime count. This is intentionally not a rate, so the mean remains visible during idle periods."
+    },
+    {
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 44
+      },
+      "id": 15,
+      "panels": [],
+      "title": "RequestBatcher metrics · Cart",
+      "type": "row"
+    },
+    {
       "datasource": {
         "type": "prometheus",
         "uid": "requestbatcher-prometheus"
@@ -205,7 +611,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 17
+        "y": 45
       },
       "id": 6,
       "options": {
@@ -226,14 +632,26 @@
             "uid": "requestbatcher-prometheus"
           },
           "editorMode": "code",
-          "expr": "sum by (service_name, requestbatcher_name) (rate(requestbatcher_submission_size_sum{service_name=\"cart\"}[$__rate_interval]))",
-          "legendFormat": "{{service_name}} / {{requestbatcher_name}}",
+          "expr": "sum by (requestbatcher_name, requestbatcher_submission_kind) (rate(requestbatcher_submission_size_sum{service_name=\"cart\",requestbatcher_request_type=\"Int32\",requestbatcher_name=~\"$batcher\"}[$__rate_interval]))",
+          "legendFormat": "{{requestbatcher_name}} / {{requestbatcher_submission_kind}} items/s",
           "range": true,
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "requestbatcher-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (requestbatcher_name, requestbatcher_submission_kind) (rate(requestbatcher_submission_size_count{service_name=\"cart\",requestbatcher_request_type=\"Int32\",requestbatcher_name=~\"$batcher\"}[$__rate_interval]))",
+          "legendFormat": "{{requestbatcher_name}} / {{requestbatcher_submission_kind}} calls/s",
+          "range": true,
+          "refId": "B"
         }
       ],
-      "title": "RequestBatcher request rate",
-      "type": "timeseries"
+      "title": "Submission throughput",
+      "type": "timeseries",
+      "description": "Items and calls per second from submissions that reached coordinator admission. Queue-full and later failures remain included; these series are not successful-admission counters."
     },
     {
       "datasource": {
@@ -253,7 +671,7 @@
         "h": 8,
         "w": 12,
         "x": 12,
-        "y": 17
+        "y": 45
       },
       "id": 7,
       "options": {
@@ -274,14 +692,26 @@
             "uid": "requestbatcher-prometheus"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum by (le, service_name, requestbatcher_name) (rate(requestbatcher_batch_size_bucket{service_name=\"cart\"}[$__rate_interval])))",
-          "legendFormat": "{{service_name}} / {{requestbatcher_name}} p95",
+          "expr": "sum by (requestbatcher_name, requestbatcher_submission_kind) (rate(requestbatcher_submission_size_sum{service_name=\"cart\",requestbatcher_request_type=\"Int32\",requestbatcher_name=~\"$batcher\"}[$__rate_interval])) / sum by (requestbatcher_name, requestbatcher_submission_kind) (rate(requestbatcher_submission_size_count{service_name=\"cart\",requestbatcher_request_type=\"Int32\",requestbatcher_name=~\"$batcher\"}[$__rate_interval]))",
+          "legendFormat": "{{requestbatcher_name}} / {{requestbatcher_submission_kind}} mean",
           "range": true,
           "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "requestbatcher-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.95, sum by (le, requestbatcher_name, requestbatcher_submission_kind) (rate(requestbatcher_submission_size_bucket{service_name=\"cart\",requestbatcher_request_type=\"Int32\",requestbatcher_name=~\"$batcher\"}[$__rate_interval])))",
+          "legendFormat": "{{requestbatcher_name}} / {{requestbatcher_submission_kind}} p95",
+          "range": true,
+          "refId": "B"
         }
       ],
-      "title": "RequestBatcher batch size p95",
-      "type": "timeseries"
+      "title": "Submission size · mean and p95",
+      "type": "timeseries",
+      "description": "Mean and bucket-estimated P95 product items per submission, split by pipeline and single or multi submission kind."
     },
     {
       "datasource": {
@@ -293,7 +723,7 @@
           "color": {
             "mode": "palette-classic"
           },
-          "unit": "ms"
+          "unit": "reqps"
         },
         "overrides": []
       },
@@ -301,7 +731,7 @@
         "h": 8,
         "w": 12,
         "x": 0,
-        "y": 25
+        "y": 53
       },
       "id": 8,
       "options": {
@@ -322,14 +752,303 @@
             "uid": "requestbatcher-prometheus"
           },
           "editorMode": "code",
-          "expr": "histogram_quantile(0.95, sum by (le, service_name, requestbatcher_name) (rate(requestbatcher_handle_duration_milliseconds_bucket{service_name=\"cart\"}[$__rate_interval])))",
-          "legendFormat": "{{service_name}} / {{requestbatcher_name}} p95",
+          "expr": "sum by (requestbatcher_name) (rate(requestbatcher_batch_size_sum{service_name=\"cart\",requestbatcher_request_type=\"Int32\",requestbatcher_name=~\"$batcher\"}[$__rate_interval]))",
+          "legendFormat": "{{requestbatcher_name}} items/s",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "requestbatcher-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (requestbatcher_name) (rate(requestbatcher_batch_size_count{service_name=\"cart\",requestbatcher_request_type=\"Int32\",requestbatcher_name=~\"$batcher\"}[$__rate_interval]))",
+          "legendFormat": "{{requestbatcher_name}} batches/s",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "Handler throughput",
+      "type": "timeseries"
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "requestbatcher-prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 53
+      },
+      "id": 9,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "requestbatcher-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (requestbatcher_name) (rate(requestbatcher_batch_size_sum{service_name=\"cart\",requestbatcher_request_type=\"Int32\",requestbatcher_name=~\"$batcher\"}[$__rate_interval])) / sum by (requestbatcher_name) (rate(requestbatcher_batch_size_count{service_name=\"cart\",requestbatcher_request_type=\"Int32\",requestbatcher_name=~\"$batcher\"}[$__rate_interval]))",
+          "legendFormat": "{{requestbatcher_name}} mean",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "requestbatcher-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.95, sum by (le, requestbatcher_name) (rate(requestbatcher_batch_size_bucket{service_name=\"cart\",requestbatcher_request_type=\"Int32\",requestbatcher_name=~\"$batcher\"}[$__rate_interval])))",
+          "legendFormat": "{{requestbatcher_name}} p95",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "Handler batch size · mean and p95",
+      "type": "timeseries",
+      "description": "Batch-size measurements are completed Handler batches; the sum counts product request items. P95 is estimated from histogram buckets."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "requestbatcher-prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 61
+      },
+      "id": 10,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "requestbatcher-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.50, sum by (le, requestbatcher_name, requestbatcher_submission_kind) (rate(requestbatcher_execute_duration_milliseconds_bucket{service_name=\"cart\",requestbatcher_request_type=\"Int32\",requestbatcher_name=~\"$batcher\",requestbatcher_outcome=\"success\"}[$__rate_interval])))",
+          "legendFormat": "{{requestbatcher_name}} / {{requestbatcher_submission_kind}} p50",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "requestbatcher-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.95, sum by (le, requestbatcher_name, requestbatcher_submission_kind) (rate(requestbatcher_execute_duration_milliseconds_bucket{service_name=\"cart\",requestbatcher_request_type=\"Int32\",requestbatcher_name=~\"$batcher\",requestbatcher_outcome=\"success\"}[$__rate_interval])))",
+          "legendFormat": "{{requestbatcher_name}} / {{requestbatcher_submission_kind}} p95",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "Successful Execute duration · p50 and p95",
+      "type": "timeseries",
+      "description": "Successful caller-visible ExecuteAsync duration, including capacity waiting, queueing, Handler work, and response assembly. Quantiles are estimated from histogram buckets."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "requestbatcher-prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "ms"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 61
+      },
+      "id": 11,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "requestbatcher-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.50, sum by (le, requestbatcher_name) (rate(requestbatcher_handle_duration_milliseconds_bucket{service_name=\"cart\",requestbatcher_request_type=\"Int32\",requestbatcher_name=~\"$batcher\"}[$__rate_interval])))",
+          "legendFormat": "{{requestbatcher_name}} p50",
+          "range": true,
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "requestbatcher-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "histogram_quantile(0.95, sum by (le, requestbatcher_name) (rate(requestbatcher_handle_duration_milliseconds_bucket{service_name=\"cart\",requestbatcher_request_type=\"Int32\",requestbatcher_name=~\"$batcher\"}[$__rate_interval])))",
+          "legendFormat": "{{requestbatcher_name}} p95",
+          "range": true,
+          "refId": "B"
+        }
+      ],
+      "title": "Handler duration · p50 and p95",
+      "type": "timeseries",
+      "description": "Handler execution and scope disposal duration per batch, including failed attempts. Quantiles are estimated from histogram buckets."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "requestbatcher-prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "reqps"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 0,
+        "y": 69
+      },
+      "id": 12,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "requestbatcher-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "sum by (requestbatcher_name, requestbatcher_outcome) (rate(requestbatcher_execute_duration_milliseconds_count{service_name=\"cart\",requestbatcher_request_type=\"Int32\",requestbatcher_name=~\"$batcher\"}[$__rate_interval]))",
+          "legendFormat": "{{requestbatcher_name}} / {{requestbatcher_outcome}}",
           "range": true,
           "refId": "A"
         }
       ],
-      "title": "RequestBatcher Handler duration p95",
-      "type": "timeseries"
+      "title": "Execute outcomes · calls/s",
+      "type": "timeseries",
+      "description": "Measured ExecuteAsync calls per second by outcome (success, error, or canceled). These are call outcomes, not accepted-request counts."
+    },
+    {
+      "datasource": {
+        "type": "prometheus",
+        "uid": "requestbatcher-prometheus"
+      },
+      "fieldConfig": {
+        "defaults": {
+          "color": {
+            "mode": "palette-classic"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "gridPos": {
+        "h": 8,
+        "w": 12,
+        "x": 12,
+        "y": 69
+      },
+      "id": 13,
+      "options": {
+        "legend": {
+          "displayMode": "list",
+          "placement": "bottom",
+          "showLegend": true
+        },
+        "tooltip": {
+          "mode": "multi",
+          "sort": "none"
+        }
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "requestbatcher-prometheus"
+          },
+          "editorMode": "code",
+          "expr": "requestbatcher_backlog{service_name=\"cart\",requestbatcher_request_type=\"Int32\",requestbatcher_name=~\"$batcher\"}",
+          "legendFormat": "{{requestbatcher_name}} backlog",
+          "range": true,
+          "refId": "A"
+        }
+      ],
+      "title": "Queue backlog · current items",
+      "type": "timeseries",
+      "description": "Approximate enqueued items not yet pulled. This is a sampled gauge, so read its value directly; do not apply rate."
     },
     {
       "datasource": {
@@ -344,7 +1063,7 @@
         "h": 9,
         "w": 24,
         "x": 0,
-        "y": 33
+        "y": 77
       },
       "id": 3,
       "options": {
@@ -376,6 +1095,37 @@
       "type": "logs"
     }
   ],
+  "templating": {
+    "list": [
+      {
+        "current": {
+          "selected": true,
+          "text": "All",
+          "value": ".*"
+        },
+        "datasource": {
+          "type": "prometheus",
+          "uid": "requestbatcher-prometheus"
+        },
+        "definition": "label_values(requestbatcher_submission_size_sum{service_name=\"cart\",requestbatcher_request_type=\"Int32\"}, requestbatcher_name)",
+        "hide": 0,
+        "includeAll": true,
+        "label": "Batcher",
+        "multi": true,
+        "name": "batcher",
+        "options": [],
+        "query": {
+          "query": "label_values(requestbatcher_submission_size_sum{service_name=\"cart\",requestbatcher_request_type=\"Int32\"}, requestbatcher_name)",
+          "refId": "StandardVariableQuery"
+        },
+        "refresh": 1,
+        "regex": "",
+        "skipUrlSync": false,
+        "sort": 1,
+        "type": "query"
+      }
+    ]
+  },
   "refresh": "5s",
   "schemaVersion": 41,
   "tags": [

@@ -21,7 +21,7 @@ builder.Services.AddRequestBatcher<PriceUpdate, PriceUpdateHandler>(
         // Optional: equal product IDs share one of eight keyed partitions; omit this line to use one shared partition.
         options.UsePartitionKey(static update => update.ProductId, partitionCount: 8);
     });
-// The name selects an independent pipeline; requests and responses can be primitive values.
+// The name selects an independent batcher; requests and responses can be primitive values.
 builder.Services.AddRequestBatcher<int, decimal?, PriceQueryHandler>(
     batcherName: "price",
     handlerLifetime: ServiceLifetime.Scoped,

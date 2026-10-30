@@ -1,6 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
-using RequestBatcher.DelegateHandlers;
+using RequestBatcher.Handlers.Delegate;
 
 namespace RequestBatcher.Tests;
 

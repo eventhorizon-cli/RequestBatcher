@@ -3,6 +3,8 @@
 This validates the container-owned core metrics service and migration of size-histogram boundaries from OpenTelemetry
 views to `InstrumentAdvice<long>`. It includes the existing backlog gauge changes and BufferQueue 2.2.0 in the working
 tree. This is a functionality validation, not a before/after performance comparison or optimization claim.
+The measured production source is commit `1f5a54c`. BufferQueue 2.2.0 package metadata identifies upstream commit
+`56af9b0051d8b965905e243b78ce91ebc7f85dea`.
 
 ## Environment and workload
 
@@ -40,6 +42,64 @@ Final validation passed 578 unit tests on each of net8.0 and net10.0, plus six .
 cases without Docker. The scoped-response tracing test now validates every actual Handler batch rather than assuming
 one explicit submission always forms one batch. Solution build completed without warnings or errors; formatting and
 package checks passed. The core package declares DiagnosticSource directly only for net8.0.
+
+The final live run also passed all seven integration cases in 4.09 minutes. For each ordinary/delegate pipeline,
+64 calls containing 364 product items exported all four histograms and the backlog gauge through OTLP to Prometheus,
+with linked traces verified in Tempo. The fixture removed its containers, images, and network; a subsequent Docker
+container listing was empty. Run the integration project without a filter and with `REQUESTBATCHER_RUN_INTEGRATION_TESTS=1` to enable
+this Docker-backed validation.
+
+## Review follow-up
+
+The 2026-10-30 working-tree review removes the shared call-diagnostics facade and dependency-forwarding properties,
+makes Metrics a required container-owned dependency, and moves backlog registration into the consumer loop. Metrics
+uses one configuration-based constructor and asynchronous disposal only. Disposal waits for already-started Execute
+measurements to record before releasing the Meter; previously, queue draining could finish before those continuations.
+
+All 588 unit cases passed on each target framework, including eight shutdown cases and two consumer-loop cleanup cases.
+The shutdown stress case records all 25,600 Execute observations during repeated container disposal. Mixed response
+calls validate results and ordering for typed and service-free delegate handlers. The six in-process SDK cases passed,
+as did the live OTLP/Prometheus/Tempo test in 2 minutes 8 seconds. Docker listed no remaining containers afterward.
+Solution build and formatting checks passed. Independent source review and Chinese documentation review found no
+remaining blocking issue after their documentation and test-cleanup findings were addressed.
+
+Root-provider disposal prevents creating new DI scopes. Consequently, callers using scoped handlers or service-injected
+delegates must stop submitting and await outstanding calls before disposing the provider. The shutdown metrics tests
+isolate this existing scope constraint rather than weakening the exact observation-count assertions.
+
+The same .NET 10.0.0, Release, 5-warmup/30-measured-wave probe was rerun after the review fixes, with no Docker,
+build, or tests running alongside measured waves. The final run includes the DI/metadata and single-task monitoring changes,
+before the final handler namespace-only move. These measurements are not a controlled baseline
+comparison or a performance-improvement claim. Each case validated 35,840 items; enabled cases checked all four
+histograms and a final zero backlog. See `review-*.json` and [review-validation.txt](review-validation.txt).
+
+| Submission | Metrics | Mean per wave (ms) | Allocated bytes per item |
+| --- | --- | ---: | ---: |
+| Single | Disabled | 102.838 | 285.660 |
+| Single | Aggregation only | 103.674 | 534.373 |
+| Explicit groups | Disabled | 84.268 | 169.535 |
+| Explicit groups | Aggregation only | 85.132 | 177.528 |
+
+The DI cleanup registers coordinators and adapters by type, shares immutable batcher metadata, and makes
+the coordinator internal. Telemetry and logs use short type names; disposed-object exceptions retain their full object
+names. After these changes and the code naming cleanup, the Release solution build passed with zero warnings/errors,
+all 588 unit cases passed on each of net8.0/net10.0, and all six in-process SDK cases passed on net10.0. Formatting and
+`git diff --check` passed. One old tracing fixture now uses its own callback delegate rather than registering the
+production execution-delegate type; another old assertion now verifies exactly-once processing without assuming one
+explicit submission becomes one handler batch.
+
+The bounded Compose validation loaded the provisioned Grafana dashboard with separate HTTP, Pricing database and
+RequestBatcher rows. All 25 Prometheus panel queries returned nonempty successful results. Both ordinary and delegate
+batcher names were present, and the displayed Batcher charts were inspected in Chrome. The connection-pool state label
+was corrected against live exported series. The Compose stack was shut down afterward; `compose ps --all` was empty.
+The timing/allocation probes above validate the final runtime changes without asserting a performance improvement.
+
+Final structural validation after organizing `Diagnostics` and `Handlers` passed the Release build, formatting, both
+package builds, all 586 unit cases on each target framework, and six in-process SDK cases on .NET 10. The unit count
+reflects removal of six tests tied to the deleted monitor class and addition of four coordinator-level cases for
+unexpected exit and failure-callback context isolation. The nine focused monitoring/context cases pass on both
+frameworks. Coordinator shutdown waits for monitoring before inspecting its recorded failure; unexpected cancellation
+now reports the same infrastructure failure to queued requests and disposal. Partition configuration remains unchanged.
 
 ## Commands
 

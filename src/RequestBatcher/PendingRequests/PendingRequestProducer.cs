@@ -1,6 +1,6 @@
 using BufferQueue;
 using Microsoft.Extensions.Logging;
-using RequestBatcher.Diagnostics;
+using RequestBatcher.Diagnostics.Logging;
 
 namespace RequestBatcher.PendingRequests;
 

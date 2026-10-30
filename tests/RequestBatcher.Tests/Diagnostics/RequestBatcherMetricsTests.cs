@@ -5,6 +5,7 @@ using Moq;
 using OpenTelemetry;
 using OpenTelemetry.Metrics;
 using RequestBatcher.Diagnostics;
+using RequestBatcher.Diagnostics.Metrics;
 
 namespace RequestBatcher.Tests.Diagnostics;
 
@@ -185,9 +186,9 @@ public sealed class RequestBatcherMetricsTests
     }
 
     [Fact]
-    public void BatchScope_WithoutEnabledInstruments_DisposeRecordsNothing()
+    public async Task BatchScope_WithoutEnabledInstruments_DisposeRecordsNothing()
     {
-        using var metrics = new RequestBatcherMetrics(3);
+        await using var metrics = new RequestBatcherMetrics([new(3)]);
         var measurements = new ConcurrentQueue<MeasurementRecord>();
         using var listener = new MeterListener
         {
@@ -208,9 +209,9 @@ public sealed class RequestBatcherMetricsTests
     }
 
     [Fact]
-    public void MeterListener_EnableDisableInstrument_ControlsMeasurements()
+    public async Task MeterListener_EnableDisableInstrument_ControlsMeasurements()
     {
-        using var metrics = new RequestBatcherMetrics(3);
+        await using var metrics = new RequestBatcherMetrics([new(3)]);
         metrics.RecordSubmissionSize("Int32", "prices", "multi", 3);
         var measurements = new ConcurrentQueue<MeasurementRecord>();
         Instrument? batchSize = null;
@@ -259,9 +260,9 @@ public sealed class RequestBatcherMetricsTests
     }
 
     [Fact]
-    public void MeterListener_OneSubscriberDisposed_KeepsOtherSubscriberEnabled()
+    public async Task MeterListener_OneSubscriberDisposed_KeepsOtherSubscriberEnabled()
     {
-        using var metrics = new RequestBatcherMetrics(3);
+        await using var metrics = new RequestBatcherMetrics([new(3)]);
         metrics.RecordSubmissionSize("Int32", "prices", "multi", 3);
         var firstMeasurements = new ConcurrentQueue<MeasurementRecord>();
         var secondMeasurements = new ConcurrentQueue<MeasurementRecord>();
@@ -333,9 +334,9 @@ public sealed class RequestBatcherMetricsTests
     }
 
     [Fact]
-    public void StartBatch_NoSubscriberAtCreation_DoesNotBackfillMeasurement()
+    public async Task StartBatch_NoSubscriberAtCreation_DoesNotBackfillMeasurement()
     {
-        using var metrics = new RequestBatcherMetrics(3);
+        await using var metrics = new RequestBatcherMetrics([new(3)]);
         var measurements = new ConcurrentQueue<MeasurementRecord>();
         Instrument? batchSize = null;
         using var listener = new MeterListener

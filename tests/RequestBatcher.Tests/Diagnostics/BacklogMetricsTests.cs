@@ -1,11 +1,16 @@
 using System.Collections.Concurrent;
 using System.Diagnostics.Metrics;
+using System.Runtime.CompilerServices;
 using BufferQueue;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using OpenTelemetry;
 using OpenTelemetry.Metrics;
 using RequestBatcher.Diagnostics;
+using RequestBatcher.Diagnostics.Metrics;
+using RequestBatcher.PendingRequests;
+using RequestBatcher.Scheduling;
 
 namespace RequestBatcher.Tests.Diagnostics;
 
@@ -15,11 +20,11 @@ public sealed class BacklogMetricsTests
     private static TimeSpan Timeout => TimeSpan.FromSeconds(10);
 
     [Fact]
-    public void RegisterBacklog_OnlyReadsOnCollection_EmitsAvailableZero()
+    public async Task RegisterBacklog_OnlyReadsOnCollection_EmitsAvailableZero()
     {
         var consumer = new LagConsumer<int>(() => (true, new(0, BufferOffsetUnit.Items)));
         using var capture = new Capture();
-        using var metrics = new RequestBatcherMetrics(1);
+        await using var metrics = new RequestBatcherMetrics([new(1)]);
         using var registration = metrics.RegisterBacklog(consumer, "Int32", "prices");
 
         Assert.Equal(0, consumer.ReadCount);
@@ -34,10 +39,10 @@ public sealed class BacklogMetricsTests
     }
 
     [Fact]
-    public void RegisterBacklog_EmitsOnlyAvailableItemSnapshots_AndSaturatesOverflow()
+    public async Task RegisterBacklog_EmitsOnlyAvailableItemSnapshots_AndSaturatesOverflow()
     {
         using var capture = new Capture();
-        using var metrics = new RequestBatcherMetrics(1);
+        await using var metrics = new RequestBatcherMetrics([new(1)]);
         using var zero = metrics.RegisterBacklog(
             new LagConsumer<int>(() => (true, new(0, BufferOffsetUnit.Items))), "Int32", "zero");
         using var unavailable = metrics.RegisterBacklog(
@@ -57,10 +62,10 @@ public sealed class BacklogMetricsTests
     }
 
     [Fact]
-    public void RegisterBacklog_SeparatesNamedSources_AndPublishesGaugeMetadata()
+    public async Task RegisterBacklog_SeparatesNamedSources_AndPublishesGaugeMetadata()
     {
         using var capture = new Capture();
-        using var metrics = new RequestBatcherMetrics(1);
+        await using var metrics = new RequestBatcherMetrics([new(1)]);
         using var first = metrics.RegisterBacklog(
             new LagConsumer<int>(() => (true, new(3, BufferOffsetUnit.Items))), "Int32", "orders");
         using var second = metrics.RegisterBacklog(
@@ -75,11 +80,11 @@ public sealed class BacklogMetricsTests
     }
 
     [Fact]
-    public void RegisterBacklog_ListenerEnabledAfterRegistration_ObservesSubsequentCollections()
+    public async Task RegisterBacklog_ListenerEnabledAfterRegistration_ObservesSubsequentCollections()
     {
         var consumer = new LagConsumer<int>(() => (true, new(5, BufferOffsetUnit.Items)));
         using var capture = new Capture(enableBacklog: false);
-        using var metrics = new RequestBatcherMetrics(1);
+        await using var metrics = new RequestBatcherMetrics([new(1)]);
         using var registration = metrics.RegisterBacklog(consumer, "Int32", null);
 
         Assert.Empty(capture.Collect());
@@ -91,10 +96,10 @@ public sealed class BacklogMetricsTests
     }
 
     [Fact]
-    public void RegisterBacklog_RegistrationBeforeListener_IsObservedWhenListenerStarts()
+    public async Task RegisterBacklog_RegistrationBeforeListener_IsObservedWhenListenerStarts()
     {
         var consumer = new LagConsumer<int>(() => (true, new(4, BufferOffsetUnit.Items)));
-        using var metrics = new RequestBatcherMetrics(1);
+        await using var metrics = new RequestBatcherMetrics([new(1)]);
         using var registration = metrics.RegisterBacklog(consumer, "Int32", null);
         using var capture = new Capture();
 
@@ -114,7 +119,7 @@ public sealed class BacklogMetricsTests
             return (true, new BufferConsumerLagSnapshot(2, BufferOffsetUnit.Items));
         });
         using var capture = new Capture();
-        using var metrics = new RequestBatcherMetrics(1);
+        await using var metrics = new RequestBatcherMetrics([new(1)]);
         var registration = metrics.RegisterBacklog(consumer, "Int32", null);
         Task<Measurement[]>? collection = null;
         try
@@ -141,20 +146,78 @@ public sealed class BacklogMetricsTests
     }
 
     [Fact]
-    public void Dispose_WithBacklogSources_RemovesSourcesAndRejectsNewRegistrations()
+    public async Task Dispose_WithBacklogSources_RemovesSourcesAndRejectsNewRegistrations()
     {
         var consumer = new LagConsumer<int>(() => (true, new(2, BufferOffsetUnit.Items)));
         using var capture = new Capture();
-        var metrics = new RequestBatcherMetrics(1);
+        var metrics = new RequestBatcherMetrics([new(1)]);
         using var registration = metrics.RegisterBacklog(consumer, "Int32", null);
 
         AssertBacklog(Assert.Single(capture.Collect()), 2, "Int32", null);
-        metrics.Dispose();
-        metrics.Dispose();
+        await metrics.DisposeAsync();
+        await metrics.DisposeAsync();
 
         Assert.Empty(capture.Collect());
         Assert.Equal(1, consumer.ReadCount);
         Assert.Throws<ObjectDisposedException>(() => metrics.RegisterBacklog(consumer, "Int32", null));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DispatchLoop_ConsumerCompletesOrFails_RemovesBacklogRegistration(bool fail)
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var readCount = 0;
+        var consumer = new Mock<IBufferPullConsumer<PendingBatchRequest<int>>>(MockBehavior.Strict);
+        consumer.Setup(candidate => candidate.TryGetLagSnapshot(out It.Ref<BufferConsumerLagSnapshot>.IsAny))
+            .Returns((out BufferConsumerLagSnapshot snapshot) =>
+            {
+                Interlocked.Increment(ref readCount);
+                snapshot = new BufferConsumerLagSnapshot(3, BufferOffsetUnit.Items);
+                return true;
+            });
+        consumer.Setup(candidate => candidate.ConsumeAsync(It.IsAny<CancellationToken>()))
+            .Returns((CancellationToken cancellationToken) =>
+                CompleteConsumerAsync(entered, release, fail, cancellationToken));
+
+        using var capture = new Capture();
+        await using var metrics = new RequestBatcherMetrics([new(1)]);
+        using var dispatchLoop = new BatchDispatchLoop<int>(
+            (_, _) => ValueTask.CompletedTask,
+            1,
+            NullLogger.Instance,
+            new RequestBatcherMetadata("Int32", "prices"),
+            metrics);
+
+        var running = dispatchLoop.RunAsync(consumer.Object, CancellationToken.None);
+        try
+        {
+            await entered.Task.WaitAsync(Timeout);
+            AssertBacklog(Assert.Single(capture.Collect()), 3, "Int32", "prices");
+            Assert.Equal(1, Volatile.Read(ref readCount));
+        }
+        finally
+        {
+            release.TrySetResult();
+            if (fail)
+            {
+                await Assert.ThrowsAsync<InvalidOperationException>(() => running.WaitAsync(Timeout));
+            }
+            else
+            {
+                await running.WaitAsync(Timeout);
+            }
+        }
+
+        Assert.Empty(capture.Collect());
+        Assert.Equal(1, Volatile.Read(ref readCount));
+        consumer.Verify(candidate => candidate.ConsumeAsync(It.IsAny<CancellationToken>()), Times.Once);
+        consumer.Verify(
+            candidate => candidate.TryGetLagSnapshot(out It.Ref<BufferConsumerLagSnapshot>.IsAny),
+            Times.Once);
+        consumer.VerifyNoOtherCalls();
     }
 
     [Fact]
@@ -315,10 +378,10 @@ public sealed class BacklogMetricsTests
     }
 
     [Fact]
-    public void AddRequestBatcherInstrumentation_Backlog_ExportsLongGaugeWithPublicTags()
+    public async Task AddRequestBatcherInstrumentation_Backlog_ExportsLongGaugeWithPublicTags()
     {
         var consumer = new LagConsumer<int>(() => (true, new(6, BufferOffsetUnit.Items)));
-        using var metrics = new RequestBatcherMetrics(1);
+        await using var metrics = new RequestBatcherMetrics([new(1)]);
         using var registration = metrics.RegisterBacklog(consumer, "Int32", "quotes");
         var exporter = new GaugeExporter();
         var reader = new BaseExportingMetricReader(exporter);
@@ -380,6 +443,22 @@ public sealed class BacklogMetricsTests
         {
             Assert.Equal(name, measurement.Tags["requestbatcher.name"]);
         }
+    }
+
+    private static async IAsyncEnumerable<IReadOnlyList<PendingBatchRequest<int>>> CompleteConsumerAsync(
+        TaskCompletionSource entered,
+        TaskCompletionSource release,
+        bool fail,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        entered.TrySetResult();
+        await release.Task.WaitAsync(cancellationToken);
+        if (fail)
+        {
+            throw new InvalidOperationException("consumer failed");
+        }
+
+        yield break;
     }
 
     private sealed class Capture : IDisposable

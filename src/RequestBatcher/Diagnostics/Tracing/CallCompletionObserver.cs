@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using RequestBatcher.PendingRequests;
 
-namespace RequestBatcher.Diagnostics;
+namespace RequestBatcher.Diagnostics.Tracing;
 
 // Admission can finish a request before returning its Task. Hold publication until the tracing boundary
 // knows whether that Task is the completion itself or a wrapper covering additional asynchronous work.

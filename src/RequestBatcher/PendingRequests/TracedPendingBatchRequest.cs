@@ -1,4 +1,4 @@
-using RequestBatcher.Diagnostics;
+using RequestBatcher.Diagnostics.Tracing;
 
 namespace RequestBatcher.PendingRequests;
 

@@ -1,5 +1,9 @@
 using Microsoft.Extensions.Logging;
 using RequestBatcher.Diagnostics;
+using RequestBatcher.Diagnostics.Logging;
+using RequestBatcher.Diagnostics.Metrics;
+using RequestBatcher.Diagnostics.Tracing;
+using RequestBatcher.Handlers;
 using RequestBatcher.PendingRequests;
 
 namespace RequestBatcher.Scheduling;
@@ -7,13 +11,9 @@ namespace RequestBatcher.Scheduling;
 internal sealed class RequestBatchConsumer<TRequest>(
     RequestBatchHandler<TRequest> handler,
     ILogger logger,
-    string requestTypeName,
-    RequestBatcherMetrics metrics,
-    string? batcherName = null)
+    RequestBatcherMetadata metadata,
+    RequestBatcherMetrics metrics)
 {
-    private static readonly string _telemetryRequestTypeName =
-        RequestBatcherRequestType.GetName(typeof(TRequest));
-
     internal async ValueTask ExecuteAsync(
         IReadOnlyList<PendingBatchRequest<TRequest>> bufferedRequests,
         CancellationToken cancellationToken)
@@ -25,16 +25,16 @@ internal sealed class RequestBatchConsumer<TRequest>(
         }
 
         var requests = CreateHandlerInput(activeRequests);
-        using var activity = RequestBatcherTracing.StartBatch(_telemetryRequestTypeName, activeRequests, batcherName);
-        var metricScope = metrics.StartBatch(_telemetryRequestTypeName, batcherName, requests.Length);
+        using var activity = RequestBatcherTracing.StartBatch(metadata.RequestTypeName, activeRequests, metadata.BatcherName);
+        var metricScope = metrics.StartBatch(metadata.RequestTypeName, metadata.BatcherName, requests.Length);
         Exception? failure = null;
 
         try
         {
-            logger.BatchStarted(requestTypeName, requests.Length);
+            logger.BatchStarted(metadata.RequestTypeName, requests.Length);
             await handler(requests, cancellationToken).ConfigureAwait(false);
 
-            logger.BatchCompleted(requestTypeName, requests.Length);
+            logger.BatchCompleted(metadata.RequestTypeName, requests.Length);
         }
         catch (Exception exception)
         {
@@ -42,7 +42,7 @@ internal sealed class RequestBatchConsumer<TRequest>(
             failure = exception;
             logger.BatchFailed(
                 exception,
-                requestTypeName,
+                metadata.RequestTypeName,
                 requests.Length);
         }
         finally

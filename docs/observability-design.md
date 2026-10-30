@@ -15,6 +15,12 @@ table. Registration snippets must not depend on a particular sample's sampler co
 
 ## Contract
 
+Displayed type names use short names without namespaces or assembly-qualified generic arguments. Logs, metrics and
+traces share the same public request type name, unwrapping response entries. Trace `error.type` uses the exception's
+short type name. `ObjectDisposedException.ObjectName` retains the full coordinator type name for diagnosis. Filters previously matching qualified
+exception or log type names must use short names. Same-named types from different namespaces are intentionally not
+distinguished by these labels. Regression tests cover error tags, request type tags and the retained disposal-error names.
+
 RequestBatcher exposes the `RequestBatcher` ActivitySource and meter through built-in .NET APIs. The core package has no
 OpenTelemetry package dependency. Applications can register these stable names directly with `AddSource("RequestBatcher")`
 and `AddMeter("RequestBatcher")`. The optional `RequestBatcher.OpenTelemetry` package supplies the corresponding
@@ -88,8 +94,10 @@ calculates the maximum internally when first resolved. DI registration only regi
 The common internal queue-registration path registers one metadata instance per pipeline from the
 validated options snapshot. This includes named, unnamed, request-only, response, and delegate registrations without
 resolving other coordinators or Handlers. All registrations must be complete before a pipeline is resolved. The existing
-metrics facade owns its Meter, instruments, bucket calculation, and backlog sources. Pipeline diagnostics owns each
-pipeline's observation registration; coordinators signal diagnostic disposal after draining. No additional size-metrics
+metrics service owns its Meter, instruments, bucket calculation, and backlog sources. Coordinators and adapters receive
+the shared service as a required constructor dependency from DI; they neither create nor dispose it. Direct-construction
+tests supply and dispose their own Metrics instance. The dispatch loop owns each pipeline's observation registration.
+No additional size-metrics
 service, static process-wide configuration, or runtime bucket updates are used.
 
 Let B be the largest registered BatchSize in that provider. Each size histogram has a budget of 25 buckets including
@@ -110,7 +118,14 @@ The core supplies immutable `InstrumentAdvice<long>` boundaries when creating bo
 histograms retain SDK defaults. The OpenTelemetry metrics extension only registers the Meter; direct AddMeter uses
 the same advice. Native MeterListener consumers can read the advice when configuring their own aggregation, but still
 receive raw measurements. A consumer may ignore advice, and an explicit OpenTelemetry View can override it.
-The application container disposes the shared Metrics service after its pipelines drain. Independent containers own
+The application container asynchronously disposes the shared Metrics service after its pipelines drain. Metrics tracks
+calls that entered Execute measurement before disposal begins, and waits for their final recording before disposing
+the Meter. Queue draining alone does not guarantee these outer completion continuations have run. A synchronous
+throw or a disabled listener still releases the measurement registration. Concurrent disposal calls share one completion;
+Metrics exposes only asynchronous disposal. Calls arriving after Metrics disposal begins execute without starting
+a new measurement. This does not change request admission or tracing. Shutdown tests cover pending generic and
+non-generic calls, success/failure/cancellation, subscription changes, and public calls racing container shutdown.
+Independent containers own
 independent instruments and may publish different schemas; consumers must not combine incompatible bucket layouts.
 Core explicitly references System.Diagnostics.DiagnosticSource 10.0.11 on net8.0 to provide InstrumentAdvice;
 net10.0 includes the API in its runtime. Core has no OpenTelemetry dependency. No new public configuration or API is required.
@@ -129,9 +144,10 @@ items already enqueued and not yet pulled, summed by the Batcher's single AutoCo
 assigned partitions. It excludes producer capacity waits and active Handler work. Canceled records remain counted
 until pulled and skipped. This is a sampled current value, not an accumulated event count or a peak measurement.
 
-Pipeline diagnostics owns the consumer observation registration and releases it during pipeline diagnostic cleanup after
-draining. Ordinary, response, and delegate adapters share that registration. Draining does not stop observations
-early. Diagnostics owns one instrument on the existing Meter and a registry of live observation sources; disposal
+The dispatch loop registers its consumer directly with Metrics when consumption starts and releases the registration
+when the loop exits, including on failure. Normal shutdown keeps consumption and observations running through draining.
+Ordinary, response, and delegate adapters use the same pipeline registration. Metrics owns one instrument on the existing
+Meter and a registry of live observation sources; registration disposal
 removes the source and releases its consumer reference. A collection already in progress may finish during disposal.
 
 At collection time, each source calls `IBufferPullConsumer.TryGetLagSnapshot` once. The consumer already aggregates
@@ -160,9 +176,9 @@ admission rejection, enumeration failure, or shutdown rejection. A null collecti
 instrumentation and is not measured. Request-only and response APIs are instrumented at their public boundary only;
 internal forwarding does not record another observation. Delegate adapters measure their SubmitAsync entry before
 binding the Handler and invoking the internal submission core. This includes binding failures and avoids calling the
-ordinary public entry a second time, which would duplicate metrics and tracing. All public entry adapters call
-`RequestBatcherCallDiagnostics.Execute`, the shared outer boundary that composes metrics around tracing and then invokes
-the adapter's submission operation. Delegate binding remains inside that operation. Response-group operations include
+ordinary public entry a second time, which would duplicate metrics and tracing. Each public entry adapter directly
+composes its injected Metrics service around the tracing helper and then invokes its submission operation.
+Delegate binding remains inside that operation. Response-group operations include
 response-array assembly and do not attach the tracing observer to an earlier queue completion. Delegate extension
 argument checks (including null collections or callbacks) and unsupported
 batcher validation occur before this boundary and are not measured.
@@ -362,7 +378,7 @@ separated by a space, such as `RequestBatcher.Execute pricing-queries` and
 `RequestBatcher.Handle pricing-queries`; both spans also include
 `requestbatcher.name`. Unnamed registrations keep the base name and omit the tag. The name is
 the exact public DI registration name, never an internal topic or pipeline key. It is available at Activity creation for
-sampling and carried once on the coordinator through dispatch and response/delegate adapters,
+sampling and supplied by the composition root to coordinators and response/delegate adapters, and to dispatch at construction,
 without adding per-request state. Tags also use `requestbatcher.request.type`,
 `requestbatcher.batch.size`, and `requestbatcher.canceled`. Both Execute and Handle use the public request type's
 simple name for `requestbatcher.request.type`, matching metrics and unwrapping internal response entries. Diagnostics
@@ -384,14 +400,20 @@ integration extension changes the SDK's batch decision when it is registered.
 
 ## Internal flow and performance
 
+Diagnostics is organized by responsibility: `Diagnostics/Tracing` owns Activity helpers, links and traced completion
+state; `Diagnostics/Metrics` owns instruments, configuration and metric constants; `Diagnostics/Logging` owns generated
+logger extensions. Namespaces follow these directories. Shared batcher metadata and the public request-type name resolver
+remain in `Diagnostics`. This internal layout does not change public APIs, instrumentation names or lifecycle behavior.
+
 The consumer records batch metrics through its injected `RequestBatcherMetrics` and creates batch Activities through
 `RequestBatcherTracing`. These remain separate: metrics owns container-specific instruments and advice; tracing owns
 the process-wide ActivitySource. Both finish before the consumer publishes request outcomes. Tests cover independent
 metric/tracing subscriptions, Handler failure and scope disposal, ambient Activity restoration, and completion ordering.
 
-Diagnostics owns a shared ActivitySource and tracing helpers. Ordinary and delegate entry points use the same
-`RequestBatcherCallDiagnostics` wrapper, which owns cached call metadata and checks metric and tracing subscriptions.
-It composes the existing measurement and tracing helpers without introducing an additional completion bridge.
+Diagnostics owns a shared ActivitySource and tracing helpers. Batcher configuration creates one immutable metadata
+instance shared by the coordinator, adapters and consumer. Ordinary and delegate entry points retain that metadata
+and check metric and tracing subscriptions locally. Each composes the measurement and tracing helpers without a shared
+diagnostics facade or dependency-forwarding properties, and without introducing an additional completion bridge.
 Static callbacks and value-type state avoid per-call closure allocations. With no listener,
 the existing task path is used without an async wrapper, span, link collection,
 or extra per-item tracing allocation. Traced pending requests use an internal
@@ -400,7 +422,7 @@ Propagation-only state contains the submission context. A separate recorded-stat
 context directly and allocates a collection only for additional batches, protected against concurrent dispatch.
 Completing the state drains those contexts exactly once and ignores later additions. The recorded-only fields do not
 increase propagation-state size. Neither state holds an Activity or participates in a pool.
-Fixed call names and immutable sampling tags are prepared once per coordinator/adapter rather than per submission.
+Fixed call names and immutable sampling tags are prepared once per batcher configuration rather than per submission.
 They remain available to samplers at Activity creation and are not mutable through the shared tag collection.
 The metadata type, sampling-dependent state, deduplication, and Activity lifetime stay under Diagnostics. Submission
 adapters only hold metadata and invoke the tracing boundary; queue admission, capacity, dispatch, and request
@@ -439,7 +461,7 @@ faults, and cancellation semantics while optimizing the ordinary admission path.
 only the final aggregate publication, never an individual item's completion. No Task.Run or extra thread is added per call/batch.
 Response and delegate adapters invoke uninstrumented core methods under their
 outer call span to avoid duplicate spans and include their own preparation.
-The shared wrapper preserves synchronous exceptions, original Task outcomes and cancellation tokens, and the
+The call boundaries preserve synchronous exceptions, original Task outcomes and cancellation tokens, and the
 existing no-listener Task path. Public APIs, metric names/tags, span boundaries, and Handler scheduling are unchanged.
 
 ## Validation and compatibility

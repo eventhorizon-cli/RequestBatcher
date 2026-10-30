@@ -3,12 +3,12 @@ using System.Diagnostics;
 using System.Diagnostics.Metrics;
 using BufferQueue;
 
-namespace RequestBatcher.Diagnostics;
+namespace RequestBatcher.Diagnostics.Metrics;
 
 /// <summary>
 /// Records low-cardinality RequestBatcher metrics when a meter listener is present.
 /// </summary>
-internal sealed class RequestBatcherMetrics : IDisposable
+internal sealed class RequestBatcherMetrics : IAsyncDisposable
 {
     internal const string MeterName = "RequestBatcher";
 
@@ -21,15 +21,15 @@ internal sealed class RequestBatcherMetrics : IDisposable
     private readonly Histogram<long> _submissionSize;
     private readonly Histogram<double> _handleDuration;
     private readonly Histogram<double> _executeDuration;
+    private readonly object _lifecycleLock = new();
+    private TaskCompletionSource? _disposeCompletion;
+    private TaskCompletionSource? _executionsDrained;
+    private int _activeExecutions;
     private int _disposed;
 
     public RequestBatcherMetrics(IEnumerable<RequestBatcherMetricsConfiguration> configurations)
-        : this(configurations.Max(configuration => configuration.BatchSize))
     {
-    }
-
-    internal RequestBatcherMetrics(int maximumBatchSize)
-    {
+        var maximumBatchSize = configurations.Max(configuration => configuration.BatchSize);
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(maximumBatchSize);
 
         _meter = new Meter(MeterName);
@@ -92,7 +92,7 @@ internal sealed class RequestBatcherMetrics : IDisposable
     internal IDisposable RegisterBacklog<TRequest>(
         IBufferPullConsumer<TRequest> consumer, string requestTypeName, string? batcherName)
     {
-        // One AutoCommit consumer already aggregates all partitions for this pipeline. Read only during collection.
+        // One AutoCommit consumer already aggregates all partitions for this batcher. Read only during collection.
         var registration = new BacklogRegistration(this,
             () => consumer.TryGetLagSnapshot(out var snapshot) && snapshot.Unit == BufferOffsetUnit.Items
                 ? snapshot.OffsetLag : null,
@@ -155,19 +155,74 @@ internal sealed class RequestBatcherMetrics : IDisposable
         }
     }
 
-    public void Dispose()
+    public ValueTask DisposeAsync()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        Task drained;
+        TaskCompletionSource completion;
+        lock (_lifecycleLock)
         {
-            return;
+            if (_disposeCompletion is not null)
+            {
+                return new ValueTask(_disposeCompletion.Task);
+            }
+
+            Volatile.Write(ref _disposed, 1);
+            completion = _disposeCompletion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            drained = _activeExecutions == 0
+                ? Task.CompletedTask
+                : (_executionsDrained = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)).Task;
         }
 
-        foreach (var source in _backlogSources.Keys)
+        // Meter callbacks and completion continuations must run outside the lifecycle lock.
+        _ = DisposeCoreAsync(drained, completion);
+        return new ValueTask(completion.Task);
+    }
+
+    private async Task DisposeCoreAsync(Task drained, TaskCompletionSource completion)
+    {
+        try
         {
-            source.Dispose();
+            await drained.ConfigureAwait(false);
+            foreach (var source in _backlogSources.Keys)
+            {
+                source.Dispose();
+            }
+
+            _meter.Dispose();
+            completion.TrySetResult();
+        }
+        catch (Exception exception)
+        {
+            completion.TrySetException(exception);
+        }
+    }
+
+    private bool TryStartExecution()
+    {
+        lock (_lifecycleLock)
+        {
+            if (_disposed != 0)
+            {
+                return false;
+            }
+
+            _activeExecutions++;
+            return true;
+        }
+    }
+
+    private void CompleteExecution()
+    {
+        TaskCompletionSource? drained = null;
+        lock (_lifecycleLock)
+        {
+            if (--_activeExecutions == 0)
+            {
+                drained = _executionsDrained;
+            }
         }
 
-        _meter.Dispose();
+        drained?.TrySetResult();
     }
 
     internal bool ExecuteEnabled => _executeDuration.Enabled;
@@ -175,6 +230,11 @@ internal sealed class RequestBatcherMetrics : IDisposable
     internal Task MeasureExecution<TState>(
         string requestTypeName, string? batcherName, string kind, TState state, Func<TState, Task> submit)
     {
+        if (!TryStartExecution())
+        {
+            return submit(state);
+        }
+
         var scope = new ExecutionScope(this, requestTypeName, batcherName, kind);
         Task task;
         try
@@ -201,6 +261,11 @@ internal sealed class RequestBatcherMetrics : IDisposable
     internal Task<TResult> MeasureExecution<TState, TResult>(
         string requestTypeName, string? batcherName, string kind, TState state, Func<TState, Task<TResult>> submit)
     {
+        if (!TryStartExecution())
+        {
+            return submit(state);
+        }
+
         var scope = new ExecutionScope(this, requestTypeName, batcherName, kind);
         Task<TResult> task;
         try
@@ -298,24 +363,31 @@ internal sealed class RequestBatcherMetrics : IDisposable
 
         internal void Record(string outcome)
         {
-            if (!metrics._executeDuration.Enabled)
+            try
             {
-                return;
-            }
+                if (!metrics._executeDuration.Enabled)
+                {
+                    return;
+                }
 
-            var elapsed = Stopwatch.GetElapsedTime(_startedAt).TotalMilliseconds;
-            var tags = new TagList
-            {
-                { RequestBatcherMetricTags.RequestType, requestTypeName },
-                { RequestBatcherMetricTags.SubmissionKind, kind },
-                { RequestBatcherMetricTags.Outcome, outcome },
-            };
-            if (batcherName is not null)
-            {
-                tags.Add(RequestBatcherMetricTags.BatcherName, batcherName);
-            }
+                var elapsed = Stopwatch.GetElapsedTime(_startedAt).TotalMilliseconds;
+                var tags = new TagList
+                {
+                    { RequestBatcherMetricTags.RequestType, requestTypeName },
+                    { RequestBatcherMetricTags.SubmissionKind, kind },
+                    { RequestBatcherMetricTags.Outcome, outcome },
+                };
+                if (batcherName is not null)
+                {
+                    tags.Add(RequestBatcherMetricTags.BatcherName, batcherName);
+                }
 
-            metrics._executeDuration.Record(elapsed, tags);
+                metrics._executeDuration.Record(elapsed, tags);
+            }
+            finally
+            {
+                metrics.CompleteExecution();
+            }
         }
     }
 

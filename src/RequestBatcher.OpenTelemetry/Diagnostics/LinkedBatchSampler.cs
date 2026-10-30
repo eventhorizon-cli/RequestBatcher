@@ -1,6 +1,6 @@
 using System.Diagnostics;
 using global::OpenTelemetry.Trace;
-using RequestBatcher.Diagnostics;
+using RequestBatcher.Diagnostics.Tracing;
 
 namespace RequestBatcher.OpenTelemetry.Diagnostics;
 

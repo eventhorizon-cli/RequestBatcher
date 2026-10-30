@@ -1,4 +1,4 @@
-namespace RequestBatcher.Diagnostics;
+namespace RequestBatcher.Diagnostics.Metrics;
 
 internal static class RequestBatcherMetricTags
 {

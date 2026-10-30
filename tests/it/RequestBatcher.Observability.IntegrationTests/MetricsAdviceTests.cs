@@ -59,7 +59,7 @@ public sealed class MetricsAdviceTests
             rawMeasurements.Add(new RawMeasurement(instrument.Name, measurement)));
         listener.Start();
 
-        // Resolve both pipelines before the MeterProvider subscribes so it consumes the shared size instruments.
+        // Resolve both batchers before the MeterProvider subscribes so it consumes the shared size instruments.
         var small = serviceProvider.GetRequiredKeyedService<IRequestBatcher<int, int>>("small");
         var large = serviceProvider.GetRequiredKeyedService<IRequestBatcher<int, int>>("large");
         var exporter = new SnapshotExporter();
