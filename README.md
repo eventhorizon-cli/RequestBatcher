@@ -40,6 +40,12 @@ not guaranteed to arrive in one batch.
 
 ## How Requests Are Batched: Opportunistic Merging
 
+![Opportunistic batching animation](docs/assets/request-batcher-conveyor.gif)
+
+Illustration: one partition, `MaxConcurrency=2`, and `BatchSize=4`. When an execution slot is available, the dispatch
+loop pulls queued requests without waiting to fill a batch. [Open the animation source](docs/animations/opportunistic-merging/); after
+downloading it, open `index.html` to pause and drag the animation.
+
 RequestBatcher uses [BufferQueue](https://github.com/eventhorizon-cli/BufferQueue) to combine queued requests within a
 .NET process and pass them to an application handler. The current dependency is
 [BufferQueue 2.1.0](https://www.nuget.org/packages/BufferQueue/2.1.0); applications do not register or configure it
