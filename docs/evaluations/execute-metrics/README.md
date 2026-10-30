@@ -1,5 +1,9 @@
 # Execute and submission metrics on .NET 10
 
+This historical report covers the four-histogram implementation merged in `bd32da1` (#78), before histogram bucket
+advice moved into core and call composition returned to individual adapters. The bucket views and candidate below refer
+to that implementation. See the [current observability design](../../observability-design.md) for the current contract.
+
 ## Scope
 
 This comparison measures the four-histogram contract: submission size, completed Handler batch size, Handler duration,

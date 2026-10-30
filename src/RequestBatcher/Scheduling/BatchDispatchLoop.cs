@@ -2,6 +2,9 @@ using System.Runtime.ExceptionServices;
 using BufferQueue;
 using Microsoft.Extensions.Logging;
 using RequestBatcher.Diagnostics;
+using RequestBatcher.Diagnostics.Logging;
+using RequestBatcher.Diagnostics.Metrics;
+using RequestBatcher.Handlers;
 using RequestBatcher.PendingRequests;
 
 namespace RequestBatcher.Scheduling;
@@ -13,7 +16,8 @@ internal sealed class BatchDispatchLoop<TRequest> : IDisposable
     private readonly SemaphoreSlim _executionSlots;
     private readonly object _inFlightLock = new();
     private readonly ILogger _logger;
-    private readonly string _requestTypeName;
+    private readonly RequestBatcherMetrics _metrics;
+    private readonly RequestBatcherMetadata _metadata;
 
     private TaskCompletionSource _drained = CreateCompletedSource();
     private Exception? _executionFailure;
@@ -24,18 +28,19 @@ internal sealed class BatchDispatchLoop<TRequest> : IDisposable
         RequestBatchHandler<TRequest> handler,
         int maxConcurrency,
         ILogger logger,
-        string requestTypeName,
-        string? batcherName = null)
+        RequestBatcherMetadata metadata,
+        RequestBatcherMetrics metrics)
     {
         ArgumentNullException.ThrowIfNull(handler);
         ArgumentOutOfRangeException.ThrowIfLessThan(maxConcurrency, 1);
         ArgumentNullException.ThrowIfNull(logger);
-        ArgumentException.ThrowIfNullOrWhiteSpace(requestTypeName);
+        ArgumentNullException.ThrowIfNull(metadata);
 
-        _batchConsumer = new RequestBatchConsumer<TRequest>(handler, logger, requestTypeName, batcherName);
+        _batchConsumer = new RequestBatchConsumer<TRequest>(handler, logger, metadata, metrics);
         _executionSlots = new SemaphoreSlim(maxConcurrency, maxConcurrency);
         _logger = logger;
-        _requestTypeName = requestTypeName;
+        _metrics = metrics;
+        _metadata = metadata;
     }
 
     public Task DrainAsync()
@@ -55,6 +60,10 @@ internal sealed class BatchDispatchLoop<TRequest> : IDisposable
         using var dispatchCancellation = CancellationTokenSource.CreateLinkedTokenSource(
             cancellationToken,
             _executionFailureCancellation.Token);
+        using var backlogRegistration = _metrics.RegisterBacklog(
+            consumer,
+            _metadata.RequestTypeName,
+            _metadata.BatcherName);
 
         try
         {
@@ -87,7 +96,7 @@ internal sealed class BatchDispatchLoop<TRequest> : IDisposable
         }
         catch (OperationCanceledException) when (GetExecutionFailure() is { } executionFailure)
         {
-            _logger.ConsumerFailed(executionFailure, _requestTypeName);
+            _logger.ConsumerFailed(executionFailure, _metadata.RequestTypeName);
             ExceptionDispatchInfo.Capture(executionFailure).Throw();
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -95,7 +104,7 @@ internal sealed class BatchDispatchLoop<TRequest> : IDisposable
         }
         catch (Exception exception)
         {
-            _logger.ConsumerFailed(exception, _requestTypeName);
+            _logger.ConsumerFailed(exception, _metadata.RequestTypeName);
             throw;
         }
     }

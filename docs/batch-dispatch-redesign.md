@@ -109,7 +109,7 @@ not guarantee one Handler call or one reverse trace link per explicit submission
 
 ## Queue Dependency Contract
 
-The pipeline uses BufferQueue 2.1.0 with its memory storage. The single pull
+The pipeline uses BufferQueue 2.2.0 with its memory storage. The single pull
 consumer scans assigned partitions in a ring and resumes after the partition
 that supplied the last batch. Notifications wake the consumer without giving
 the notifying partition priority. This balances pull opportunities between
@@ -144,8 +144,8 @@ collection. RequestBatcher's public handler signatures remain unchanged, and
 handler-facing request arrays remain independent of pending-request state.
 Tests cover batch lifetime across overlapping executions, cancellation filtering,
 consumer failures, capacity handoff, routing, and shutdown on both target frameworks.
-The [tracing I/O evaluation](evaluations/bufferqueue-2.1.0/README.md) compares matched source snapshots with only this
-dependency upgrade and its API adaptation changed, retaining the same 20 ms
+The [BufferQueue 2.1.0 tracing I/O evaluation](evaluations/bufferqueue-2.1.0/README.md) compares matched source snapshots
+using 2.0.3 and 2.1.0 with the required API adaptation, retaining the same 20 ms
 workload and sampling matrix, reporting timing and managed allocation separately.
 
 ## BatchDispatchLoop
@@ -275,13 +275,22 @@ the configured wait/fail admission behavior directly.
 
 ## Background Execution Context
 
-The dispatch loop and consumer monitor start on the ThreadPool without capturing
+The dispatch loop and its coordinator-owned monitoring method start on the ThreadPool without capturing
 the execution context of the caller that constructs the coordinator. Startup
 suppresses execution-context flow only while scheduling each background task,
 restores the caller's original flow state synchronously, and supports callers
 that have already suppressed flow. The task boundary isolates even the
 synchronous prefix of consumer enumeration and monitoring. Normal context flow
 inside background tasks remains enabled, including across handler awaits.
+
+The coordinator monitors its single dispatch task directly. It waits for completion without propagating the task's
+exception from the monitoring method, then handles any exit that occurs before cancellation is requested as a failure.
+Faulted tasks retain their original base exception; unexpected successful or canceled completion receives an
+infrastructure-failure exception. No collection of consumer tasks or separate monitor object is needed. Shutdown awaits
+the monitoring task before inspecting the recorded failure and releasing resources. Unexpected cancellation reports
+the same infrastructure failure to queued submissions and disposal, rather than a separate canceled-task exception.
+Public APIs and routing remain unchanged; regressions
+cover synchronous/deferred faults, unexpected success/cancellation, normal shutdown and caller-context isolation.
 
 Consequently, handlers and consumer-failure supervision do not inherit the
 initializing HTTP request's `Activity.Current`, logging scopes, or other

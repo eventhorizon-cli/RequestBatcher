@@ -137,7 +137,7 @@ public class TracingIoOverheadBenchmarks
         _explicitGroups);
 
     /// <summary>
-    /// Prints aggregate diagnostics after all benchmark invocations and disposes the pipeline.
+    /// Prints aggregate diagnostics after all benchmark invocations and disposes the batcher.
     /// </summary>
     [GlobalCleanup]
     public async Task GlobalCleanupAsync()

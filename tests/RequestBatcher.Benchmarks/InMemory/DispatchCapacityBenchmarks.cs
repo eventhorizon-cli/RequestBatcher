@@ -6,7 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace RequestBatcher.Benchmarks.InMemory;
 
 /// <summary>
-/// Compares the complete batching pipeline with direct, fully packed handler batches.
+/// Compares the complete batching path with direct, fully packed handler batches.
 /// </summary>
 [MemoryDiagnoser]
 [SimpleJob(RunStrategy.Throughput, launchCount: 2, warmupCount: 3, iterationCount: 8,
@@ -42,7 +42,7 @@ public class DispatchCapacityBenchmarks
     [Params(0, 20)]
     public int DelayMilliseconds { get; set; }
 
-    /// <summary>Creates the pipeline outside measurement without telemetry listeners.</summary>
+    /// <summary>Creates the batcher outside measurement without telemetry listeners.</summary>
     [GlobalSetup]
     public void Setup()
     {
@@ -94,7 +94,7 @@ public class DispatchCapacityBenchmarks
         ValidateAndRecord(started, direct: false);
     }
 
-    /// <summary>Disposes the pipeline and reports observed batch formation and handler occupancy.</summary>
+    /// <summary>Disposes the batcher and reports observed batch formation and handler occupancy.</summary>
     [GlobalCleanup]
     public async Task CleanupAsync()
     {

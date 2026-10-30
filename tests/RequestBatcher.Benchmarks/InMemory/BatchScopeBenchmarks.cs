@@ -1,7 +1,7 @@
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Engines;
 using Microsoft.Extensions.DependencyInjection;
-using RequestBatcher.DelegateHandlers;
+using RequestBatcher.Handlers.Delegate;
 
 namespace RequestBatcher.Benchmarks.InMemory;
 
@@ -11,7 +11,7 @@ namespace RequestBatcher.Benchmarks.InMemory;
 /// </summary>
 /// <remarks>
 /// The benchmark isolates dependency-resolution and scope overhead with synchronous work.
-/// It is not a full pipeline or downstream-latency comparison. Provider construction,
+/// It does not compare full request submission or downstream latency. Provider construction,
 /// singleton creation, delegate binding and warm-up are outside the measured methods.
 /// </remarks>
 [MemoryDiagnoser]

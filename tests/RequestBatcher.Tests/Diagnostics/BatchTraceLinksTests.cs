@@ -1,5 +1,5 @@
 using System.Diagnostics;
-using RequestBatcher.Diagnostics;
+using RequestBatcher.Diagnostics.Tracing;
 
 namespace RequestBatcher.Tests.Diagnostics;
 

@@ -55,7 +55,7 @@ public class DelegateReturnTypeBenchmarks
     [Benchmark]
     public Task DelegateValueTask() => RunAsync();
 
-    /// <summary>Disposes the pipeline outside measurement.</summary>
+    /// <summary>Disposes the batcher outside measurement.</summary>
     [GlobalCleanup]
     public async Task CleanupAsync() => await _provider.DisposeAsync().ConfigureAwait(false);
 

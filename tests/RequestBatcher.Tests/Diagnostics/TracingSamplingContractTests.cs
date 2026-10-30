@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using RequestBatcher.Diagnostics;
+using RequestBatcher.Diagnostics.Tracing;
 using RequestBatcher.PendingRequests;
 
 namespace RequestBatcher.Tests.Diagnostics;
@@ -172,7 +173,7 @@ public sealed class TracingSamplingContractTests
         var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         SubmissionTraceContext? traceContext = null;
         var returned = RequestBatcherTracing.TraceCall(
-            new RequestBatcherTraceMetadata(requestType),
+            new RequestBatcherMetadata(requestType),
             completion,
             (state, context) =>
             {

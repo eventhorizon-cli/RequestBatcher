@@ -73,13 +73,15 @@ builder.Services.AddOpenTelemetry()
 ```
 
 You can also install [`RequestBatcher.OpenTelemetry`](https://www.nuget.org/packages/RequestBatcher.OpenTelemetry) and use
-`.WithMetrics(metrics => metrics.AddRequestBatcherInstrumentation())`. Both register the same Meter; the extension also
-applies size-histogram views from the largest `BatchSize` registered in the same service collection when `MeterProvider`
-is built. Complete batcher registrations first. Direct `AddMeter("RequestBatcher")` registers the Meter without these
-views and retains SDK defaults.
+`.WithMetrics(metrics => metrics.AddRequestBatcherInstrumentation())`. Both register the same Meter and use the
+size-histogram bucket advice supplied by core from the largest `BatchSize` in the batchers' service collection.
+Complete batcher registrations before building the service provider. Advice is fixed when the core metrics service
+is first resolved. Custom `AddView` settings override the advice.
 
 The Meter exposes four histograms: `requestbatcher.submission.size` and `requestbatcher.batch.size` are `Histogram<long>`
 in `{request}`; `requestbatcher.handle.duration` and `requestbatcher.execute.duration` are `Histogram<double>` in `ms`.
+`requestbatcher.backlog` is an `ObservableGauge<long>` in `{request}` for approximate enqueued items not yet pulled,
+excluding capacity waits and active Handler work.
 For recording semantics, tags, PromQL, bucket rules, and MeterListener usage, see the
 [RequestBatcher Metrics guide](https://github.com/eventhorizon-cli/RequestBatcher/blob/main/docs/metrics.md).
 

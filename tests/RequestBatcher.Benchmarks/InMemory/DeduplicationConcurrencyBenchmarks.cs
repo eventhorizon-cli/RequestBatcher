@@ -38,15 +38,15 @@ public class DeduplicationConcurrencyBenchmarks
     [Params(1, 32, RequestCount)]
     public int SubmissionSize { get; set; }
 
-    /// <summary>Creates a pipeline that reads all distinct keys with one downstream call per batch.</summary>
+    /// <summary>Creates a batcher that reads all distinct keys with one downstream call per batch.</summary>
     [GlobalSetup(Target = nameof(BulkRead))]
     public Task SetupBulkAsync() => SetupAsync(querySize: 0);
 
-    /// <summary>Creates a pipeline that joins individual distinct-key reads inside each handler.</summary>
+    /// <summary>Creates a batcher that joins individual distinct-key reads inside each handler.</summary>
     [GlobalSetup(Target = nameof(PerKeyWhenAll))]
     public Task SetupFanOutAsync() => SetupAsync(querySize: 1);
 
-    /// <summary>Creates a pipeline that joins reads of up to 32 distinct keys inside each handler.</summary>
+    /// <summary>Creates a batcher that joins reads of up to 32 distinct keys inside each handler.</summary>
     [GlobalSetup(Target = nameof(ChunkedWhenAll))]
     public Task SetupChunkedAsync() => SetupAsync(querySize: 32);
 
@@ -118,7 +118,7 @@ public class DeduplicationConcurrencyBenchmarks
             $"PeakDownstream={_workload.PeakCalls}");
     }
 
-    /// <summary>Drains and disposes the pipeline outside measurement.</summary>
+    /// <summary>Drains and disposes the batcher outside measurement.</summary>
     [GlobalCleanup]
     public async Task CleanupAsync() => await _provider.DisposeAsync().ConfigureAwait(false);
 

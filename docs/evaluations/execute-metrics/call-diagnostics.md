@@ -1,5 +1,9 @@
 # Shared call diagnostics validation
 
+This is a historical validation of the implementation merged in `bd32da1` (#78). The shared diagnostics class described
+below has since been removed; see the [current observability design](../../observability-design.md) for ownership and
+call composition. These measurements describe the historical implementation only.
+
 Validated on 2026-10-29 with SDK 10.0.100 and the actual .NET 10.0.0 runtime, macOS 27.2 Arm64.
 The change routes ordinary and delegate submission adapters through `RequestBatcherCallDiagnostics`, preserving
 delegate binding, cancellation, response assembly, and the existing completion helpers inside the call boundary.

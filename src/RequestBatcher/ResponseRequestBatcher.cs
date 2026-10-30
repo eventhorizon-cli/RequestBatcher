@@ -1,21 +1,21 @@
+using Microsoft.Extensions.DependencyInjection;
 using RequestBatcher.Diagnostics;
+using RequestBatcher.Diagnostics.Metrics;
+using RequestBatcher.Diagnostics.Tracing;
 using RequestBatcher.PendingRequests;
 
 namespace RequestBatcher;
 
 internal sealed class ResponseRequestBatcher<TRequest, TResponse>(
-    RequestBatchCoordinator<RequestBatchEntry<TRequest, TResponse>> batcher)
+    [FromKeyedServices] RequestBatchCoordinator<RequestBatchEntry<TRequest, TResponse>> batcher,
+    RequestBatcherMetrics metrics,
+    [FromKeyedServices] RequestBatcherConfiguration<RequestBatchEntry<TRequest, TResponse>> configuration)
     : IRequestBatcher<TRequest, TResponse>
 {
-    private static readonly string _telemetryRequestTypeName = RequestBatcherRequestType.GetName(typeof(TRequest));
-    private readonly RequestBatcherCallDiagnostics _callDiagnostics = new(
-        _telemetryRequestTypeName,
-        batcher.BatcherName);
-
-    internal string? BatcherName => batcher.BatcherName;
+    private readonly RequestBatcherMetadata _metadata = configuration.Metadata;
 
     public Task<TResponse> ExecuteAsync(TRequest request, CancellationToken cancellationToken = default) =>
-        _callDiagnostics.Execute(
+        ExecuteCall(
             RequestBatcherMetricTags.SingleSubmission,
             (Batcher: this, Request: request, Token: cancellationToken),
             static (state, context, observer) => state.Batcher.ExecuteCoreAsync(state.Request, state.Token, context, observer));
@@ -42,7 +42,7 @@ internal sealed class ResponseRequestBatcher<TRequest, TResponse>(
     {
         ArgumentNullException.ThrowIfNull(requests);
         // The call includes response-array assembly after queue completion, so observe the returned Task instead.
-        return _callDiagnostics.Execute(
+        return ExecuteCall(
             RequestBatcherMetricTags.MultiSubmission,
             (Batcher: this, Requests: requests, Token: cancellationToken),
             static (state, context, _) => state.Batcher.ExecuteCoreAsync(state.Requests, state.Token, context),
@@ -101,4 +101,28 @@ internal sealed class ResponseRequestBatcher<TRequest, TResponse>(
             yield return entry;
         }
     }
+
+    private Task<TResult> ExecuteCall<TResult, TState>(
+        string kind,
+        TState state,
+        Func<TState, SubmissionTraceContext?, IRequestCompletionObserver?, Task<TResult>> submit,
+        bool observeCompletion = true)
+    {
+        return metrics.ExecuteEnabled
+            ? metrics.MeasureExecution(
+                _metadata.RequestTypeName,
+                _metadata.BatcherName,
+                kind,
+                (Batcher: this, State: state, Submit: submit, ObserveCompletion: observeCompletion),
+                static args => args.Batcher.ExecuteWithTracing(args.State, args.Submit, args.ObserveCompletion))
+            : ExecuteWithTracing(state, submit, observeCompletion);
+    }
+
+    private Task<TResult> ExecuteWithTracing<TResult, TState>(
+        TState state,
+        Func<TState, SubmissionTraceContext?, IRequestCompletionObserver?, Task<TResult>> submit,
+        bool observeCompletion) =>
+        RequestBatcherTracing.Source.HasListeners()
+            ? RequestBatcherTracing.TraceCall(_metadata, state, submit, observeCompletion)
+            : submit(state, null, null);
 }

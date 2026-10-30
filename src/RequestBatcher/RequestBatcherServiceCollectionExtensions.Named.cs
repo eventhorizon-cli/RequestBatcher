@@ -1,7 +1,5 @@
-using BufferQueue;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
+using RequestBatcher.Handlers;
 
 namespace RequestBatcher;
 
@@ -19,7 +17,7 @@ public static partial class RequestBatcherServiceCollectionExtensions
     /// <param name="services">The application-owned service collection.</param>
     /// <param name="batcherName">The non-empty, case-sensitive batcher name.</param>
     /// <param name="handlerLifetime">The handler lifetime. Scoped and transient handlers are resolved once per batch.</param>
-    /// <param name="configure">An optional callback that configures this pipeline.</param>
+    /// <param name="configure">An optional callback that configures this batcher.</param>
     /// <returns>The service collection.</returns>
     public static IServiceCollection AddRequestBatcher<TRequest, THandler>(
         this IServiceCollection services,
@@ -31,7 +29,7 @@ public static partial class RequestBatcherServiceCollectionExtensions
         ValidateNamedRegistration<TRequest>(services, batcherName, handlerLifetime);
         var options = CreateNamedOptions(configure);
 
-        RegisterNamedPipeline<TRequest>(services, batcherName);
+        RegisterNamedBatcher<TRequest>(services, batcherName);
         services.Add(new ServiceDescriptor(
             typeof(IRequestBatchHandler<TRequest>), batcherName, typeof(THandler), handlerLifetime));
         AddNamedOptions(services, batcherName, options);
@@ -56,7 +54,7 @@ public static partial class RequestBatcherServiceCollectionExtensions
     /// <param name="services">The application-owned service collection.</param>
     /// <param name="batcherName">The non-empty, case-sensitive batcher name.</param>
     /// <param name="handlerLifetime">The handler lifetime. Scoped and transient handlers are resolved once per batch.</param>
-    /// <param name="configure">An optional callback that configures this pipeline.</param>
+    /// <param name="configure">An optional callback that configures this batcher.</param>
     /// <returns>The service collection.</returns>
     public static IServiceCollection AddRequestBatcher<TRequest, TResponse, THandler>(
         this IServiceCollection services,
@@ -68,25 +66,24 @@ public static partial class RequestBatcherServiceCollectionExtensions
         ValidateNamedRegistration<TRequest>(services, batcherName, handlerLifetime);
         var options = CreateNamedOptions(configure);
         var entryOptions = options.Project<RequestBatchEntry<TRequest, TResponse>>(static entry => entry.Request);
-        var pipelineKey = new object();
+        var batcherKey = new object();
 
-        RegisterNamedPipeline<TRequest>(services, batcherName);
+        RegisterNamedBatcher<TRequest>(services, batcherName);
         services.Add(new ServiceDescriptor(
             typeof(IRequestBatchHandler<TRequest, TResponse>), batcherName, typeof(THandler), handlerLifetime));
         AddNamedOptions(services, batcherName, options);
         services.Add(new ServiceDescriptor(
             typeof(IRequestBatchHandler<RequestBatchEntry<TRequest, TResponse>>),
-            pipelineKey,
+            batcherKey,
             (provider, _) => new ResponseRequestBatchHandler<TRequest, TResponse>(
                 provider.GetRequiredKeyedService<IRequestBatchHandler<TRequest, TResponse>>(batcherName)),
             handlerLifetime));
         AddKeyedCoordinator<RequestBatchEntry<TRequest, TResponse>>(
-            services, pipelineKey, handlerLifetime, entryOptions, batcherName);
+            services, batcherKey, handlerLifetime, entryOptions, batcherName);
+        services.AddKeyedSingleton<ResponseRequestBatcher<TRequest, TResponse>>(batcherKey);
         services.AddKeyedSingleton<IRequestBatcher<TRequest, TResponse>>(
             batcherName,
-            (provider, _) => new ResponseRequestBatcher<TRequest, TResponse>(
-                provider.GetRequiredKeyedService<RequestBatchCoordinator<RequestBatchEntry<TRequest, TResponse>>>(
-                    pipelineKey)));
+            (provider, _) => provider.GetRequiredKeyedService<ResponseRequestBatcher<TRequest, TResponse>>(batcherKey));
 
         return services;
     }
@@ -121,7 +118,7 @@ public static partial class RequestBatcherServiceCollectionExtensions
         return options.ValidateAndClone();
     }
 
-    private static void RegisterNamedPipeline<TRequest>(IServiceCollection services, string batcherName)
+    private static void RegisterNamedBatcher<TRequest>(IServiceCollection services, string batcherName)
     {
         services.AddLogging();
         services.AddKeyedSingleton<RequestBatcherRegistration<TRequest>>(batcherName);
@@ -142,36 +139,9 @@ public static partial class RequestBatcherServiceCollectionExtensions
         string? batcherName)
     {
         var topicName = $"request-batcher-{Guid.NewGuid():N}";
-        AddInternalBufferQueueTopic(services, options, topicName);
-        services.AddKeyedSingleton<RequestBatchCoordinator<TRequest>>(
-            serviceKey,
-            (provider, key) => new RequestBatchCoordinator<TRequest>(
-                provider.GetRequiredService<IBufferQueue>(),
-                CreateKeyedHandler<TRequest>(provider, key, handlerLifetime),
-                Options.Create(options),
-                provider.GetRequiredService<ILogger<RequestBatchCoordinator<TRequest>>>(),
-                topicName,
-                batcherName));
-    }
-
-    private static RequestBatchHandler<TRequest> CreateKeyedHandler<TRequest>(
-        IServiceProvider provider,
-        object? serviceKey,
-        ServiceLifetime handlerLifetime)
-    {
-        if (handlerLifetime == ServiceLifetime.Singleton)
-        {
-            return provider.GetRequiredKeyedService<IRequestBatchHandler<TRequest>>(serviceKey).HandleAsync;
-        }
-
-        var scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
-        return HandleInScopeAsync;
-
-        async ValueTask HandleInScopeAsync(IReadOnlyList<TRequest> requests, CancellationToken cancellationToken)
-        {
-            await using var scope = scopeFactory.CreateAsyncScope();
-            var handler = scope.ServiceProvider.GetRequiredKeyedService<IRequestBatchHandler<TRequest>>(serviceKey);
-            await handler.HandleAsync(requests, cancellationToken).ConfigureAwait(false);
-        }
+        AddBatcherServices(services, options, topicName);
+        services.AddKeyedSingleton(serviceKey, new RequestBatcherConfiguration<TRequest>(topicName, batcherName, options));
+        RegisterHandlerDelegate<TRequest>(services, handlerLifetime, serviceKey);
+        services.AddKeyedSingleton<RequestBatchCoordinator<TRequest>>(serviceKey);
     }
 }

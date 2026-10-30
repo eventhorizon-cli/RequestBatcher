@@ -7,7 +7,6 @@ using BenchmarkDotNet.Order;
 using Microsoft.Extensions.DependencyInjection;
 using OpenTelemetry;
 using OpenTelemetry.Metrics;
-using RequestBatcher.Diagnostics;
 
 namespace RequestBatcher.Benchmarks.InMemory;
 
@@ -81,8 +80,6 @@ public class MetricsIoOverheadBenchmarks
             };
             _metricReader.TemporalityPreference = MetricReaderTemporalityPreference.Cumulative;
             _meterProvider = Sdk.CreateMeterProviderBuilder()
-                // The benchmark owns a separate SDK container; supply the same sizing snapshot as its pipeline.
-                .ConfigureServices(services => services.AddSingleton(new RequestBatcherMetricsConfiguration(BatchSize)))
                 .AddRequestBatcherInstrumentation()
                 .AddReader(_metricReader)
                 .Build();
@@ -146,15 +143,27 @@ public class MetricsIoOverheadBenchmarks
         _explicitGroups);
 
     /// <summary>
-    /// Drains the batcher, forces the final cumulative collection, and validates all four histograms.
+    /// Collects the live backlog, drains the batcher, and validates the gauge and all four histograms.
     /// </summary>
     [GlobalCleanup]
     public async Task GlobalCleanupAsync()
     {
-        if (_serviceProvider is not null)
+        var exportsBeforeFinalFlush = _exporter?.ExportCount ?? 0;
+        try
         {
-            await _serviceProvider.DisposeAsync().ConfigureAwait(false);
-            _serviceProvider = null;
+            // Every wave is complete here; collect the zero backlog before disposal unregisters its source.
+            if (_metricReader is not null && !_metricReader.Collect(Timeout.Infinite))
+            {
+                throw new InvalidOperationException("The final metrics collection did not complete.");
+            }
+        }
+        finally
+        {
+            if (_serviceProvider is not null)
+            {
+                await _serviceProvider.DisposeAsync().ConfigureAwait(false);
+                _serviceProvider = null;
+            }
         }
 
         if (Mode != MetricsMode.Disabled)
@@ -164,15 +173,9 @@ public class MetricsIoOverheadBenchmarks
                 throw new InvalidOperationException("The metrics provider was not initialized.");
             }
 
-            var exportsBeforeFinalFlush = _exporter.ExportCount;
             if (Mode is MetricsMode.Periodic1000 or MetricsMode.Periodic100 && exportsBeforeFinalFlush == 0)
             {
                 throw new InvalidOperationException("Periodic metrics collection did not occur before the final flush.");
-            }
-
-            if (!_metricReader.Collect(Timeout.Infinite))
-            {
-                throw new InvalidOperationException("The final metrics collection did not complete.");
             }
 
             _meterProvider.Dispose();
@@ -187,7 +190,8 @@ public class MetricsIoOverheadBenchmarks
                 throw new InvalidOperationException($"Metrics exporter failed: {snapshot.FirstError}");
             }
 
-            if (snapshot.ObservedInstrumentCount != 4 ||
+            if (snapshot.ObservedInstrumentCount != 5 ||
+                snapshot.Backlog != 0 ||
                 snapshot.BatchSizeCount != expectedBatches ||
                 snapshot.BatchSizeSum != expectedRequests ||
                 snapshot.HandleDurationCount != expectedBatches ||
@@ -203,7 +207,7 @@ public class MetricsIoOverheadBenchmarks
             Console.WriteLine(
                 $"Metrics validation: Benchmark={_benchmarkName}, Mode={Mode}, " +
                 $"ExportsBeforeFinalFlush={exportsBeforeFinalFlush}, TotalExports={snapshot.ExportCount}, " +
-                $"Instruments={snapshot.ObservedInstrumentCount}, " +
+                $"Instruments={snapshot.ObservedInstrumentCount}, Backlog={snapshot.Backlog}, " +
                 $"BatchSizeCount={snapshot.BatchSizeCount}, BatchSizeSum={snapshot.BatchSizeSum}, " +
                 $"HandleDurationCount={snapshot.HandleDurationCount}, ExecuteDurationCount={snapshot.ExecuteDurationCount}, " +
                 $"SubmissionSizeCount={snapshot.SubmissionSizeCount}, SubmissionSizeSum={snapshot.SubmissionSizeSum}");
@@ -341,6 +345,7 @@ public class MetricsIoOverheadBenchmarks
         private long _executeDurationCount;
         private long _submissionSizeCount;
         private long _submissionSizeSum;
+        private long _backlog;
         private string? _firstError;
 
         public int ExportCount
@@ -364,6 +369,23 @@ public class MetricsIoOverheadBenchmarks
                     {
                         switch (metric.Name)
                         {
+                            case "requestbatcher.backlog":
+                                if (metric.MetricType != MetricType.LongGauge)
+                                {
+                                    throw new InvalidOperationException("Backlog must be a long gauge.");
+                                }
+
+                                foreach (var point in metric.GetMetricPoints())
+                                {
+                                    _observedInstrumentCount |= 16;
+                                    _backlog = point.GetGaugeLastValueLong();
+                                    if (_backlog < 0)
+                                    {
+                                        throw new InvalidOperationException("Backlog must be nonnegative.");
+                                    }
+                                }
+
+                                break;
                             case "requestbatcher.batch.size":
                                 _observedInstrumentCount |= 1;
                                 _batchSizeCount = 0;
@@ -436,6 +458,7 @@ public class MetricsIoOverheadBenchmarks
                     _executeDurationCount,
                     _submissionSizeCount,
                     _submissionSizeSum,
+                    _backlog,
                     _firstError);
             }
         }
@@ -450,5 +473,6 @@ public class MetricsIoOverheadBenchmarks
         long ExecuteDurationCount,
         long SubmissionSizeCount,
         long SubmissionSizeSum,
+        long Backlog,
         string? FirstError);
 }

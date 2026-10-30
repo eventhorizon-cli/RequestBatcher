@@ -8,7 +8,7 @@ using RequestBatcher.Benchmarks.Infrastructure;
 namespace RequestBatcher.Benchmarks.InMemory;
 
 /// <summary>
-/// Measures explicit request submissions through the public dependency-injection pipeline.
+/// Measures explicit request submissions through the public dependency-injection batcher.
 /// </summary>
 [MemoryDiagnoser]
 [RankColumn]

@@ -1,12 +1,20 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using RequestBatcher.Diagnostics;
+using RequestBatcher.Diagnostics.Metrics;
 using RequestBatcher.PendingRequests;
 using RequestBatcher.Scheduling;
 
 namespace RequestBatcher.Tests.Scheduling;
 
-public sealed class RequestBatchConsumerTests
+public sealed class RequestBatchConsumerTests : IAsyncLifetime
 {
+    private readonly RequestBatcherMetrics _metrics = new([new(128)]);
+
+    public Task InitializeAsync() => Task.CompletedTask;
+
+    public Task DisposeAsync() => _metrics.DisposeAsync().AsTask();
+
     [Fact]
     public async Task ExecuteAsync_HandlerIsRunning_CompletesRequestsAfterHandler()
     {
@@ -21,7 +29,8 @@ public sealed class RequestBatchConsumerTests
                 await releaseHandler.Task;
             },
             NullLogger.Instance,
-            typeof(int).FullName!);
+            new RequestBatcherMetadata("Int32"),
+            _metrics);
 
         var processing = subject.ExecuteAsync([pendingRequest], CancellationToken.None).AsTask();
         await handlerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -46,7 +55,8 @@ public sealed class RequestBatchConsumerTests
                 return ValueTask.FromException(expected);
             },
             NullLogger.Instance,
-            typeof(int).FullName!);
+            new RequestBatcherMetadata("Int32"),
+            _metrics);
 
         await subject.ExecuteAsync([pendingRequest], CancellationToken.None).AsTask();
 
@@ -72,7 +82,8 @@ public sealed class RequestBatchConsumerTests
                 return ValueTask.CompletedTask;
             },
             NullLogger.Instance,
-            typeof(int).FullName!);
+            new RequestBatcherMetadata("Int32"),
+            _metrics);
 
         cancellation.Cancel();
 
@@ -106,7 +117,8 @@ public sealed class RequestBatchConsumerTests
                 return ValueTask.CompletedTask;
             },
             NullLogger.Instance,
-            typeof(int).FullName!);
+            new RequestBatcherMetadata("Int32"),
+            _metrics);
 
         cancellation.Cancel();
         await subject.ExecuteAsync(requests, CancellationToken.None).AsTask();
@@ -148,7 +160,8 @@ public sealed class RequestBatchConsumerTests
                 return ValueTask.FromException(expected);
             },
             NullLogger.Instance,
-            typeof(int).FullName!);
+            new RequestBatcherMetadata("Int32"),
+            _metrics);
 
         cancellation.Cancel();
         await subject.ExecuteAsync(requests, CancellationToken.None).AsTask();
@@ -202,7 +215,8 @@ public sealed class RequestBatchConsumerTests
                 return ValueTask.CompletedTask;
             },
             NullLogger.Instance,
-            typeof(int).FullName!);
+            new RequestBatcherMetadata("Int32"),
+            _metrics);
 
         if (includeCanceledRequest)
         {
@@ -273,7 +287,8 @@ public sealed class RequestBatchConsumerTests
                 await releaseSecond.Task;
             },
             NullLogger.Instance,
-            typeof(int).FullName!);
+            new RequestBatcherMetadata("Int32"),
+            _metrics);
 
         var firstProcessing = subject.ExecuteAsync(firstRequests, CancellationToken.None).AsTask();
         await firstStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));

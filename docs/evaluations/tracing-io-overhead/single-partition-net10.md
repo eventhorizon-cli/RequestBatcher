@@ -42,12 +42,12 @@ a latency regression or gain. This report provides no matched baseline for a run
 
 ## Source findings
 
-- [RequestBatcherTracing.StartBatch](../../../src/RequestBatcher/Diagnostics/RequestBatcherTracing.cs) already skips
+- [RequestBatcherTracing.StartBatch](../../../src/RequestBatcher/Diagnostics/Tracing/RequestBatcherTracing.cs) already skips
   link collection when no participating submission is sampled. At 0%, the remaining cost therefore cannot all be
   attributed to link deduplication. Activity lifetime, context propagation, completion notifications, and tags still
   contribute. A propagation-only Activity is compatible with a non-recorded sampling result; see the
   [.NET sampling contract](https://learn.microsoft.com/en-us/dotnet/core/compatibility/core-libraries/10.0/activity-sampling).
-- [BatchTraceLinks](../../../src/RequestBatcher/Diagnostics/BatchTraceLinks.cs) already stores the first context
+- [BatchTraceLinks](../../../src/RequestBatcher/Diagnostics/Tracing/BatchTraceLinks.cs) already stores the first context
   without a dictionary. Additional distinct contexts use a lazily allocated dictionary. A batch entirely from one
   explicit submission therefore already avoids that dictionary, but still examines each item.
 - `CountSubmissions` reuses an existing link collector's count when its unique trace/span-pair count equals the item
@@ -57,7 +57,7 @@ a latency regression or gain. This report provides no matched baseline for a run
 - `StartBatch` creates an `ActivityTagsCollection` for every batch with listeners and computes a named Handler span
   name each time. Execute already caches immutable name/type metadata. Batch metadata preparation is a candidate
   for similar reuse, while retaining creation-time sampler inputs and per-batch size.
-- [SubmissionTraceContext](../../../src/RequestBatcher/Diagnostics/SubmissionTraceContext.cs) synchronizes batch-link
+- [SubmissionTraceContext](../../../src/RequestBatcher/Diagnostics/Tracing/SubmissionTraceContext.cs) synchronizes batch-link
   collection with completion. One partition still permits multiple concurrent batches and one submission can span
   those batches. Partition count is not sufficient proof that this state can be unsynchronized.
 

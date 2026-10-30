@@ -2,7 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Moq;
-using RequestBatcher.Diagnostics;
+using RequestBatcher.Diagnostics.Tracing;
 
 namespace RequestBatcher.Tests.Diagnostics;
 
@@ -18,7 +18,7 @@ public sealed class NamedTracingTests
     [InlineData(true, false, true)]
     [InlineData(true, true, false)]
     [InlineData(true, true, true)]
-    public async Task ExecuteAsync_MultipleNamedAndUnnamedPipelines_TagsBothSpansWithPublicName(
+    public async Task ExecuteAsync_MultipleNamedAndUnnamedBatchers_TagsBothSpansWithPublicName(
         bool useDelegate, bool hasResponse, bool submitBatch)
     {
         var sampled = new ConcurrentQueue<(string Operation, string? Name)>();

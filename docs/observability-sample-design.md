@@ -55,9 +55,11 @@ cross the queue; ambient request state is isolated.
 
 OTLP/HTTP exports traces, framework HTTP metrics, RequestBatcher metrics, Npgsql metrics, and logs. Service names are
 `cart` and `pricing`, set through `OTEL_SERVICE_NAME` with matching application defaults. Grafana queries and integration
-assertions use those service identities. Existing stored telemetry retains its original service names.
-Dashboard trace panels appear first, distinguish caller waiting from batch execution, and explain navigation through
-span links. Metrics and logs follow them.
+assertions use those service identities. Existing stored telemetry retains its original service names. Dashboard trace
+panels appear first and explain navigation through span links. Service HTTP metrics and Pricing database metrics have
+separate dashboard rows; RequestBatcher measurements use their own row, and logs remain separate from all metric groups.
+This keeps RequestBatcher item and batch behavior distinct from service request volume, database operations, and pool
+state. The sample does not register .NET runtime instrumentation, so the dashboard does not query runtime metrics.
 Grafana's span details label these navigable entries `References` and include both
 parent references and span links. An Execute's HTTP parent shares its trace ID;
 its handler links point to independent Handle traces. Panel descriptions and
@@ -65,10 +67,30 @@ sample instructions explain this distinction.
 Always-on sampling and a 256-link limit keep the demonstration
 visible; these are not production sampling recommendations. Grafana provisions Tempo, Prometheus, and Loki and
 searches both RequestBatcher span types. TraceQL link lookup connects a caller trace to its batch traces without
-implying a single trace tree. RequestBatcher metrics cover accepted and processed product requests, processed batches,
-batch size in product requests, and batch duration. Their request-type dimension uses `Int32`, the public request type's
-short name. Instrument names contain one `requestbatcher` prefix. It is in-process and
-cannot recover pending requests after process failure.
+implying a single trace tree.
+
+The dedicated RequestBatcher dashboard row uses the Prometheus translations for all four histograms and the backlog
+gauge: submission size, batch size, Execute duration, Handler duration, and backlog. A batcher-name selector filters
+`requestbatcher_name`, so the `pricing-queries` delegate pipeline and `pricing-queries-ordinary` handler pipeline remain
+distinct. Both use the `Int32` request-type dimension. Panels show submission item and call rates, batch item and batch
+rates, mean and P95 submission and batch sizes, successful Execute P50/P95, Handler P50/P95, Execute outcome rates, and
+the current backlog value. Duration quantiles use the classic histogram buckets; successful Execute quantiles filter
+`requestbatcher_outcome=success`, while the outcome panel groups Execute call rates by the available `success`, `error`,
+and `canceled` values.
+
+Submission-size totals count requests in submissions that reached coordinator admission, including queue-full and later
+failures; they are not successful-admission counters. Batch-size totals count items in completed Handler batches, and
+batch-size counts represent completed batches. Execute-duration counts represent measured public calls and carry the
+outcome tag. The backlog gauge is a sampled current value, not a counter or rate. Instrument names contain one
+`requestbatcher` prefix. The library is in-process and cannot recover pending requests after process failure.
+
+The Pricing database row uses the verified Npgsql translations and filters `service_name="pricing"`. It shows connection
+counts by `state` (`idle` and `used`) alongside the configured connection maximum, operation rate from the duration
+histogram count, bucket-estimated P95 operation duration, currently executing operations, read and written byte rates,
+prepared ratio, and the cumulative mean connection creation time. The connection creation mean is the lifetime sum divided
+by the lifetime count; it is not calculated with `rate`, which may have no samples during an idle interval. Pool labels
+are aggregated so legends do not expose long connection-string-derived names. Runtime metrics are not included because
+the sample does not register runtime instrumentation.
 
 ## Validation
 

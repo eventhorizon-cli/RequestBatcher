@@ -1,7 +1,7 @@
 using BenchmarkDotNet.Attributes;
 using BenchmarkDotNet.Engines;
 using Microsoft.Extensions.DependencyInjection;
-using RequestBatcher.DelegateHandlers;
+using RequestBatcher.Handlers.Delegate;
 
 namespace RequestBatcher.Benchmarks.InMemory;
 

@@ -72,6 +72,9 @@ services.AddRequestBatcher<TRequest, THandler>(ServiceLifetime.Scoped);
 services.AddRequestBatcher<TRequest, TResponse, THandler>(ServiceLifetime.Scoped);
 ```
 
+`RequestBatchCoordinator<TRequest>` is internal. Code that previously referenced it directly must use the public
+`IRequestBatcher<TRequest>` abstraction instead.
+
 `AddRequestBatcher` registers the handler, coordinator, and internal queue in the application's existing
 `IServiceCollection`. The application does not register or configure BufferQueue separately. Scoped and transient typed
 handlers are resolved in an async scope once per handler batch; singleton handlers are reused and must be thread-safe
@@ -287,7 +290,8 @@ their parent.
 - Queue capacity excludes executing requests: up to `MaxConcurrency * BatchSize` pulled requests may be in flight in addition.
 - `DisposeAsync` stops new admissions, drains accepted work including submissions waiting for capacity, and releases owned
   resources. Concurrent and repeated disposal calls share one operation. When registered through DI, the application
-  container owns async disposal.
+  container owns async disposal. When handlers need DI scopes, stop producers and await outstanding calls before
+  disposing the container; pending batches cannot create new scopes once container disposal begins.
 
 The default is `FullMode = Wait`. `MaxPendingRequests` bounds queued requests, not callers or submissions waiting for
 capacity, and is not a process-wide memory limit; apply an ingress concurrency or rate limit when total waiting work must
@@ -334,6 +338,10 @@ log-level prefix to configure the whole library.
 
 The Meter exposes four histograms: `requestbatcher.submission.size` and `requestbatcher.batch.size` are `Histogram<long>`
 in `{request}`; `requestbatcher.handle.duration` and `requestbatcher.execute.duration` are `Histogram<double>` in `ms`.
+`requestbatcher.backlog` is an `ObservableGauge<long>` in `{request}` for approximate enqueued items not yet pulled,
+excluding capacity waits and active Handler work.
+Core supplies size-histogram bucket advice from the largest `BatchSize` registered in the same service collection.
+Direct `AddMeter` and the integration extension use the same advice; custom `AddView` settings override it.
 Histogram `sum / count` gives the mean. For metric semantics, tags, queries, and bucket rules, see the
 [RequestBatcher Metrics guide](https://github.com/eventhorizon-cli/RequestBatcher/blob/main/docs/metrics.md).
 

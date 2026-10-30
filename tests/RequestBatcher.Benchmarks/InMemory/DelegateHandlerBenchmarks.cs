@@ -39,7 +39,7 @@ public class DelegateHandlerBenchmarks
     public void SetupTypedNoServices() => Setup(useDelegate: false, useServices: false);
 
     /// <summary>
-    /// Builds and warms the delegate pipeline without per-batch service resolution.
+    /// Builds and warms the delegate batcher without per-batch service resolution.
     /// </summary>
     [GlobalSetup(Target = nameof(DelegateBatchNoServices))]
     public void SetupDelegateNoServices() => Setup(useDelegate: true, useServices: false);
@@ -51,7 +51,7 @@ public class DelegateHandlerBenchmarks
     public void SetupTypedScoped() => Setup(useDelegate: false, useServices: true);
 
     /// <summary>
-    /// Builds and warms the delegate pipeline with the same scoped dependency.
+    /// Builds and warms the delegate batcher with the same scoped dependency.
     /// </summary>
     [GlobalSetup(Target = nameof(DelegateBatchScopedService))]
     public void SetupDelegateScoped() => Setup(useDelegate: true, useServices: true);

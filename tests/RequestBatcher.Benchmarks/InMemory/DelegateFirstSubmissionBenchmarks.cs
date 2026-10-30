@@ -7,7 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 namespace RequestBatcher.Benchmarks.InMemory;
 
 /// <summary>
-/// Measures the first response submission through a freshly constructed typed or delegate pipeline.
+/// Measures the first response submission through a freshly constructed typed or delegate batcher.
 /// </summary>
 [MemoryDiagnoser]
 [Config(typeof(FirstSubmissionConfig))]
@@ -27,25 +27,25 @@ public class DelegateFirstSubmissionBenchmarks
     public bool InjectService { get; set; }
 
     /// <summary>
-    /// Gets or sets whether the pipeline is registered and resolved by name.
+    /// Gets or sets whether the batcher is registered and resolved by name.
     /// </summary>
     [Params(false, true)]
     public bool Named { get; set; }
 
     /// <summary>
-    /// Creates a fresh typed pipeline before each timed iteration.
+    /// Creates a fresh typed batcher before each timed iteration.
     /// </summary>
     [IterationSetup(Target = nameof(TypedFirstSubmission))]
     public void SetupTyped() => Setup(useDelegate: false);
 
     /// <summary>
-    /// Creates a fresh delegate pipeline before each timed iteration.
+    /// Creates a fresh delegate batcher before each timed iteration.
     /// </summary>
     [IterationSetup(Target = nameof(DelegateFirstSubmission))]
     public void SetupDelegate() => Setup(useDelegate: true);
 
     /// <summary>
-    /// Measures the first typed response submission for a fresh pipeline.
+    /// Measures the first typed response submission for a fresh batcher.
     /// </summary>
     [Benchmark(Baseline = true)]
     public async Task<int> TypedFirstSubmission()
@@ -56,7 +56,7 @@ public class DelegateFirstSubmissionBenchmarks
     }
 
     /// <summary>
-    /// Measures the first static delegate response submission for a fresh pipeline.
+    /// Measures the first static delegate response submission for a fresh batcher.
     /// </summary>
     [Benchmark]
     public async Task<int> DelegateFirstSubmission()

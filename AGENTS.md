@@ -29,12 +29,17 @@ You are an AI coding assistant for this repository.
   `IRequestBatcher<TRequest>`.
 - BufferQueue is an internal scheduling dependency. Do not expose its topics, partitions, producers, or consumers from
   RequestBatcher public APIs.
-- Keep queue adapters and pending-request state under `src/RequestBatcher/PendingRequests`, consumer supervision and
-  dispatch under `src/RequestBatcher/Scheduling`, and logging under `src/RequestBatcher/Diagnostics`; the coordinator
-  owns public submission and lifecycle composition.
+- Keep queue adapters and pending-request state under `src/RequestBatcher/PendingRequests`, and dispatch under
+  `src/RequestBatcher/Scheduling`. The coordinator owns public submission, lifecycle composition, and supervision of
+  its single dispatch task. Keep internal handlers under `Handlers`, with delegate binding and adapters in
+  `Handlers/Delegate`. Split diagnostics into `Diagnostics/Tracing`, `Diagnostics/Metrics`, and `Diagnostics/Logging`;
+  shared diagnostic metadata stays in `Diagnostics`.
 - Compose RequestBatcher through `IServiceCollection.AddRequestBatcher`; callers must not need to register or configure
   BufferQueue. Production code registers BufferQueue into the application's container and must not build or own a
   nested service provider.
+- Avoid forwarding dependencies through coordinator or adapter properties. Pass shared dependencies directly to the
+  component that owns the behavior; retain a forwarding property only when a clear lifecycle or abstraction boundary
+  requires it.
 - Register the handler in the same `AddRequestBatcher` call and require an explicit `ServiceLifetime`. Resolve scoped and
   transient handlers inside an async scope owned by one batch; never capture them in the singleton coordinator.
 - A request accepted by the coordinator must complete exactly once with success, cancellation, or the handler failure

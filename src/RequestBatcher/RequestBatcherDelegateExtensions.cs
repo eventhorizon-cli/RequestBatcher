@@ -1,5 +1,5 @@
 using System.Diagnostics.CodeAnalysis;
-using RequestBatcher.DelegateHandlers;
+using RequestBatcher.Handlers.Delegate;
 
 namespace RequestBatcher;
 
@@ -13,7 +13,7 @@ public static class RequestBatcherDelegateExtensions
         "Delegate handlers inspect the delegate signature and service parameter attributes.";
 
     /// <summary>
-    /// Submits one request using the pipeline's single delegate handler.
+    /// Submits one request using the batcher's single delegate handler.
     /// </summary>
     /// <typeparam name="TRequest">The request type.</typeparam>
     /// <param name="batcher">A batcher registered with AddDelegateRequestBatcher.</param>
@@ -21,7 +21,7 @@ public static class RequestBatcherDelegateExtensions
     /// <param name="handler">A delegate to a static lambda, anonymous method, local function, or method receiving the batch, DI services and an optional batch token.</param>
     /// <param name="cancellationToken">Cancels the request only before dispatch.</param>
     /// <returns>A task that completes after handler execution and batch scope disposal.</returns>
-    /// <remarks>The first handler binds the pipeline; subsequent calls must supply an equal delegate.</remarks>
+    /// <remarks>The first handler binds the batcher; subsequent calls must supply an equal delegate.</remarks>
     [RequiresDynamicCode(DynamicCodeMessage)]
     [RequiresUnreferencedCode(TrimmingMessage)]
     public static Task ExecuteAsync<TRequest>(
@@ -36,7 +36,7 @@ public static class RequestBatcherDelegateExtensions
     }
 
     /// <summary>
-    /// Submits a request sequence using the pipeline's single delegate handler.
+    /// Submits a request sequence using the batcher's single delegate handler.
     /// </summary>
     /// <typeparam name="TRequest">The request type.</typeparam>
     /// <param name="batcher">A batcher registered with AddDelegateRequestBatcher.</param>
@@ -44,7 +44,7 @@ public static class RequestBatcherDelegateExtensions
     /// <param name="handler">A delegate to a static lambda, anonymous method, local function, or method receiving the batch, DI services and an optional batch token.</param>
     /// <param name="cancellationToken">Cancels requests only before dispatch.</param>
     /// <returns>A task that completes after all submitted requests complete.</returns>
-    /// <remarks>The first handler binds the pipeline; subsequent calls must supply an equal delegate.</remarks>
+    /// <remarks>The first handler binds the batcher; subsequent calls must supply an equal delegate.</remarks>
     [RequiresDynamicCode(DynamicCodeMessage)]
     [RequiresUnreferencedCode(TrimmingMessage)]
     public static Task ExecuteAsync<TRequest>(
@@ -60,7 +60,7 @@ public static class RequestBatcherDelegateExtensions
     }
 
     /// <summary>
-    /// Submits one request and returns its response using the pipeline's single delegate handler.
+    /// Submits one request and returns its response using the batcher's single delegate handler.
     /// </summary>
     /// <typeparam name="TRequest">The request type.</typeparam>
     /// <typeparam name="TResponse">The response type.</typeparam>
@@ -69,7 +69,7 @@ public static class RequestBatcherDelegateExtensions
     /// <param name="handler">A delegate to a static lambda, anonymous method, local function, or method receiving response entries, DI services and an optional batch token.</param>
     /// <param name="cancellationToken">Cancels the request only before dispatch.</param>
     /// <returns>A task containing the response after handler execution and batch scope disposal.</returns>
-    /// <remarks>The first handler binds the pipeline; subsequent calls must supply an equal delegate.</remarks>
+    /// <remarks>The first handler binds the batcher; subsequent calls must supply an equal delegate.</remarks>
     [RequiresDynamicCode(DynamicCodeMessage)]
     [RequiresUnreferencedCode(TrimmingMessage)]
     public static Task<TResponse> ExecuteAsync<TRequest, TResponse>(
@@ -84,7 +84,7 @@ public static class RequestBatcherDelegateExtensions
     }
 
     /// <summary>
-    /// Submits a request sequence and returns responses in input order using the pipeline's single delegate handler.
+    /// Submits a request sequence and returns responses in input order using the batcher's single delegate handler.
     /// </summary>
     /// <typeparam name="TRequest">The request type.</typeparam>
     /// <typeparam name="TResponse">The response type.</typeparam>
@@ -93,7 +93,7 @@ public static class RequestBatcherDelegateExtensions
     /// <param name="handler">A delegate to a static lambda, anonymous method, local function, or method receiving response entries, DI services and an optional batch token.</param>
     /// <param name="cancellationToken">Cancels requests only before dispatch.</param>
     /// <returns>A task containing one response per input, including duplicates, after all requests complete.</returns>
-    /// <remarks>The first handler binds the pipeline; subsequent calls must supply an equal delegate.</remarks>
+    /// <remarks>The first handler binds the batcher; subsequent calls must supply an equal delegate.</remarks>
     [RequiresDynamicCode(DynamicCodeMessage)]
     [RequiresUnreferencedCode(TrimmingMessage)]
     public static Task<IReadOnlyList<TResponse>> ExecuteAsync<TRequest, TResponse>(

@@ -202,7 +202,7 @@ public sealed class PendingRequestProducerTests
         new(
             producer,
             NullLogger.Instance,
-            typeof(int).FullName!,
+            typeof(int).Name,
             capacity,
             stoppingToken);
 

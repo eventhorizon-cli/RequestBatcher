@@ -6,7 +6,7 @@ namespace RequestBatcher.Tests.Batching;
 public sealed class RequestBatchSubmissionTests
 {
     [Fact]
-    public async Task ExecuteAsync_MultipleRequests_ProcessesOneProducedBatch()
+    public async Task ExecuteAsync_MultipleRequests_ProcessesEveryRequestExactlyOnce()
     {
         var handledBatches = new ConcurrentQueue<int[]>();
 
@@ -21,7 +21,8 @@ public sealed class RequestBatchSubmissionTests
 
         await batcher.ExecuteAsync([1, 2, 3]).WaitAsync(TimeSpan.FromSeconds(5));
 
-        Assert.Equal(new[] { 1, 2, 3 }, Assert.Single(handledBatches));
+        Assert.Equal(new[] { 1, 2, 3 }, handledBatches.SelectMany(static batch => batch).Order());
+        Assert.All(handledBatches, static batch => Assert.InRange(batch.Length, 1, 10));
     }
 
     [Fact]

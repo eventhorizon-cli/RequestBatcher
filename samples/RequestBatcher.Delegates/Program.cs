@@ -88,7 +88,7 @@ static async Task<IResult> QueryAsync(
         return Results.BadRequest("Product IDs must be positive.");
     }
 
-    // This direct static lambda call site is reused for every submission to the named price pipeline.
+    // This direct static lambda call site is reused for every submission to the named price batcher.
     // Ordinary service parameters can optionally use [FromServices]; keyed services require an explicit key.
     // The handler may omit CancellationToken entirely; if declared, do not give it a default value.
     // It receives the batch lifecycle token; the final ExecuteAsync argument is the caller's optional token.

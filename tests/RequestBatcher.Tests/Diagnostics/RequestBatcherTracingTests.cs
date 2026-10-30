@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using System.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using RequestBatcher.Diagnostics;
+using RequestBatcher.Diagnostics.Tracing;
 using RequestBatcher.PendingRequests;
 
 namespace RequestBatcher.Tests.Diagnostics;
@@ -177,7 +178,7 @@ public sealed class RequestBatcherTracingTests
         Assert.Same(expected, await Assert.ThrowsAsync<OperationCanceledException>(() => task));
         Assert.True(task.IsFaulted);
         Assert.All(capture.Stopped, span => Assert.Equal(ActivityStatusCode.Error, span.Status));
-        Assert.Equal(typeof(OperationCanceledException).FullName, Assert.Single(capture.Calls).GetTagItem("error.type"));
+        Assert.Equal(nameof(OperationCanceledException), Assert.Single(capture.Calls).GetTagItem("error.type"));
     }
 
     [Fact]
@@ -203,7 +204,7 @@ public sealed class RequestBatcherTracingTests
         var first = new InvalidOperationException();
         var second = new ArgumentException();
         var pending = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        var task = RequestBatcherTracing.TraceCall(new RequestBatcherTraceMetadata("test"), pending.Task, static (state, _) => state);
+        var task = RequestBatcherTracing.TraceCall(new RequestBatcherMetadata("test"), pending.Task, static (state, _) => state);
         pending.SetException(new Exception[] { first, second });
         Assert.Same(first, await Assert.ThrowsAsync<InvalidOperationException>(() => task));
         Assert.Equal(new Exception[] { first, second }, task.Exception!.InnerExceptions);
@@ -383,8 +384,9 @@ public sealed class RequestBatcherTracingTests
 
             await task.WaitAsync(TimeSpan.FromSeconds(5));
             Assert.Single(capture.Calls);
-            var batch = Assert.Single(capture.Batches);
-            Assert.Equal(batch.Context, probe.Context);
+            Assert.NotEmpty(capture.Batches);
+            Assert.Equal(capture.Batches.Count(), probe.Contexts.Count);
+            Assert.All(capture.Batches, batch => Assert.Contains(batch.Context, probe.Contexts));
             AssertIntRequestType(capture);
         }
     }
@@ -409,7 +411,7 @@ public sealed class RequestBatcherTracingTests
         var started = NewSource();
         var release = NewSource();
         var services = new ServiceCollection();
-        services.AddSingleton<RequestBatchHandler<int>>(async (requests, _) =>
+        services.AddSingleton<TestCallback>(async (requests, _) =>
         {
             if (requests.Contains(0))
             {
@@ -529,7 +531,7 @@ public sealed class RequestBatcherTracingTests
     {
         public TaskCompletionSource Disposing { get; } = NewSource();
         public TaskCompletionSource Release { get; } = NewSource();
-        public ActivityContext Context { get; set; }
+        public ConcurrentBag<ActivityContext> Contexts { get; } = new();
     }
 
     private sealed class ScopedResponseHandler(DisposalProbe probe) : IRequestBatchHandler<int, string>, IAsyncDisposable
@@ -544,17 +546,18 @@ public sealed class RequestBatcherTracingTests
 
         public async ValueTask DisposeAsync()
         {
-            probe.Context = Activity.Current!.Context;
-            probe.Disposing.SetResult();
+            var context = Activity.Current!.Context;
+            probe.Contexts.Add(context);
+            probe.Disposing.TrySetResult();
             await probe.Release.Task;
-            Assert.Equal(probe.Context, Activity.Current!.Context);
+            Assert.Equal(context, Activity.Current!.Context);
         }
     }
 
     private static TaskCompletionSource NewSource() => new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private static ServiceProvider CreateProvider(
-        RequestBatchHandler<int> handler, int batchSize = 16, int maxConcurrency = 1)
+        TestCallback handler, int batchSize = 16, int maxConcurrency = 1)
     {
         var services = new ServiceCollection();
         services.AddSingleton(handler);
@@ -566,7 +569,9 @@ public sealed class RequestBatcherTracingTests
         return services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
     }
 
-    private sealed class TestHandler(RequestBatchHandler<int> handler) : IRequestBatchHandler<int>
+    private delegate ValueTask TestCallback(IReadOnlyList<int> requests, CancellationToken cancellationToken);
+
+    private sealed class TestHandler(TestCallback handler) : IRequestBatchHandler<int>
     {
         public ValueTask HandleAsync(IReadOnlyList<int> requests, CancellationToken cancellationToken = default) =>
             handler(requests, cancellationToken);

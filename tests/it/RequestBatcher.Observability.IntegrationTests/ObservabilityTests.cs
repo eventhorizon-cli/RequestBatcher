@@ -130,6 +130,9 @@ public sealed class ObservabilityTests(ITestOutputHelper output, ObservabilityFi
         await AssertEventuallyAsync(async cancellationToken =>
         {
             var current = await ReadMetricsAsync(grafana, batcherName, cancellationToken);
+            Assert.True(current.TryGetValue("requestbatcher_backlog", out var backlog),
+                $"The backlog gauge for {batcherName} has not been exported.");
+            Assert.Equal(0, backlog);
             foreach (var metric in new[] { "requestbatcher_batch_size_sum", "requestbatcher_submission_size_sum" })
             {
                 var actual = current.GetValueOrDefault(metric) - baseline.GetValueOrDefault(metric);
@@ -156,7 +159,7 @@ public sealed class ObservabilityTests(ITestOutputHelper output, ObservabilityFi
                     $"{metric} has not advanced after the requests.");
             }
         });
-        output.WriteLine($"{apiStyle}: all four histograms exported; {submittedCalls} calls and " +
+        output.WriteLine($"{apiStyle}: all four histograms and backlog gauge exported; {submittedCalls} calls and " +
             $"{submittedItems} product items completed for {batcherName}.");
     }
 
@@ -263,7 +266,7 @@ public sealed class ObservabilityTests(ITestOutputHelper output, ObservabilityFi
     {
         var query = "sum by (__name__) ({__name__=~\"requestbatcher_(batch_size_(sum|count)|" +
             "submission_size_(sum|count)|handle_duration_milliseconds_(sum|count)|" +
-            "execute_duration_milliseconds_(sum|count))\"," +
+            "execute_duration_milliseconds_(sum|count)|backlog)\"," +
             $"requestbatcher_name=\"{batcherName}\",requestbatcher_request_type=\"Int32\",service_name=\"cart\"}})";
         using var response = await grafana.GetAsync("/api/datasources/proxy/uid/requestbatcher-prometheus/api/v1/query?query=" +
             Uri.EscapeDataString(query), cancellationToken);

@@ -48,7 +48,7 @@ public class ObservabilityOverheadBenchmarks
         _batcher ?? throw new InvalidOperationException("The benchmark has not been initialized.");
 
     /// <summary>
-    /// Creates the named pipeline and provider listeners before timing starts.
+    /// Creates the named batcher and provider listeners before timing starts.
     /// </summary>
     [GlobalSetup]
     public void GlobalSetup()

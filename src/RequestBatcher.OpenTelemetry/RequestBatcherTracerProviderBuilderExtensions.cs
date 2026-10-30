@@ -1,3 +1,4 @@
+using RequestBatcher.Diagnostics.Tracing;
 using RequestBatcher.OpenTelemetry.Diagnostics;
 
 namespace OpenTelemetry.Trace;
@@ -28,6 +29,6 @@ public static class RequestBatcherTracerProviderBuilderExtensions
         builder.ConfigureSampler(static (_, sampler) =>
             sampler is LinkedBatchSampler ? sampler : new LinkedBatchSampler(sampler));
 
-        return builder.AddSource("RequestBatcher");
+        return builder.AddSource(RequestBatcherTracing.SourceName);
     }
 }

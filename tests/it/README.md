@@ -28,7 +28,9 @@ by the test host's collector; the live test verifies exported behavior separatel
 `integration` flag and unit-test reports with the `unit` flag.
 
 The same project also contains in-process tests that use the public API and the real OpenTelemetry SDK without Docker or
-the environment switch: `ExecuteAsync_ConcurrentWavesAtEachSamplingRate_ProcessesExactlyOnceAndLinksActualBatches`
+the environment switch. `MetricsAdviceTests` verifies core size-histogram advice through a native MeterListener and
+direct SDK `AddMeter`, including ordinary/delegate response correctness, bucket boundaries, counts, sums, and tags.
+`ExecuteAsync_ConcurrentWavesAtEachSamplingRate_ProcessesExactlyOnceAndLinksActualBatches`
 checks 32 waves of 512 requests (16,384 requests per sampling mode) at 0% and 100% sampling, with mixed single and
 16-request submissions, an asynchronous 1 ms handler delay, bounded pending capacity, and per-wave telemetry cleanup.
 These baseline waves register `AddRequestBatcherInstrumentation()` so the linked-batch policy is exercised with the
@@ -63,6 +65,8 @@ delegate endpoints. Each request contains 2–10 product items, including a dupl
 - All four RequestBatcher histograms exported with the short request type `Int32` for each pipeline. Per-pipeline
   submission-size and batch-size sums match the inputs, and submission-size and Execute-duration histogram counts match
   submitted calls, so results from one API cannot mask missing or duplicate measurements from the other.
+- Each pipeline exports `requestbatcher.backlog`, returning to zero after its requests finish. Deterministic in-process
+  tests hold Handler execution to verify nonzero backlog, capacity-wait exclusion, and cancellation behavior.
 
 The sample uses `service.name=cart` and `service.name=pricing` for new telemetry. The dashboard's `Cart calls · Execute`
 and `Handler execution · Handle` tables expose both directions explicitly: a `Handle` row links to its caller
@@ -72,7 +76,8 @@ backend retention removes it.
 Trace and metric assertions poll for up to 120 seconds per phase because OTLP export, Tempo indexing, and Prometheus
 scraping are asynchronous. Failures include missing trace/link/metric evidence. Successful output includes caller and
 batch trace IDs for inspection in Grafana. Only this run's trace IDs are searched.
-Metrics are cumulative for each named sample batcher; the fixture does not start the traffic generator.
+Histograms are cumulative for each named sample batcher; the backlog gauge reports the approximate value at collection
+time. Only requests from the test cases are sent, so additional traffic does not affect the counts.
 The test uses the sample's seeded product IDs 1–100 and prices (`id × 1.25`); it does not modify database contents.
 
 | Environment variable | Default | Purpose |

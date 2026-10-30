@@ -1,9 +1,9 @@
 using BufferQueue;
 using BufferQueue.Memory;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
-using RequestBatcher.Diagnostics;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using RequestBatcher.Diagnostics.Metrics;
+using RequestBatcher.Handlers;
 using RequestBatcher.PendingRequests;
 
 namespace RequestBatcher;
@@ -27,7 +27,7 @@ public static partial class RequestBatcherServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
         ValidateHandlerLifetime(handlerLifetime);
-        RegisterBatcherPipeline<TRequest>(services);
+        RegisterDefaultBatcher<TRequest>(services);
 
         return AddRequestBatcherCore<TRequest>(
             services,
@@ -84,13 +84,11 @@ public static partial class RequestBatcherServiceCollectionExtensions
         var optionsSnapshot = ConfigureOptions(services, configure);
 
         registerHandler(services);
-        AddInternalBufferQueueTopic<TRequest>(services, optionsSnapshot);
-        services.AddSingleton<RequestBatchCoordinator<TRequest>>(provider =>
-            new RequestBatchCoordinator<TRequest>(
-                provider.GetRequiredService<IBufferQueue>(),
-                CreateHandler<TRequest>(provider, handlerLifetime),
-                provider.GetRequiredService<IOptions<RequestBatchOptions<TRequest>>>(),
-                provider.GetRequiredService<ILogger<RequestBatchCoordinator<TRequest>>>()));
+        AddBatcherServices<TRequest>(services, optionsSnapshot);
+        services.AddSingleton(new RequestBatcherConfiguration<TRequest>(
+            RequestBatchCoordinator<TRequest>.TopicName, null));
+        RegisterHandlerDelegate<TRequest>(services, handlerLifetime);
+        services.AddSingleton<RequestBatchCoordinator<TRequest>>();
         services.AddSingleton<IRequestBatcher<TRequest>>(
             static provider => provider.GetRequiredService<RequestBatchCoordinator<TRequest>>());
 
@@ -103,7 +101,7 @@ public static partial class RequestBatcherServiceCollectionExtensions
         Action<RequestBatchOptions<TRequest>>? configure,
         Action<IServiceCollection> registerHandler)
     {
-        RegisterBatcherPipeline<TRequest>(services);
+        RegisterDefaultBatcher<TRequest>(services);
 
         var configuredOptions = ConfigureOptions(services, configure);
         var entryOptions = configuredOptions
@@ -116,12 +114,9 @@ public static partial class RequestBatcherServiceCollectionExtensions
             options => options.CopyFrom(entryOptions),
             services => services.Add(new ServiceDescriptor(
                 typeof(IRequestBatchHandler<RequestBatchEntry<TRequest, TResponse>>),
-                provider => new ResponseRequestBatchHandler<TRequest, TResponse>(
-                    provider.GetRequiredService<IRequestBatchHandler<TRequest, TResponse>>()),
+                typeof(ResponseRequestBatchHandler<TRequest, TResponse>),
                 handlerLifetime)));
-        services.AddSingleton<IRequestBatcher<TRequest, TResponse>>(
-            provider => new ResponseRequestBatcher<TRequest, TResponse>(
-                provider.GetRequiredService<RequestBatchCoordinator<RequestBatchEntry<TRequest, TResponse>>>()));
+        services.AddSingleton<IRequestBatcher<TRequest, TResponse>, ResponseRequestBatcher<TRequest, TResponse>>();
 
         return services;
     }
@@ -154,12 +149,13 @@ public static partial class RequestBatcherServiceCollectionExtensions
         return optionsSnapshot;
     }
 
-    private static void AddInternalBufferQueueTopic<TRequest>(
+    private static void AddBatcherServices<TRequest>(
         IServiceCollection services,
         RequestBatchOptions<TRequest> options,
         string topicName = RequestBatchCoordinator<TRequest>.TopicName)
     {
         services.AddSingleton(new RequestBatcherMetricsConfiguration(options.BatchSize));
+        services.TryAddSingleton<RequestBatcherMetrics>();
         services.AddBufferQueue(queue =>
             queue.UseMemory(memory =>
                 memory.AddTopic<PendingBatchRequest<TRequest>>(topic =>
@@ -180,7 +176,7 @@ public static partial class RequestBatcherServiceCollectionExtensions
                 })));
     }
 
-    private static void RegisterBatcherPipeline<TRequest>(IServiceCollection services)
+    private static void RegisterDefaultBatcher<TRequest>(IServiceCollection services)
     {
         if (services.Any(descriptor =>
                 descriptor.ServiceType == typeof(RequestBatcherRegistration<TRequest>) && !descriptor.IsKeyedService))
@@ -192,25 +188,35 @@ public static partial class RequestBatcherServiceCollectionExtensions
         services.AddSingleton<RequestBatcherRegistration<TRequest>>();
     }
 
-    private static RequestBatchHandler<TRequest> CreateHandler<TRequest>(
-        IServiceProvider provider,
-        ServiceLifetime handlerLifetime)
+    private static void RegisterHandlerDelegate<TRequest>(
+        IServiceCollection services,
+        ServiceLifetime handlerLifetime,
+        object? serviceKey = null)
     {
-        if (handlerLifetime == ServiceLifetime.Singleton)
+        if (serviceKey is null)
         {
-            return provider.GetRequiredService<IRequestBatchHandler<TRequest>>().HandleAsync;
+            if (handlerLifetime == ServiceLifetime.Singleton)
+            {
+                services.AddSingleton<RequestBatchHandler<TRequest>>(
+                    static provider => provider.GetRequiredService<IRequestBatchHandler<TRequest>>().HandleAsync);
+            }
+            else
+            {
+                services.AddSingleton<ScopedRequestBatchHandler<TRequest>>();
+                services.AddSingleton<RequestBatchHandler<TRequest>>(
+                    static provider => provider.GetRequiredService<ScopedRequestBatchHandler<TRequest>>().HandleAsync);
+            }
         }
-
-        var scopeFactory = provider.GetRequiredService<IServiceScopeFactory>();
-        return HandleInScopeAsync;
-
-        async ValueTask HandleInScopeAsync(
-            IReadOnlyList<TRequest> requests,
-            CancellationToken cancellationToken)
+        else if (handlerLifetime == ServiceLifetime.Singleton)
         {
-            await using var scope = scopeFactory.CreateAsyncScope();
-            var handler = scope.ServiceProvider.GetRequiredService<IRequestBatchHandler<TRequest>>();
-            await handler.HandleAsync(requests, cancellationToken).ConfigureAwait(false);
+            services.AddKeyedSingleton<RequestBatchHandler<TRequest>>(serviceKey,
+                static (provider, key) => provider.GetRequiredKeyedService<IRequestBatchHandler<TRequest>>(key).HandleAsync);
+        }
+        else
+        {
+            services.AddKeyedSingleton<ScopedRequestBatchHandler<TRequest>>(serviceKey);
+            services.AddKeyedSingleton<RequestBatchHandler<TRequest>>(serviceKey,
+                static (provider, key) => provider.GetRequiredKeyedService<ScopedRequestBatchHandler<TRequest>>(key).HandleAsync);
         }
     }
 

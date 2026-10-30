@@ -46,13 +46,13 @@ public class NamedBatchingBenchmarks
     public ServiceLifetime HandlerLifetime { get; set; }
 
     /// <summary>
-    /// Builds the unnamed pipeline for the single and explicit submission cases.
+    /// Builds the unnamed batcher for the single and explicit submission cases.
     /// </summary>
     [GlobalSetup(Targets = new[] { nameof(UnnamedSingleAsync), nameof(UnnamedExplicitAsync) })]
     public void SetupUnnamed() => Setup(named: false);
 
     /// <summary>
-    /// Builds the named pipeline for the single and explicit submission cases.
+    /// Builds the named batcher for the single and explicit submission cases.
     /// </summary>
     [GlobalSetup(Targets = new[] { nameof(NamedSingleAsync), nameof(NamedExplicitAsync) })]
     public void SetupNamed() => Setup(named: true);

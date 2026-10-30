@@ -68,7 +68,7 @@ public sealed class DelegateRequestBatcherTests
     }
 
     [Fact]
-    public async Task AddDelegateRequestBatcher_DefaultAndNamed_KeepPipelinesIndependent()
+    public async Task AddDelegateRequestBatcher_DefaultAndNamed_KeepBatchersIndependent()
     {
         var services = new ServiceCollection();
         services.AddDelegateRequestBatcher<int, string>();
@@ -386,7 +386,7 @@ public sealed class DelegateRequestBatcherTests
     }
 
     [Fact]
-    public async Task ExecuteAsync_NamedPipelines_DrainTogether()
+    public async Task ExecuteAsync_NamedBatchers_DrainTogether()
     {
         var firstProbe = new DrainProbe();
         var secondProbe = new DrainProbe();
