@@ -51,7 +51,7 @@ following its setup instructions, run from the repository root:
 
 Repeat with `--query lang=zh-CN` and output `docs/assets/request-batcher-conveyor.zh-CN.gif`.
 Use `--browser /path/to/chrome` to select an installed Chrome executable instead of Playwright's
-Chromium. The export renders a 1100-pixel-wide layout at twice the pixel density (2200 × 1354),
+Chromium. The export renders a 1100-pixel-wide layout at a target width of 3840 pixels (3840 × 2363),
 captures 20 frames per second for a 10-second loop, hides playback controls,
 and checks queue, active-batch, and completed-request counts before writing the GIF.
 
