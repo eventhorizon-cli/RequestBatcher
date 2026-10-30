@@ -56,7 +56,18 @@ public sealed class MetricsAdviceTests
             },
         };
         listener.SetMeasurementEventCallback<long>((instrument, measurement, tags, _) =>
-            rawMeasurements.Add(new RawMeasurement(instrument.Name, measurement)));
+        {
+            string? batcherName = null;
+            foreach (var tag in tags)
+            {
+                if (tag.Key == BatcherNameTag)
+                {
+                    batcherName = tag.Value as string;
+                }
+            }
+
+            rawMeasurements.Add(new RawMeasurement(instrument.Name, batcherName, measurement));
+        });
         listener.Start();
 
         // Resolve both batchers before the MeterProvider subscribes so it consumes the shared size instruments.
@@ -69,7 +80,8 @@ public sealed class MetricsAdviceTests
             .AddReader(reader)
             .Build();
 
-        var smallRequests = Enumerable.Range(1000, 40).ToArray();
+        // Force multiple Handler batches while retaining one submission observation.
+        var smallRequests = Enumerable.Range(1000, 80).ToArray();
         var largeRequests = Enumerable.Range(2000, 120).ToArray();
         try
         {
@@ -77,7 +89,7 @@ public sealed class MetricsAdviceTests
             var largeResponses = await large.ExecuteAsync(largeRequests,
                 static (IReadOnlyList<RequestBatchEntry<int, int>> entries, InvocationCapture capture) =>
                 {
-                    capture.Record(entries);
+                    capture.Record(entries, "large");
                     entries.SetResponses(static request => request * 2);
                 });
 
@@ -87,20 +99,20 @@ public sealed class MetricsAdviceTests
 
             AssertAdvice(published, BatchSizeName, _batchBounds);
             AssertAdvice(published, SubmissionSizeName, _submissionBounds);
-            Assert.Equal(new[] { 40L, 120L }, rawMeasurements
-                .Where(measurement => measurement.Name == BatchSizeName)
-                .Select(measurement => measurement.Value)
-                .Order());
-            Assert.Equal(new[] { 40L, 120L }, rawMeasurements
+            var smallBatches = invocations.GetBatchSizes("small");
+            var largeBatches = invocations.GetBatchSizes("large");
+            AssertBatchMeasurements(rawMeasurements, "small", smallBatches, 40, 80);
+            AssertBatchMeasurements(rawMeasurements, "large", largeBatches, 120, 120);
+            Assert.Equal(new[] { 80L, 120L }, rawMeasurements
                 .Where(measurement => measurement.Name == SubmissionSizeName)
                 .Select(measurement => measurement.Value)
                 .Order());
 
             Assert.True(reader.Collect((int)TimeSpan.FromSeconds(10).TotalMilliseconds));
-            AssertMetric(exporter, BatchSizeName, "small", _batchBounds, 40, 44);
-            AssertMetric(exporter, BatchSizeName, "large", _batchBounds, 120, 120);
-            AssertMetric(exporter, SubmissionSizeName, "small", _submissionBounds, 40, 43, "multi");
-            AssertMetric(exporter, SubmissionSizeName, "large", _submissionBounds, 120, 120, "multi");
+            AssertMetric(exporter, BatchSizeName, "small", _batchBounds, smallBatches);
+            AssertMetric(exporter, BatchSizeName, "large", _batchBounds, largeBatches);
+            AssertMetric(exporter, SubmissionSizeName, "small", _submissionBounds, [80], "multi");
+            AssertMetric(exporter, SubmissionSizeName, "large", _submissionBounds, [120], "multi");
         }
         finally
         {
@@ -123,18 +135,24 @@ public sealed class MetricsAdviceTests
         string metricName,
         string batcherName,
         long[] expectedBounds,
-        long expectedValue,
-        double expectedBucket,
+        long[] expectedValues,
         string? submissionKind = null)
     {
         var point = Assert.Single(exporter.Points, item =>
             item.Name == metricName && item.Tags[BatcherNameTag] == batcherName);
         Assert.Equal(expectedBounds.Select(static boundary => (double)boundary).Append(double.PositiveInfinity), point.Bounds);
-        Assert.Equal(1, point.Count);
-        Assert.Equal(expectedValue, point.Sum);
+        Assert.Equal(expectedValues.Length, point.Count);
+        Assert.Equal(expectedValues.Sum(), point.Sum);
         Assert.Equal(expectedBounds.Length + 1, point.Buckets.Count);
-        Assert.Equal(1, point.Buckets[expectedBucket]);
-        Assert.Equal(1, point.Buckets.Values.Sum());
+        var lowerBound = double.NegativeInfinity;
+        foreach (var upperBound in point.Bounds)
+        {
+            Assert.Equal(expectedValues.LongCount(value => value > lowerBound && value <= upperBound),
+                point.Buckets[upperBound]);
+            lowerBound = upperBound;
+        }
+
+        Assert.Equal(expectedValues.Length, point.Buckets.Values.Sum());
         Assert.Equal("Int32", point.Tags[RequestTypeTag]);
         Assert.Equal(submissionKind is null ? 2 : 3, point.Tags.Count);
         if (submissionKind is not null)
@@ -143,13 +161,29 @@ public sealed class MetricsAdviceTests
         }
     }
 
+    private static void AssertBatchMeasurements(
+        IEnumerable<RawMeasurement> measurements,
+        string batcherName,
+        long[] actualBatches,
+        int maximumBatchSize,
+        int submittedCount)
+    {
+        Assert.NotEmpty(actualBatches);
+        Assert.All(actualBatches, size => Assert.InRange(size, 1, maximumBatchSize));
+        Assert.Equal(submittedCount, actualBatches.Sum());
+        Assert.Equal(actualBatches, measurements
+            .Where(measurement => measurement.Name == BatchSizeName && measurement.BatcherName == batcherName)
+            .Select(measurement => measurement.Value)
+            .Order());
+    }
+
     private sealed class SmallBatchHandler(InvocationCapture capture) : IRequestBatchHandler<int, int>
     {
         public ValueTask HandleAsync(
             IReadOnlyList<RequestBatchEntry<int, int>> entries,
             CancellationToken cancellationToken = default)
         {
-            capture.Record(entries);
+            capture.Record(entries, "small");
             entries.SetResponses(static request => request + 1);
             return ValueTask.CompletedTask;
         }
@@ -158,14 +192,22 @@ public sealed class MetricsAdviceTests
     private sealed class InvocationCapture
     {
         private readonly ConcurrentDictionary<int, int> _counts = new();
+        private readonly ConcurrentBag<(string BatcherName, long Size)> _batches = [];
 
-        public void Record(IReadOnlyList<RequestBatchEntry<int, int>> entries)
+        public void Record(IReadOnlyList<RequestBatchEntry<int, int>> entries, string batcherName)
         {
+            _batches.Add((batcherName, entries.Count));
             foreach (var entry in entries)
             {
                 _counts.AddOrUpdate(entry.Request, 1, static (_, count) => count + 1);
             }
         }
+
+        public long[] GetBatchSizes(string batcherName) => _batches
+            .Where(batch => batch.BatcherName == batcherName)
+            .Select(batch => batch.Size)
+            .Order()
+            .ToArray();
 
         public void AssertExactlyOnce(IEnumerable<int> requests)
         {
@@ -177,7 +219,7 @@ public sealed class MetricsAdviceTests
 
     private sealed record HistogramObservation(Instrument Instrument, long[]? Boundaries);
 
-    private sealed record RawMeasurement(string Name, long Value);
+    private sealed record RawMeasurement(string Name, string? BatcherName, long Value);
 
     private sealed class SnapshotExporter : BaseExporter<Metric>
     {

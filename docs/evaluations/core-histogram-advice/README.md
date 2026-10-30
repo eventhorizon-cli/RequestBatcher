@@ -100,6 +100,9 @@ reflects removal of six tests tied to the deleted monitor class and addition of 
 unexpected exit and failure-callback context isolation. The nine focused monitoring/context cases pass on both
 frameworks. Coordinator shutdown waits for monitoring before inspecting its recorded failure; unexpected cancellation
 now reports the same infrastructure failure to queued requests and disposal. Partition configuration remains unchanged.
+Independent PR review also removed a one-submission/one-handler-batch assumption from the SDK advice test. The test now
+forces an 80-item submission through BatchSize 40, compares native and exported histogram buckets with independently
+captured handler batches, and retains exactly one submission measurement. All six SDK cases pass with that regression.
 
 ## Commands
 
