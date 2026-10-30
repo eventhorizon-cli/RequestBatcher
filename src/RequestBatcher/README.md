@@ -11,6 +11,11 @@ and bounds queued capacity. It is useful when a database, cache, or downstream A
 
 ## How Requests Are Batched: Opportunistic Merging
 
+![Opportunistic batching animation](https://raw.githubusercontent.com/eventhorizon-cli/RequestBatcher/main/docs/assets/request-batcher-conveyor.gif)
+
+Illustration: one partition, `MaxConcurrency=2`, and `BatchSize=4`. When an execution slot is available, the dispatch
+loop pulls queued requests without waiting to fill a batch. See the [animation source](https://github.com/eventhorizon-cli/RequestBatcher/tree/main/docs/animations/opportunistic-merging).
+
 RequestBatcher uses `MaxConcurrency` to limit concurrent Handler batches; its consumption loop pulls and dispatches
 batches. See the
 [internal dispatch design](https://github.com/eventhorizon-cli/RequestBatcher/blob/main/docs/batch-dispatch-redesign.md#topology).

@@ -1,0 +1,43 @@
+{
+  "width": 1100,
+  "height": 900,
+  "scale": 2,
+  "duration": 10,
+  "fps": 20,
+  "selector": ".demo",
+  "ready": "typeof render === 'function' && document.documentElement.lang === (new URLSearchParams(location.search).get('lang') === 'zh-CN' ? 'zh-CN' : 'en')",
+  "css": "header,footer,.controls{display:none!important} main{max-width:none;margin:0;padding:0} .demo{border:0;border-radius:0} body{background:white}",
+  "seek": "t => { const slider=document.querySelector('#timeline'); slider.value=t; slider.dispatchEvent(new Event('input')); }",
+  "checkpoints": [
+    {
+      "time": 2.7,
+      "evaluate": "['queued-count','active-count','completed-count'].map(id=>Number(document.getElementById(id).textContent))",
+      "equals": [3, 2, 0]
+    },
+    {
+      "time": 3.7,
+      "evaluate": "['queued-count','active-count','completed-count'].map(id=>Number(document.getElementById(id).textContent))",
+      "equals": [6, 2, 0]
+    },
+    {
+      "time": 5.75,
+      "evaluate": "['queued-count','active-count','completed-count'].map(id=>Number(document.getElementById(id).textContent))",
+      "equals": [2, 2, 1]
+    },
+    {
+      "time": 7,
+      "evaluate": "['queued-count','active-count','completed-count'].map(id=>Number(document.getElementById(id).textContent))",
+      "equals": [0, 2, 2]
+    },
+    {
+      "time": 8.5,
+      "evaluate": "['queued-count','active-count','completed-count'].map(id=>Number(document.getElementById(id).textContent))",
+      "equals": [0, 1, 4]
+    },
+    {
+      "time": 9.5,
+      "evaluate": "['queued-count','active-count','completed-count'].map(id=>Number(document.getElementById(id).textContent))",
+      "equals": [0, 0, 8]
+    }
+  ]
+}

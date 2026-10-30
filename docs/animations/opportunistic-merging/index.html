@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RequestBatcher · Opportunistic merging</title>
+  <link rel="stylesheet" href="styles.css">
+  <script src="animation.js" defer></script>
+</head>
+<body>
+  <main>
+    <header>
+      <div><p class="eyebrow">REQUESTBATCHER / <span data-copy="eyebrow">HOW IT WORKS</span></p>
+        <h1 data-copy="title">An available slot. Immediate dispatch.</h1>
+        <p class="intro" data-copy="intro">Take what is queued. Process it together. Never wait to fill a batch.</p></div>
+      <button id="language" class="language" aria-label="Switch to Simplified Chinese">中文</button>
+    </header>
+    <section class="demo" aria-label="Batching animation">
+      <div class="configuration"><span>MaxConcurrency <b>2</b></span><span>BatchSize <b>4</b></span><span class="partition" data-copy="partition">Single partition example</span></div>
+      <div class="scene-wrap">
+        <svg id="scene" viewBox="0 0 1100 430" role="img" aria-labelledby="scene-title scene-description">
+          <title id="scene-title">Requests move from a queue to two execution slots</title>
+          <desc id="scene-description">One request per slot runs immediately. Six requests queue while both slots are busy, then dispatch as batches of four and two.</desc>
+          <defs><marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#bac4ce"/></marker>
+            <clipPath id="belt-clip"><rect x="44" y="191" width="438" height="84" rx="40"/></clipPath></defs>
+          <rect width="1100" height="430" fill="white"/>
+          <text x="44" y="91" class="section-label" data-copy="incoming">PENDING REQUESTS</text>
+          <text x="44" y="119" class="scene-note" data-copy="queueNote">BufferQueue · one partition</text>
+          <text id="arrival-group" x="44" y="166" class="scene-note" style="fill:#3567a7"></text>
+          <rect x="44" y="191" width="438" height="84" rx="40" fill="#f0f3f6" stroke="#d4dce4" stroke-width="2"/>
+          <g id="belt-marks" clip-path="url(#belt-clip)"></g>
+          <path d="M 72 282 H 455" stroke="#d4dce4" stroke-width="2"/>
+          <circle cx="90" cy="289" r="5" fill="#bac4ce"/><circle cx="437" cy="289" r="5" fill="#bac4ce"/>
+          <path d="M 482 233 H 523 M 571 233 H 590" fill="none" stroke="#bac4ce" stroke-width="2"/>
+          <path d="M 590 233 Q 610 233 610 213 V 151 Q 610 131 630 131 H 648" fill="none" stroke="#bac4ce" stroke-width="2" marker-end="url(#arrow)"/>
+          <path d="M 590 233 Q 610 233 610 253 V 315 Q 610 335 630 335 H 648" fill="none" stroke="#bac4ce" stroke-width="2" marker-end="url(#arrow)"/>
+          <rect x="523" y="209" width="48" height="48" rx="10" fill="#eaf2ff" stroke="#7a9dc7"/>
+          <path d="M 536 225 H 558 M 536 233 H 552 M 536 241 H 558" stroke="#3567a7" stroke-width="2" fill="none"/>
+          <text x="547" y="357" text-anchor="middle" class="small-note" data-copy="dispatch">BatchDispatchLoop</text>
+          <text x="547" y="378" text-anchor="middle" class="small-note" data-copy="take">Acquire slot → pull ≤ 4</text>
+          <g id="station-a"></g><g id="station-b"></g>
+          <path d="M 908 131 H 965" stroke="#bac4ce" stroke-width="2" marker-end="url(#arrow)"/>
+          <path d="M 908 335 H 965" stroke="#bac4ce" stroke-width="2" marker-end="url(#arrow)"/>
+          <rect x="968" y="97" width="88" height="272" rx="12" fill="#f0f8f4" stroke="#c8e2d4"/>
+          <text x="1012" y="78" text-anchor="middle" class="section-label" data-copy="results">RESULTS</text>
+          <g id="result-items"></g><g id="requests"></g>
+          <text x="44" y="377" class="small-note" data-copy="slotsNote">Each Handler batch holds one execution slot until it completes.</text>
+          <text x="44" y="400" class="small-note" data-copy="timeNote">Illustrative timing · conveyor motion adds no collection window</text>
+        </svg>
+      </div>
+      <div class="metrics"><div><span data-copy="queued">Queued</span><strong id="queued-count">0</strong></div><div><span data-copy="active">Active batches</span><strong><span id="active-count">0</span><small> / 2</small></strong></div><div><span data-copy="completed">Completed requests</span><strong><span id="completed-count">0</span><small> / 8</small></strong></div></div>
+      <div class="narration"><span id="step-number">01</span><div><h2 id="step-title"></h2><p id="step-description"></p></div></div>
+      <div class="controls"><button id="play" type="button">Pause</button><button id="replay" type="button" data-copy="replay">Replay</button><label class="sr-only" for="timeline" data-copy="timeline">Timeline</label><input id="timeline" type="range" min="0" max="10" step="0.05" value="0"><output id="time" for="timeline">0.0 / 10 s</output><label class="sr-only" for="speed" data-copy="speed">Playback speed</label><select id="speed"><option value="0.5">0.5×</option><option value="1" selected>1×</option><option value="1.5">1.5×</option></select></div>
+    </section>
+    <footer data-copy="footer">In-process, in-memory batching. Pending requests do not survive process failure.</footer>
+  </main>
+</body>
+</html>

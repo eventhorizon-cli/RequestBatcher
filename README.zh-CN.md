@@ -36,6 +36,11 @@ RequestBatcher 会合并已经排队的请求，限制 Handler 批次并发数�
 
 ## 请求如何合并：机会式合并
 
+![机会式合并动画](docs/assets/request-batcher-conveyor.zh-CN.gif)
+
+示例展示单个 Partition、`MaxConcurrency=2` 和 `BatchSize=4`。有可用执行名额时，会立即分发已排队的请求，不会等待凑满一批。
+[打开动画源码](docs/animations/opportunistic-merging/)；下载后打开 `index.html`，可以暂停并拖动动画。
+
 RequestBatcher 基于 [BufferQueue](https://github.com/eventhorizon-cli/BufferQueue)，将 .NET 进程内已经排队的并发请求
 合并为批次，交给应用的 Handler 处理。当前依赖 [BufferQueue 2.1.0](https://www.nuget.org/packages/BufferQueue/2.1.0)，
 应用无需单独注册或配置它。
