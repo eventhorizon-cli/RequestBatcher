@@ -27,6 +27,8 @@ REQUESTBATCHER_RUN_INTEGRATION_TESTS=1 dotnet test \
 CI 将该报告标记为 `integration` 上传，单元测试报告标记为 `unit`。
 
 同一个项目还包含不依赖 Docker 和环境开关的进程内测试，它们使用公共 API 和真实 OpenTelemetry SDK：
+`MetricsAdviceTests` 通过原生 MeterListener 和 SDK 的直接 `AddMeter` 注册，验证 core 的大小 Histogram Advice，
+同时校验普通和委托 Handler 的响应、桶边界、count、sum 和标签。
 `ExecuteAsync_ConcurrentWavesAtEachSamplingRate_ProcessesExactlyOnceAndLinksActualBatches` 在 0% 和 100% 采样下分别运行
 32 轮、每轮 512 个请求（每种采样率共 16,384 个请求），混合单请求和 16 请求批量提交，Handler 异步等待 1 毫秒，并在每轮
 校验后清理 Telemetry。这些基线轮次注册 `AddRequestBatcherInstrumentation()`，在应用 Sampler 配置下验证 Linked-Batch 策略。
@@ -55,6 +57,7 @@ Execute 上下文，包括未采样的上下文；Handle 是否导出则根据�
 - 第二轮使用新的上下文，防止早先调用方污染后续 Trace。
 - 四个 RequestBatcher Histogram 均已导出，请求类型标签为短名 `Int32`。按 Batcher 名称分别检查：提交数量和处理数量的 sum 等于输入项数，
   提交数量和 Execute 耗时的 count 等于调用次数，避免一个入口的指标掩盖另一个入口的漏记或重复记录。
+- 各 Batcher 均导出 `requestbatcher.backlog`，请求完成后回到零。进程内测试通过阻塞 Handler，验证非零积压、等待容量的请求不计入，以及取消行为。
 
 示例新写入的 Telemetry 使用 `service.name=cart` 和 `service.name=pricing`。仪表板的 `Cart calls · Execute` 与
 `Handler execution · Handle` 表格明确展示两种方向：`Handle` 指向调用方 `Execute`，`Execute` 指向处理其请求的 `Handle`。
@@ -63,7 +66,8 @@ Execute 上下文，包括未采样的上下文；Handle 是否导出则根据�
 
 OTLP 导出、Tempo 索引和 Prometheus 抓取是异步的，所以每个验证阶段最多轮询 120 秒。
 失败时会报告缺失的 Trace、Link 或 Metrics 证据；成功输出包含调用方和批次的 Trace ID，方便在 Grafana 查看。
-链路检索仅匹配本次测试生成的 Trace ID。Metrics 是各命名 Batcher 的累计值，测试夹具不启动流量生成器，确保能精确核对数量。
+链路检索仅匹配本次测试生成的 Trace ID。Histogram 按各命名 Batcher 累计记录，backlog Gauge 报告采集时的近似值。
+测试期间只发送测试用例中的请求，避免其他流量影响计数。
 测试使用示例中 ID 为 1–100、价格为 `id × 1.25` 的种子数据，不修改数据库内容。
 
 | 环境变量 | 默认值 | 用途 |

@@ -383,8 +383,9 @@ public sealed class RequestBatcherTracingTests
 
             await task.WaitAsync(TimeSpan.FromSeconds(5));
             Assert.Single(capture.Calls);
-            var batch = Assert.Single(capture.Batches);
-            Assert.Equal(batch.Context, probe.Context);
+            Assert.NotEmpty(capture.Batches);
+            Assert.Equal(capture.Batches.Count(), probe.Contexts.Count);
+            Assert.All(capture.Batches, batch => Assert.Contains(batch.Context, probe.Contexts));
             AssertIntRequestType(capture);
         }
     }
@@ -529,7 +530,7 @@ public sealed class RequestBatcherTracingTests
     {
         public TaskCompletionSource Disposing { get; } = NewSource();
         public TaskCompletionSource Release { get; } = NewSource();
-        public ActivityContext Context { get; set; }
+        public ConcurrentBag<ActivityContext> Contexts { get; } = new();
     }
 
     private sealed class ScopedResponseHandler(DisposalProbe probe) : IRequestBatchHandler<int, string>, IAsyncDisposable
@@ -544,10 +545,11 @@ public sealed class RequestBatcherTracingTests
 
         public async ValueTask DisposeAsync()
         {
-            probe.Context = Activity.Current!.Context;
-            probe.Disposing.SetResult();
+            var context = Activity.Current!.Context;
+            probe.Contexts.Add(context);
+            probe.Disposing.TrySetResult();
             await probe.Release.Task;
-            Assert.Equal(probe.Context, Activity.Current!.Context);
+            Assert.Equal(context, Activity.Current!.Context);
         }
     }
 

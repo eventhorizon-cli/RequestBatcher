@@ -50,12 +50,14 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
         IOptions<RequestBatchOptions<TRequest>> options,
         ILogger<RequestBatchCoordinator<TRequest>> logger,
         string topicName = TopicName,
-        string? batcherName = null)
+        string? batcherName = null,
+        RequestBatcherMetrics? metrics = null)
     {
         BatcherName = batcherName;
-        _callDiagnostics = new(_telemetryRequestTypeName, batcherName);
         _logger = logger;
         _options = options.Value.ValidateAndClone();
+        _callDiagnostics = new(_telemetryRequestTypeName, batcherName,
+            metrics ?? new RequestBatcherMetrics(_options.BatchSize), ownsMetrics: metrics is null);
         _onRequestFinished = OnRequestFinished;
 
         _producer = new PendingRequestProducer<TRequest>(
@@ -70,6 +72,7 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
             _options.MaxConcurrency,
             _logger,
             _requestTypeName,
+            _callDiagnostics.Metrics,
             batcherName);
         var consumer = bufferQueue.CreatePullConsumers<PendingBatchRequest<TRequest>>(
             new BufferPullConsumerOptions
@@ -97,9 +100,12 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
             _consumerCancellation.Token,
             _requestTypeName,
             HandleConsumerFailure);
+        _callDiagnostics.ObserveBacklog(consumer);
     }
 
     internal string? BatcherName { get; }
+
+    internal RequestBatcherMetrics Metrics => _callDiagnostics.Metrics;
 
     /// <inheritdoc />
     public Task ExecuteAsync(TRequest request, CancellationToken cancellationToken = default) =>
@@ -180,8 +186,7 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
 
         if (requestArray.Length == 0)
         {
-            RequestBatcherMetrics.RecordSubmissionSize(
-                _telemetryRequestTypeName, BatcherName, RequestBatcherMetricTags.MultiSubmission, 0);
+            _callDiagnostics.RecordSubmissionSize(RequestBatcherMetricTags.MultiSubmission, 0);
             return Task.CompletedTask;
         }
 
@@ -231,8 +236,7 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
             _pendingRequests.TryAdd(pendingRequest, 0);
         }
 
-        RequestBatcherMetrics.RecordSubmissionSize(
-            _telemetryRequestTypeName, BatcherName, RequestBatcherMetricTags.SingleSubmission, 1);
+        _callDiagnostics.RecordSubmissionSize(RequestBatcherMetricTags.SingleSubmission, 1);
         return _producer.ProduceAsync(pendingRequest, cancellationToken);
     }
 
@@ -263,8 +267,7 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
             }
         }
 
-        RequestBatcherMetrics.RecordSubmissionSize(
-            _telemetryRequestTypeName, BatcherName, RequestBatcherMetricTags.MultiSubmission, requests.Length);
+        _callDiagnostics.RecordSubmissionSize(RequestBatcherMetricTags.MultiSubmission, requests.Length);
         return _producer.ProduceAsync(pendingRequests, cancellationToken);
     }
 
@@ -340,6 +343,7 @@ public sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest
             }
             finally
             {
+                _callDiagnostics.Dispose();
                 lock (_lifecycleLock)
                 {
                     _state = Stopped;

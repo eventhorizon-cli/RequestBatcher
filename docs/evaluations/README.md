@@ -33,6 +33,9 @@ Find reports by question; versions, workloads, and limitations are documented in
 
 ## Observability
 
+The [core histogram advice validation](core-histogram-advice/README.md) records container-owned metrics, direct Meter
+aggregation, custom View precedence, and bounded .NET 10 measurements with the backlog gauge.
+
 RequestBatcher exposes optional `RequestBatcher.Execute` and `RequestBatcher.Handle` spans through its
 `RequestBatcher` ActivitySource. Each report identifies its measured version and listener/provider configuration;
 historical baseline results do not describe the current implementation. Read the

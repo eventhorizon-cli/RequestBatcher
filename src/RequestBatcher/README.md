@@ -334,6 +334,10 @@ log-level prefix to configure the whole library.
 
 The Meter exposes four histograms: `requestbatcher.submission.size` and `requestbatcher.batch.size` are `Histogram<long>`
 in `{request}`; `requestbatcher.handle.duration` and `requestbatcher.execute.duration` are `Histogram<double>` in `ms`.
+`requestbatcher.backlog` is an `ObservableGauge<long>` in `{request}` for approximate enqueued items not yet pulled,
+excluding capacity waits and active Handler work.
+Core supplies size-histogram bucket advice from the largest `BatchSize` registered in the same service collection.
+Direct `AddMeter` and the integration extension use the same advice; custom `AddView` settings override it.
 Histogram `sum / count` gives the mean. For metric semantics, tags, queries, and bucket rules, see the
 [RequestBatcher Metrics guide](https://github.com/eventhorizon-cli/RequestBatcher/blob/main/docs/metrics.md).
 

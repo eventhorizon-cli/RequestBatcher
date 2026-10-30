@@ -18,9 +18,9 @@ public sealed class MetricsBucketTests
     public void SizeHistograms_SmallBatchSize_PreserveEveryIntegerBoundary(int batchSize)
     {
         using var capture = new Capture(services => Register(services, batchSize));
-        RequestBatcherMetrics.RecordSubmissionSize("Int32", null, "multi", 0);
-        RequestBatcherMetrics.RecordSubmissionSize("Int32", null, "multi", batchSize);
-        RecordBatch(batchSize);
+        capture.Metrics.RecordSubmissionSize("Int32", null, "multi", 0);
+        capture.Metrics.RecordSubmissionSize("Int32", null, "multi", batchSize);
+        RecordBatch(capture.Metrics, batchSize);
         capture.Collect();
 
         var batch = capture.Get(BatchSize);
@@ -42,11 +42,11 @@ public sealed class MetricsBucketTests
         using var capture = new Capture(services => Register(services, 100));
         foreach (var size in new[] { 0, 1, 3, 100, 101, 3201 })
         {
-            RequestBatcherMetrics.RecordSubmissionSize("Int32", null, "multi", size);
+            capture.Metrics.RecordSubmissionSize("Int32", null, "multi", size);
         }
         foreach (var size in new[] { 1, 3, 100 })
         {
-            RecordBatch(size);
+            RecordBatch(capture.Metrics, size);
         }
         capture.Collect();
 
@@ -73,8 +73,8 @@ public sealed class MetricsBucketTests
     public void SizeHistograms_MaximumBatchSize_AvoidOverflowWithoutResolvingPipeline()
     {
         using var capture = new Capture(services => Register(services, int.MaxValue));
-        RequestBatcherMetrics.RecordSubmissionSize("Int32", null, "multi", int.MaxValue);
-        RecordBatch(int.MaxValue);
+        capture.Metrics.RecordSubmissionSize("Int32", null, "multi", int.MaxValue);
+        RecordBatch(capture.Metrics, int.MaxValue);
         capture.Collect();
 
         var batch = capture.Get(BatchSize);
@@ -117,7 +117,7 @@ public sealed class MetricsBucketTests
                     break;
             }
         }, instrumentationFirst: instrumentationFirst);
-        RecordBatch(2);
+        RecordBatch(capture.Metrics, 2);
         capture.Collect();
         Assert.Equal(new double[] { 0, 1, 2, 3, double.PositiveInfinity }, capture.Get(BatchSize).Bounds);
     }
@@ -131,12 +131,12 @@ public sealed class MetricsBucketTests
             services.AddRequestBatcher<int, int, UnresolvedResponseHandler>("large", ServiceLifetime.Scoped, options => options.BatchSize = 120);
             services.AddDelegateRequestBatcher<int>("same-size", options => options.BatchSize = 40);
         }, repeatInstrumentation: true);
-        RequestBatcherMetrics.RecordSubmissionSize("Int32", "small", "multi", 40);
-        RequestBatcherMetrics.RecordSubmissionSize("Int32", "large", "multi", 120);
-        using (RequestBatcherMetrics.StartBatch("Int32", "small", 40))
+        capture.Metrics.RecordSubmissionSize("Int32", "small", "multi", 40);
+        capture.Metrics.RecordSubmissionSize("Int32", "large", "multi", 120);
+        using (capture.Metrics.StartBatch("Int32", "small", 40))
         {
         }
-        using (RequestBatcherMetrics.StartBatch("Int32", "large", 120))
+        using (capture.Metrics.StartBatch("Int32", "large", 120))
         {
         }
         capture.Collect();
@@ -160,7 +160,17 @@ public sealed class MetricsBucketTests
     [Fact]
     public void Instrumentation_ManyDifferentBatchSizes_KeepsSameBucketBudgetAsMaximumAlone()
     {
-        using var maximumOnly = new Capture(services => Register(services, 120));
+        Snapshot[] expectedPoints;
+        using (var maximumOnly = new Capture(services => Register(services, 120)))
+        {
+            foreach (var size in new[] { 40, 120 })
+            {
+                maximumOnly.Metrics.RecordSubmissionSize("Int32", null, "multi", size);
+                RecordBatch(maximumOnly.Metrics, size);
+            }
+            maximumOnly.Collect();
+            expectedPoints = maximumOnly.Exporter.Points.ToArray();
+        }
         using var many = new Capture(services =>
         {
             for (var size = 1; size <= 120; size++)
@@ -172,15 +182,14 @@ public sealed class MetricsBucketTests
         });
         foreach (var size in new[] { 40, 120 })
         {
-            RequestBatcherMetrics.RecordSubmissionSize("Int32", null, "multi", size);
-            RecordBatch(size);
+            many.Metrics.RecordSubmissionSize("Int32", null, "multi", size);
+            RecordBatch(many.Metrics, size);
         }
-        maximumOnly.Collect();
         many.Collect();
 
         foreach (var instrument in new[] { BatchSize, SubmissionSize })
         {
-            var expected = maximumOnly.Get(instrument);
+            var expected = Assert.Single(expectedPoints, point => point.Name == instrument);
             var actual = many.Get(instrument);
             Assert.Equal(expected.Bounds, actual.Bounds);
             Assert.Equal(25, actual.Bounds.Length);
@@ -193,78 +202,151 @@ public sealed class MetricsBucketTests
     }
 
     [Fact]
-    public void Instrumentation_ProvidersWithDifferentOptions_KeepIndependentSchemas()
+    public void Instrumentation_MetersWithDifferentOptions_KeepIndependentAdvice()
     {
         using var first = new Capture(services => Register(services, 1));
         using var second = new Capture(services => Register(services, 3));
-        RecordBatch(1);
-        first.Collect();
-        second.Collect();
-        Assert.Equal(new double[] { 0, 1, double.PositiveInfinity }, first.Get(BatchSize).Bounds);
-        Assert.Equal(new double[] { 0, 1, 2, 3, double.PositiveInfinity }, second.Get(BatchSize).Bounds);
-        Assert.Equal(1, first.Get(BatchSize).Count);
-        Assert.Equal(1, second.Get(BatchSize).Count);
+        var instruments = new List<Histogram<long>>();
+        var measurements = new List<long>();
+        using var listener = new MeterListener
+        {
+            InstrumentPublished = (instrument, meterListener) =>
+            {
+                if (instrument.Meter.Name == "RequestBatcher" && instrument.Name == BatchSize &&
+                    instrument is Histogram<long> histogram)
+                {
+                    instruments.Add(histogram);
+                    meterListener.EnableMeasurementEvents(histogram);
+                }
+            },
+        };
+        listener.SetMeasurementEventCallback<long>((_, value, _, _) => measurements.Add(value));
+        listener.Start();
+
+        Assert.Equal(2, instruments.Count);
+        Assert.NotSame(instruments[0], instruments[1]);
+        Assert.Contains(instruments, instrument => instrument.Advice!.HistogramBucketBoundaries!.SequenceEqual(new long[] { 0, 1 }));
+        Assert.Contains(instruments, instrument => instrument.Advice!.HistogramBucketBoundaries!.SequenceEqual(new long[] { 0, 1, 2, 3 }));
+
+        RecordBatch(first.Metrics, 1);
+        first.Dispose();
+        RecordBatch(first.Metrics, 1);
+        RecordBatch(second.Metrics, 3);
+        Assert.Equal(new long[] { 1, 3 }, measurements);
     }
 
     [Fact]
-    public async Task Instrumentation_NoPipelineDirectMeterAndUnrelatedInstruments_RetainSdkDefaults()
+    public void SizeHistograms_WithMeterListener_ExposeAdviceAndRawMeasurements()
     {
-        using var configured = new Capture(services => Register(services, 3));
-        using var noPipeline = new Capture();
-        using var direct = new Capture(services => Register(services, 100), directMeter: true);
+        using var metrics = new RequestBatcherMetrics(120);
+        var observations = new Dictionary<string, (long[] Advice, List<long> Values)>();
+        using var listener = new MeterListener
+        {
+            InstrumentPublished = (instrument, meterListener) =>
+            {
+                if (instrument.Meter.Name == RequestBatcherMetrics.MeterName &&
+                    instrument.Name is BatchSize or SubmissionSize && instrument is Histogram<long> histogram)
+                {
+                    observations[instrument.Name] = (histogram.Advice!.HistogramBucketBoundaries!.ToArray(), []);
+                    meterListener.EnableMeasurementEvents(histogram);
+                }
+            },
+        };
+        listener.SetMeasurementEventCallback<long>((instrument, value, _, _) => observations[instrument.Name].Values.Add(value));
+        listener.Start();
+
+        metrics.RecordSubmissionSize("Int32", null, "multi", 121);
+        using (metrics.StartBatch("Int32", null, 39))
+        {
+        }
+
+        Assert.Equal(24, observations[BatchSize].Advice.Length);
+        Assert.Equal(24, observations[SubmissionSize].Advice.Length);
+        Assert.Equal(new long[] { 39 }, observations[BatchSize].Values);
+        Assert.Equal(new long[] { 121 }, observations[SubmissionSize].Values);
+    }
+
+    [Fact]
+    public void SizeHistograms_WithExplicitView_OverrideCoreAdvice()
+    {
+        using var metrics = new RequestBatcherMetrics(120);
+        var exporter = new SnapshotExporter();
+        var reader = new BaseExportingMetricReader(exporter);
+        using var provider = Sdk.CreateMeterProviderBuilder()
+            .AddMeter(RequestBatcherMetrics.MeterName)
+            .AddView(BatchSize, new ExplicitBucketHistogramConfiguration { Boundaries = [0, 1, 2] })
+            .AddReader(reader)
+            .Build();
+
+        using (metrics.StartBatch("Int32", null, 3))
+        {
+        }
+        Assert.True(reader.Collect(10000));
+
+        var point = Assert.Single(exporter.Points, item => item.Name == BatchSize);
+        Assert.Equal(new double[] { 0, 1, 2, double.PositiveInfinity }, point.Bounds);
+        Assert.Equal(1, point.Count);
+        Assert.Equal(3, point.Sum);
+        Assert.Equal(1, point.Buckets[double.PositiveInfinity]);
+    }
+
+    [Fact]
+    public async Task Instrumentation_DirectMeter_UsesAdviceAndRetainsOtherDefaults()
+    {
+        using var direct = new Capture(services => Register(services, 3), directMeter: true);
         using var foreign = new Meter("BucketTests.Foreign");
         foreign.CreateHistogram<long>(BatchSize).Record(3);
         foreign.CreateHistogram<long>(SubmissionSize).Record(3);
-        RequestBatcherMetrics.RecordSubmissionSize("Int32", null, "multi", 3);
-        RecordBatch(3);
-        await RequestBatcherMetrics.MeasureExecution("Int32", null, "single", 0, static _ => Task.CompletedTask);
-        configured.Collect();
-        noPipeline.Collect();
+        direct.Metrics.RecordSubmissionSize("Int32", null, "multi", 3);
+        RecordBatch(direct.Metrics, 3);
+        await direct.Metrics.MeasureExecution("Int32", null, "single", 0, static _ => Task.CompletedTask);
         direct.Collect();
 
+        double[] defaults = [0, 5, 10, 25, 50, 75, 100, 250, 500, 750, 1000, 2500, 5000, 7500, 10000, double.PositiveInfinity];
         foreach (var instrument in new[] { BatchSize, SubmissionSize })
         {
-            var defaults = direct.Get(instrument).Bounds;
-            Assert.Equal(defaults, noPipeline.Get(instrument).Bounds);
-            Assert.Equal(defaults, configured.Get(instrument, "BucketTests.Foreign").Bounds);
-            Assert.False(defaults.SequenceEqual(configured.Get(instrument).Bounds));
+            Assert.Equal(defaults, direct.Get(instrument, "BucketTests.Foreign").Bounds);
+            Assert.False(defaults.SequenceEqual(direct.Get(instrument).Bounds));
         }
+        Assert.Equal(new double[] { 0, 1, 2, 3, double.PositiveInfinity }, direct.Get(BatchSize).Bounds);
+        Assert.Equal(new double[] { 0, 1, 2, 3, 6, 12, 24, 48, 96, double.PositiveInfinity }, direct.Get(SubmissionSize).Bounds);
         foreach (var duration in new[] { "requestbatcher.handle.duration", "requestbatcher.execute.duration" })
         {
-            Assert.Equal(direct.Get(duration).Bounds, configured.Get(duration).Bounds);
-            Assert.Equal(new double[] { 0, 5, 10, 25, 50, 75, 100, 250, 500, 750, 1000, 2500, 5000, 7500, 10000, double.PositiveInfinity }, configured.Get(duration).Bounds);
-            Assert.Equal(1, configured.Get(duration).Count);
+            Assert.Equal(defaults, direct.Get(duration).Bounds);
+            Assert.Equal(1, direct.Get(duration).Count);
         }
     }
 
     private static void Register(IServiceCollection services, int batchSize) =>
         services.AddRequestBatcher<int, UnresolvedHandler>(ServiceLifetime.Scoped, options => options.BatchSize = batchSize);
 
-    private static void RecordBatch(int size)
+    private static void RecordBatch(RequestBatcherMetrics metrics, int size)
     {
-        using var scope = RequestBatcherMetrics.StartBatch("Int32", null, size);
+        using var scope = metrics.StartBatch("Int32", null, size);
     }
 
     private sealed class Capture : IDisposable
     {
         private readonly BaseExportingMetricReader _reader;
         private readonly MeterProvider _provider;
+        private readonly ServiceProvider _services;
 
         public Capture(
-            Action<IServiceCollection>? register = null,
+            Action<IServiceCollection> register,
             bool instrumentationFirst = false,
             bool repeatInstrumentation = false,
             bool directMeter = false)
         {
+            var services = new ServiceCollection();
+            register(services);
+            _services = services.BuildServiceProvider();
+            Metrics = _services.GetRequiredService<RequestBatcherMetrics>();
+
             _reader = new BaseExportingMetricReader(Exporter);
             var builder = Sdk.CreateMeterProviderBuilder().AddMeter("BucketTests.Foreign").AddReader(_reader);
             if (instrumentationFirst)
             {
                 builder.AddRequestBatcherInstrumentation();
-            }
-            if (register is not null)
-            {
-                builder.ConfigureServices(register);
             }
             if (directMeter)
             {
@@ -282,10 +364,15 @@ public sealed class MetricsBucketTests
         }
 
         public SnapshotExporter Exporter { get; } = new();
+        public RequestBatcherMetrics Metrics { get; }
         public void Collect() => Assert.True(_reader.Collect(10000));
         public Snapshot Get(string name, string meter = "RequestBatcher") =>
             Assert.Single(Exporter.Points, point => point.Name == name && point.Meter == meter);
-        public void Dispose() => _provider.Dispose();
+        public void Dispose()
+        {
+            _provider.Dispose();
+            _services.Dispose();
+        }
     }
 
     private sealed class SnapshotExporter : BaseExporter<Metric>

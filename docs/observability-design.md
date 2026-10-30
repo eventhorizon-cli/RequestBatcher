@@ -83,11 +83,14 @@ Execute duration additionally distinguishes submission kind and terminal outcome
 
 ### Size histogram buckets
 
-The metrics integration reads immutable BatchSize metadata from the application's service provider when building
-MeterProvider. The common internal queue-registration path registers one metadata instance per pipeline from the
+The core `RequestBatcherMetrics` service receives immutable BatchSize metadata through constructor injection and
+calculates the maximum internally when first resolved. DI registration only registers the service type.
+The common internal queue-registration path registers one metadata instance per pipeline from the
 validated options snapshot. This includes named, unnamed, request-only, response, and delegate registrations without
-resolving a coordinator or Handler. OpenTelemetry registration may precede Batcher registration; all registrations
-must be complete before the provider is built. No static process-wide configuration or runtime bucket updates are used.
+resolving other coordinators or Handlers. All registrations must be complete before a pipeline is resolved. The existing
+metrics facade owns its Meter, instruments, bucket calculation, and backlog sources. Pipeline diagnostics owns each
+pipeline's observation registration; coordinators signal diagnostic disposal after draining. No additional size-metrics
+service, static process-wide configuration, or runtime bucket updates are used.
 
 Let B be the largest registered BatchSize in that provider. Each size histogram has a budget of 25 buckets including
 overflow. Batch-size boundaries include 0, 1, and ceil(B * i / 22), for i = 1 through 22, sorted and deduplicated.
@@ -103,16 +106,50 @@ Bucket estimates trade resolution for bounded storage. Observations above 32B en
 into finer tail quantiles. Sums, counts, and means still include those observations and are independent of bucket
 boundaries. Instances whose buckets are combined for quantiles must use the same boundaries.
 
-The integration applies views only to the RequestBatcher Meter's two size histograms. Duration histograms retain SDK
-defaults. Repeated instrumentation registration adds the configuration once. With no registered pipeline in that service
-provider, the integration leaves SDK defaults intact. Direct AddMeter/MeterListener registration does not apply these
-views; custom aggregation remains the application's responsibility. Applications that require their own bucket views
-can use AddMeter instead of the integration extension. No new public configuration or API is required.
+The core supplies immutable `InstrumentAdvice<long>` boundaries when creating both size histograms. Duration
+histograms retain SDK defaults. The OpenTelemetry metrics extension only registers the Meter; direct AddMeter uses
+the same advice. Native MeterListener consumers can read the advice when configuring their own aggregation, but still
+receive raw measurements. A consumer may ignore advice, and an explicit OpenTelemetry View can override it.
+The application container disposes the shared Metrics service after its pipelines drain. Independent containers own
+independent instruments and may publish different schemas; consumers must not combine incompatible bucket layouts.
+Core explicitly references System.Diagnostics.DiagnosticSource 10.0.11 on net8.0 to provide InstrumentAdvice;
+net10.0 includes the API in its runtime. Core has no OpenTelemetry dependency. No new public configuration or API is required.
 
 Tests validate exported bucket boundaries/counts for small, ordinary, and maximum int BatchSize, empty and oversized
-submissions, a fixed bucket budget with many differently sized named pipelines, all registration shapes, registration order, provider isolation, repeated
-instrumentation registration, and the no-pipeline fallback. The metadata registry is startup-only; request processing
+submissions, a fixed bucket budget with many differently sized named pipelines, all registration shapes, registration
+order, container isolation and disposal, native advice visibility, direct SDK export, and explicit View overrides.
+Integration tests exercise public ordinary/delegate submissions with native listeners and direct SDK Meter registration.
+The metadata registry is startup-only; request processing
 does not read options or compute bucket layouts.
+
+### Queue backlog
+
+`requestbatcher.backlog` is an `ObservableGauge<long>` with unit `{request}`. It reports the approximate number of
+items already enqueued and not yet pulled, summed by the Batcher's single AutoCommit Memory consumer across its
+assigned partitions. It excludes producer capacity waits and active Handler work. Canceled records remain counted
+until pulled and skipped. This is a sampled current value, not an accumulated event count or a peak measurement.
+
+Pipeline diagnostics owns the consumer observation registration and releases it during pipeline diagnostic cleanup after
+draining. Ordinary, response, and delegate adapters share that registration. Draining does not stop observations
+early. Diagnostics owns one instrument on the existing Meter and a registry of live observation sources; disposal
+removes the source and releases its consumer reference. A collection already in progress may finish during disposal.
+
+At collection time, each source calls `IBufferPullConsumer.TryGetLagSnapshot` once. The consumer already aggregates
+its partitions; RequestBatcher performs no additional partition reads, retries, or consistency locking. Only successful
+`Items` snapshots are emitted. A successful zero is recorded; unavailable snapshots and other units are skipped, not
+reported as zero. The unsigned value saturates at `long.MaxValue` rather than wrapping on conversion. RequestBatcher's
+bounded Memory queues normally remain far below that limit. Tags are the existing public request type and optional
+Batcher name; internal topics, groups, partitions, submission kind, and outcome are not dimensions.
+
+Metrics readers control observation timing, independently of exporter or backend. The callback does not run on
+submission or Handler completion and introduces no per-request diagnostic counters or timers. The existing `AddMeter("RequestBatcher")` and `AddRequestBatcherInstrumentation()` registrations collect the gauge. Histogram
+advice and the four histogram recording boundaries are independent of backlog collection. The snapshot API requires BufferQueue 2.2.0.
+
+Coverage includes snapshot availability/units/zero/overflow, independent named sources, collection-only reads,
+disposal and concurrent collection, and real Memory queues with held Handlers, queued cancellation, capacity waits,
+multiple partitions, ordinary and delegate APIs. SDK export verifies Gauge type and tags. Live OTLP coverage checks
+the backlog series for each sample pipeline. Dependency-upgrade validation includes .NET 10 submission correctness
+stress tests and metrics/tracing hot-path measurements, with runtime and source/package provenance recorded.
 
 ### Public call duration
 
@@ -174,7 +211,7 @@ short names. Instrument names already contain the
 `requestbatcher.` prefix; an exporter namespace must not duplicate it.
 
 Span tags and fixed values are defined in RequestBatcherTraceTags, separately from RequestBatcherMetricTags.
-RequestBatcherMetricNames supplies the instrument names for both recording and integration views. Contract tests
+RequestBatcherMetricNames supplies the instrument names for recording. Contract tests
 assert literal exported names so accidental naming changes cannot pass by sharing the same constants.
 
 Batch measurements finish alongside the batch span, before request completions are
@@ -346,6 +383,11 @@ or backend retention drops either endpoint. Core does not force recording; the o
 integration extension changes the SDK's batch decision when it is registered.
 
 ## Internal flow and performance
+
+The consumer records batch metrics through its injected `RequestBatcherMetrics` and creates batch Activities through
+`RequestBatcherTracing`. These remain separate: metrics owns container-specific instruments and advice; tracing owns
+the process-wide ActivitySource. Both finish before the consumer publishes request outcomes. Tests cover independent
+metric/tracing subscriptions, Handler failure and scope disposal, ambient Activity restoration, and completion ordering.
 
 Diagnostics owns a shared ActivitySource and tracing helpers. Ordinary and delegate entry points use the same
 `RequestBatcherCallDiagnostics` wrapper, which owns cached call metadata and checks metric and tracing subscriptions.

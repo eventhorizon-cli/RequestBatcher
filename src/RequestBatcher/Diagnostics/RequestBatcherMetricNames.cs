@@ -1,7 +1,7 @@
 namespace RequestBatcher.Diagnostics;
 
 /// <summary>
-/// Identifies instruments shared by recording and OpenTelemetry view configuration.
+/// Defines the names of RequestBatcher metric instruments.
 /// </summary>
 internal static class RequestBatcherMetricNames
 {
@@ -9,4 +9,5 @@ internal static class RequestBatcherMetricNames
     internal const string BatchSize = "requestbatcher.batch.size";
     internal const string HandleDuration = "requestbatcher.handle.duration";
     internal const string ExecuteDuration = "requestbatcher.execute.duration";
+    internal const string Backlog = "requestbatcher.backlog";
 }

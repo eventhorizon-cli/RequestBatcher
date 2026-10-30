@@ -1378,8 +1378,8 @@ builder.Services.AddOpenTelemetry()
 ```
 
 Alternatively, install [`RequestBatcher.OpenTelemetry`](https://www.nuget.org/packages/RequestBatcher.OpenTelemetry) and
-use the `AddRequestBatcherInstrumentation()` extension shown above. It also applies size-histogram views from the largest
-`BatchSize` registered in the same service collection.
+use the `AddRequestBatcherInstrumentation()` extension shown above. Both use the size-histogram bucket advice supplied
+by core from the largest `BatchSize` registered in the same service collection. Custom `AddView` settings override this advice.
 
 | Instrument | Type | Unit | Meaning |
 | --- | --- | --- | --- |
@@ -1387,6 +1387,7 @@ use the `AddRequestBatcherInstrumentation()` extension shown above. It also appl
 | `requestbatcher.batch.size` | `Histogram<long>` | `{request}` | Requests per completed Handler batch, including failed attempts; items canceled before dispatch are excluded. |
 | `requestbatcher.handle.duration` | `Histogram<double>` | `ms` | Handler batch duration in milliseconds, including handler scope disposal. |
 | `requestbatcher.execute.duration` | `Histogram<double>` | `ms` | End-to-end duration of one public `ExecuteAsync` call, including capacity waiting, queueing, all Handler batches, and response assembly. |
+| `requestbatcher.backlog` | `ObservableGauge<long>` | `{request}` | Approximate enqueued items not yet pulled; excludes capacity waits and active Handler work. |
 
 These histograms describe size and duration distributions and support averages and processing rates.
 See the [metrics guide](docs/metrics.md) for details and queries.

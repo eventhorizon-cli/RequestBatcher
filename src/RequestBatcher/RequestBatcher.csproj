@@ -20,7 +20,8 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="BufferQueue" Version="2.1.0" />
+    <PackageReference Include="BufferQueue" Version="2.2.0" />
+    <PackageReference Include="System.Diagnostics.DiagnosticSource" Version="10.0.11" Condition="'$(TargetFramework)' == 'net8.0'" />
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" Version="10.0.11" />
     <PackageReference Include="Microsoft.Extensions.Logging" Version="10.0.11" />
     <PackageReference Include="Microsoft.Extensions.Logging.Abstractions" Version="10.0.11" />

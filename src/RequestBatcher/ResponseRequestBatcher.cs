@@ -10,9 +10,12 @@ internal sealed class ResponseRequestBatcher<TRequest, TResponse>(
     private static readonly string _telemetryRequestTypeName = RequestBatcherRequestType.GetName(typeof(TRequest));
     private readonly RequestBatcherCallDiagnostics _callDiagnostics = new(
         _telemetryRequestTypeName,
-        batcher.BatcherName);
+        batcher.BatcherName,
+        batcher.Metrics);
 
     internal string? BatcherName => batcher.BatcherName;
+
+    internal RequestBatcherMetrics Metrics => batcher.Metrics;
 
     public Task<TResponse> ExecuteAsync(TRequest request, CancellationToken cancellationToken = default) =>
         _callDiagnostics.Execute(

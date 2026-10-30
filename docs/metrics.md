@@ -1,7 +1,7 @@
 # RequestBatcher Metrics
 
-RequestBatcher exposes four histograms through the `RequestBatcher` Meter. This guide covers their recording boundaries,
-tags, bucket views, and query examples. See the [Chinese guide](metrics.zh-CN.md).
+RequestBatcher exposes four histograms and a backlog gauge through the `RequestBatcher` Meter. This guide covers their recording boundaries,
+tags, bucket advice, and query examples. See the [Chinese guide](metrics.zh-CN.md).
 
 ## Registration
 
@@ -13,11 +13,12 @@ builder.Services.AddOpenTelemetry()
 ```
 
 Alternatively, install `RequestBatcher.OpenTelemetry` and use
-`.WithMetrics(metrics => metrics.AddRequestBatcherInstrumentation())`. Both register the Meter; the extension also applies
-size-histogram views derived from the largest `BatchSize` in the same service collection when `MeterProvider` is built.
-Register all batchers before building the provider. It does not construct batchers or handlers. Direct `AddMeter` and
-collections without batcher metadata retain SDK default buckets. Views are fixed at provider build time; separate
-service collections/providers use their own metadata.
+`.WithMetrics(metrics => metrics.AddRequestBatcherInstrumentation())`. Both register the Meter and use the size-histogram
+bucket advice supplied by core. Register all batchers before building the service provider. When the first batcher is
+resolved, the shared core metrics service uses the largest registered `BatchSize` to create immutable advice; it does not
+resolve other batchers or handlers. Each container owns its metrics service and disposes it after its batchers drain.
+Independent containers may publish different bucket layouts; do not combine incompatible layouts in one metric stream.
+Once the container disposes the metrics service, calls through retained batcher references emit no further measurements.
 
 ## Instruments
 
@@ -27,6 +28,7 @@ service collections/providers use their own metadata.
 | `requestbatcher.batch.size` | `Histogram<long>` | `{request}` | Requests per completed Handler batch, including failed attempts; items canceled before dispatch are excluded. |
 | `requestbatcher.handle.duration` | `Histogram<double>` | `ms` | Handler batch duration, including Handler scope disposal. |
 | `requestbatcher.execute.duration` | `Histogram<double>` | `ms` | End-to-end duration of one public `ExecuteAsync` call, including capacity waiting, queueing, all Handler batches, and response assembly. |
+| `requestbatcher.backlog` | `ObservableGauge<long>` | `{request}` | Approximate enqueued items not yet pulled; excludes capacity waits and active Handler work. |
 
 Histogram `sum` accumulates measurements, `count` counts observations, and buckets describe their distribution; `sum / count`
 gives the mean. OTLP exports sum and count as fields of the same Histogram data point.
@@ -50,6 +52,20 @@ When subscribed, each empty, failed, or canceled call records once. Outcome foll
 the exception type. Request payloads, tenant values, and partition keys are not recorded. `single` identifies the
 single-request overload; `multi` identifies the collection overload, including empty or one-item collections. These tags
 do not indicate how many Handler batches processed a submission.
+
+## Queue backlog
+
+`requestbatcher.backlog` reads the Batcher's consumer snapshot when a metrics reader collects. It includes all assigned
+partitions and excludes requests still waiting to enter the queue and batches already pulled for Handler execution.
+Canceled entries remain counted until pulled and skipped. Each successful collection reports the current approximate
+value, including zero. If statistics are unavailable, the observation is omitted rather than replaced with zero.
+
+The reader controls collection timing: periodic OpenTelemetry readers, pull exporters, and native `MeterListener`
+all work without a RequestBatcher timer. Short peaks between collections may be missed. The gauge has the request-type
+and optional Batcher-name tags, with no submission-kind, outcome, or partition tags. It remains observable during
+draining and is unregistered when the coordinator is disposed. An in-progress collection can finish during disposal.
+Unlike the histograms, the gauge has no buckets and is not a cumulative total; read its value directly instead of
+applying `rate`. OTLP keeps `requestbatcher.backlog`; the sample's Prometheus query is `requestbatcher_backlog`.
 
 ## Export Names and Queries
 
@@ -98,7 +114,7 @@ queries from `requestbatcher_batch_duration_milliseconds_*` to `requestbatcher_h
 
 ## Size Histogram Buckets
 
-The views use the largest `BatchSize` B in the service collection, regardless of how many batchers are registered.
+The advice uses the largest `BatchSize` B in the service collection, regardless of how many batchers are registered.
 `batch.size` uses boundaries `0`, `1`, and `ceil(B * i / 22)` for `i = 1..22`, sorted and deduplicated; for B <= 22,
 every integer size is represented. `submission.size` independently uses `0`, `1`, and `ceil(B * i / 17)` for `i = 1..17`,
 then adds `2B`, `4B`, `8B`, `16B`, and `32B`; for B <= 17, every integer size is represented. For B = 40 and B = 120,
@@ -111,11 +127,11 @@ series. `submission.size` values above `32B` fall into `+Inf`; `batch.size` valu
 still contribute to sum, count, and mean; quantiles are estimated from buckets, so estimates are coarse and the
 `submission.size` tail above `32B` cannot be resolved.
 
-Only size histograms use these views. `handle.duration` and `execute.duration` retain the OpenTelemetry SDK default
+Only size histograms carry this advice. `handle.duration` and `execute.duration` retain the OpenTelemetry SDK default
 boundaries: `0, 5, 10, 25, 50, 75, 100, 250, 500, 750, 1000, 2500, 5000, 7500, 10000 ms`, plus overflow. Use the same
-boundaries across instances when aggregating buckets for quantiles. Direct `AddMeter("RequestBatcher")` does not apply
-these views; use `AddMeter` with a custom `AddView` to configure custom buckets. Without batcher metadata, size histograms
-also retain SDK defaults.
+boundaries across instances when aggregating buckets for quantiles. Direct `AddMeter("RequestBatcher")` uses the advice;
+custom `AddView` settings override it. Advice is a recommendation: other consumers may ignore it. A native `MeterListener`
+can inspect `Histogram<long>.Advice.HistogramBucketBoundaries`, but receives raw measurements and performs its own aggregation.
 
 ## MeterListener
 
@@ -135,6 +151,8 @@ listener.InstrumentPublished = (instrument, meterListener) =>
   per listener; filter `instrument.Name` if needed.
 - Register `long` callbacks for both size histograms and `double` callbacks for both duration histograms. Call `Start()`
   before submitting work and keep the listener alive until the batcher has shut down. Earlier measurements are not replayed.
+- The backlog gauge also uses a `long` callback. After enabling it, call `RecordObservableInstruments()` to collect
+  a current value; `Start()` alone does not periodically sample observable instruments.
 - Callbacks run synchronously and may run concurrently. Keep them lightweight and thread-safe, avoid blocking I/O, and
   prevent exceptions from escaping. Copy any tags needed after the callback returns. Listeners provide their own
   aggregation and export.

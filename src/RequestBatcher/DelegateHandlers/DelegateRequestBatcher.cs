@@ -11,7 +11,8 @@ internal sealed class DelegateRequestBatcher<TRequest>(
     private static readonly string _telemetryRequestTypeName = RequestBatcherRequestType.GetName(typeof(TRequest));
     private readonly RequestBatcherCallDiagnostics _callDiagnostics = new(
         _telemetryRequestTypeName,
-        coordinator.BatcherName);
+        coordinator.BatcherName,
+        coordinator.Metrics);
 
     public Task ExecuteAsync(TRequest request, CancellationToken cancellationToken = default) =>
         throw MissingHandler();

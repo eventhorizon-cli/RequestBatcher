@@ -1270,7 +1270,8 @@ builder.Services.AddOpenTelemetry()
 ```
 
 也可以安装 [`RequestBatcher.OpenTelemetry`](https://www.nuget.org/packages/RequestBatcher.OpenTelemetry)，
-使用前面示例中的 `AddRequestBatcherInstrumentation()` 扩展；它还会根据同一服务集合中最大的 `BatchSize` 应用大小 Histogram 的 view。
+使用前面示例中的 `AddRequestBatcherInstrumentation()` 扩展。两种方式都使用 core 根据同一服务集合中最大的 `BatchSize`
+提供的大小 Histogram 建议桶边界（Advice）；应用通过 `AddView` 设置的边界优先。
 
 | 指标名称 | 类型 | 单位 | 含义 |
 | --- | --- | --- | --- |
@@ -1278,6 +1279,7 @@ builder.Services.AddOpenTelemetry()
 | `requestbatcher.batch.size` | `Histogram<long>` | `{request}` | 每个已完成 Handler 批次的请求数，包含失败尝试；分发前取消的请求不计。 |
 | `requestbatcher.handle.duration` | `Histogram<double>` | `ms` | Handler 批次耗时，包含 Handler 作用域释放。 |
 | `requestbatcher.execute.duration` | `Histogram<double>` | `ms` | 每次公开 `ExecuteAsync` 调用的端到端耗时，包含容量等待、排队、所有 Handler 批次及响应组装。 |
+| `requestbatcher.backlog` | `ObservableGauge<long>` | `{request}` | 已入队、尚未拉取的请求项数近似值，不包含等待入队或正在处理的请求。 |
 
 这些 Histogram 可用于查看数量和耗时分布，并计算平均值与处理速率。更多用法见 [Metrics 指南](docs/metrics.zh-CN.md)。
 

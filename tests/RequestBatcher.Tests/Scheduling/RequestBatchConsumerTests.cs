@@ -1,12 +1,16 @@
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using RequestBatcher.Diagnostics;
 using RequestBatcher.PendingRequests;
 using RequestBatcher.Scheduling;
 
 namespace RequestBatcher.Tests.Scheduling;
 
-public sealed class RequestBatchConsumerTests
+public sealed class RequestBatchConsumerTests : IDisposable
 {
+    private readonly RequestBatcherMetrics _metrics = new(128);
+    public void Dispose() => _metrics.Dispose();
+
     [Fact]
     public async Task ExecuteAsync_HandlerIsRunning_CompletesRequestsAfterHandler()
     {
@@ -21,7 +25,8 @@ public sealed class RequestBatchConsumerTests
                 await releaseHandler.Task;
             },
             NullLogger.Instance,
-            typeof(int).FullName!);
+            typeof(int).FullName!,
+            _metrics);
 
         var processing = subject.ExecuteAsync([pendingRequest], CancellationToken.None).AsTask();
         await handlerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -46,7 +51,8 @@ public sealed class RequestBatchConsumerTests
                 return ValueTask.FromException(expected);
             },
             NullLogger.Instance,
-            typeof(int).FullName!);
+            typeof(int).FullName!,
+            _metrics);
 
         await subject.ExecuteAsync([pendingRequest], CancellationToken.None).AsTask();
 
@@ -72,7 +78,8 @@ public sealed class RequestBatchConsumerTests
                 return ValueTask.CompletedTask;
             },
             NullLogger.Instance,
-            typeof(int).FullName!);
+            typeof(int).FullName!,
+            _metrics);
 
         cancellation.Cancel();
 
@@ -106,7 +113,8 @@ public sealed class RequestBatchConsumerTests
                 return ValueTask.CompletedTask;
             },
             NullLogger.Instance,
-            typeof(int).FullName!);
+            typeof(int).FullName!,
+            _metrics);
 
         cancellation.Cancel();
         await subject.ExecuteAsync(requests, CancellationToken.None).AsTask();
@@ -148,7 +156,8 @@ public sealed class RequestBatchConsumerTests
                 return ValueTask.FromException(expected);
             },
             NullLogger.Instance,
-            typeof(int).FullName!);
+            typeof(int).FullName!,
+            _metrics);
 
         cancellation.Cancel();
         await subject.ExecuteAsync(requests, CancellationToken.None).AsTask();
@@ -202,7 +211,8 @@ public sealed class RequestBatchConsumerTests
                 return ValueTask.CompletedTask;
             },
             NullLogger.Instance,
-            typeof(int).FullName!);
+            typeof(int).FullName!,
+            _metrics);
 
         if (includeCanceledRequest)
         {
@@ -273,7 +283,8 @@ public sealed class RequestBatchConsumerTests
                 await releaseSecond.Task;
             },
             NullLogger.Instance,
-            typeof(int).FullName!);
+            typeof(int).FullName!,
+            _metrics);
 
         var firstProcessing = subject.ExecuteAsync(firstRequests, CancellationToken.None).AsTask();
         await firstStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));

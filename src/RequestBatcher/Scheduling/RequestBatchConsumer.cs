@@ -8,6 +8,7 @@ internal sealed class RequestBatchConsumer<TRequest>(
     RequestBatchHandler<TRequest> handler,
     ILogger logger,
     string requestTypeName,
+    RequestBatcherMetrics metrics,
     string? batcherName = null)
 {
     private static readonly string _telemetryRequestTypeName =
@@ -25,7 +26,7 @@ internal sealed class RequestBatchConsumer<TRequest>(
 
         var requests = CreateHandlerInput(activeRequests);
         using var activity = RequestBatcherTracing.StartBatch(_telemetryRequestTypeName, activeRequests, batcherName);
-        var metrics = RequestBatcherMetrics.StartBatch(_telemetryRequestTypeName, batcherName, requests.Length);
+        var metricScope = metrics.StartBatch(_telemetryRequestTypeName, batcherName, requests.Length);
         Exception? failure = null;
 
         try
@@ -48,7 +49,7 @@ internal sealed class RequestBatchConsumer<TRequest>(
         {
             // End both measurements before publishing results, so caller continuations see a complete batch.
             activity?.Stop();
-            metrics.Dispose();
+            metricScope.Dispose();
         }
 
         if (failure is not null)

@@ -1,6 +1,7 @@
 using BufferQueue;
 using BufferQueue.Memory;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using RequestBatcher.Diagnostics;
@@ -90,7 +91,8 @@ public static partial class RequestBatcherServiceCollectionExtensions
                 provider.GetRequiredService<IBufferQueue>(),
                 CreateHandler<TRequest>(provider, handlerLifetime),
                 provider.GetRequiredService<IOptions<RequestBatchOptions<TRequest>>>(),
-                provider.GetRequiredService<ILogger<RequestBatchCoordinator<TRequest>>>()));
+                provider.GetRequiredService<ILogger<RequestBatchCoordinator<TRequest>>>(),
+                metrics: provider.GetRequiredService<RequestBatcherMetrics>()));
         services.AddSingleton<IRequestBatcher<TRequest>>(
             static provider => provider.GetRequiredService<RequestBatchCoordinator<TRequest>>());
 
@@ -160,6 +162,7 @@ public static partial class RequestBatcherServiceCollectionExtensions
         string topicName = RequestBatchCoordinator<TRequest>.TopicName)
     {
         services.AddSingleton(new RequestBatcherMetricsConfiguration(options.BatchSize));
+        services.TryAddSingleton<RequestBatcherMetrics>();
         services.AddBufferQueue(queue =>
             queue.UseMemory(memory =>
                 memory.AddTopic<PendingBatchRequest<TRequest>>(topic =>

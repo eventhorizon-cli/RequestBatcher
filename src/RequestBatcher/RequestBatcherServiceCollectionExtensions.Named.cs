@@ -2,6 +2,7 @@ using BufferQueue;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using RequestBatcher.Diagnostics;
 
 namespace RequestBatcher;
 
@@ -151,7 +152,8 @@ public static partial class RequestBatcherServiceCollectionExtensions
                 Options.Create(options),
                 provider.GetRequiredService<ILogger<RequestBatchCoordinator<TRequest>>>(),
                 topicName,
-                batcherName));
+                batcherName,
+                provider.GetRequiredService<RequestBatcherMetrics>()));
     }
 
     private static RequestBatchHandler<TRequest> CreateKeyedHandler<TRequest>(

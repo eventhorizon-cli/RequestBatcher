@@ -2,13 +2,17 @@ using System.Runtime.CompilerServices;
 using BufferQueue;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
+using RequestBatcher.Diagnostics;
 using RequestBatcher.PendingRequests;
 using RequestBatcher.Scheduling;
 
 namespace RequestBatcher.Tests.Scheduling;
 
-public sealed class BatchDispatchLoopTests
+public sealed class BatchDispatchLoopTests : IDisposable
 {
+    private readonly RequestBatcherMetrics _metrics = new(128);
+    public void Dispose() => _metrics.Dispose();
+
     [Fact]
     public async Task RunAsync_ExhaustedConsumer_ReleasesSlotAndDisposesEnumerator()
     {
@@ -23,7 +27,8 @@ public sealed class BatchDispatchLoopTests
             (_, _) => ValueTask.CompletedTask,
             1,
             NullLogger.Instance,
-            typeof(int).FullName!);
+            typeof(int).FullName!,
+            _metrics);
 
         await subject.RunAsync(consumer.Object, CancellationToken.None)
             .WaitAsync(TimeSpan.FromSeconds(5));
@@ -67,7 +72,8 @@ public sealed class BatchDispatchLoopTests
             },
             2,
             NullLogger.Instance,
-            typeof(int).FullName!);
+            typeof(int).FullName!,
+            _metrics);
 
         var running = subject.RunAsync(consumer.Object, CancellationToken.None);
         await handlerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -119,7 +125,8 @@ public sealed class BatchDispatchLoopTests
             },
             1,
             NullLogger.Instance,
-            typeof(int).FullName!);
+            typeof(int).FullName!,
+            _metrics);
 
         var running = subject.RunAsync(consumer.Object, cancellation.Token);
         await firstHandlerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
@@ -175,7 +182,8 @@ public sealed class BatchDispatchLoopTests
             },
             2,
             NullLogger.Instance,
-            typeof(int).FullName!);
+            typeof(int).FullName!,
+            _metrics);
 
         var running = subject.RunAsync(consumer.Object, cancellation.Token);
         await firstHandlerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));

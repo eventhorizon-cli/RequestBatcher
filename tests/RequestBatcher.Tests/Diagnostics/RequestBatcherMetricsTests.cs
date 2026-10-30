@@ -50,11 +50,13 @@ public sealed class RequestBatcherMetricsTests
 
         Assert.Equal(new[]
         {
+            "requestbatcher.backlog",
             "requestbatcher.batch.size",
             "requestbatcher.execute.duration",
             "requestbatcher.handle.duration",
             "requestbatcher.submission.size",
         }, instruments.Keys.Order());
+        Assert.IsType<ObservableGauge<long>>(instruments["requestbatcher.backlog"]);
         Assert.IsType<Histogram<long>>(instruments["requestbatcher.submission.size"]);
         Assert.IsType<Histogram<long>>(instruments["requestbatcher.batch.size"]);
         Assert.IsType<Histogram<double>>(instruments["requestbatcher.handle.duration"]);
@@ -185,6 +187,7 @@ public sealed class RequestBatcherMetricsTests
     [Fact]
     public void BatchScope_WithoutEnabledInstruments_DisposeRecordsNothing()
     {
+        using var metrics = new RequestBatcherMetrics(3);
         var measurements = new ConcurrentQueue<MeasurementRecord>();
         using var listener = new MeterListener
         {
@@ -196,8 +199,8 @@ public sealed class RequestBatcherMetricsTests
             measurements.Enqueue(new MeasurementRecord(instrument.Name, value, tags)));
         listener.Start();
 
-        RequestBatcherMetrics.RecordSubmissionSize("Int32", "prices", "multi", 3);
-        using (RequestBatcherMetrics.StartBatch("Int32", "prices", 3))
+        metrics.RecordSubmissionSize("Int32", "prices", "multi", 3);
+        using (metrics.StartBatch("Int32", "prices", 3))
         {
         }
 
@@ -207,7 +210,8 @@ public sealed class RequestBatcherMetricsTests
     [Fact]
     public void MeterListener_EnableDisableInstrument_ControlsMeasurements()
     {
-        RequestBatcherMetrics.RecordSubmissionSize("Int32", "prices", "multi", 3);
+        using var metrics = new RequestBatcherMetrics(3);
+        metrics.RecordSubmissionSize("Int32", "prices", "multi", 3);
         var measurements = new ConcurrentQueue<MeasurementRecord>();
         Instrument? batchSize = null;
         using var listener = new MeterListener
@@ -230,14 +234,14 @@ public sealed class RequestBatcherMetricsTests
         Assert.NotNull(batchSize);
         var instrument = batchSize!;
         Assert.False(instrument.Enabled);
-        using (RequestBatcherMetrics.StartBatch("Int32", "prices", 3))
+        using (metrics.StartBatch("Int32", "prices", 3))
         {
         }
         Assert.Empty(measurements);
 
         listener.EnableMeasurementEvents(instrument);
         Assert.True(instrument.Enabled);
-        using (RequestBatcherMetrics.StartBatch("Int32", "prices", 3))
+        using (metrics.StartBatch("Int32", "prices", 3))
         {
         }
 
@@ -247,7 +251,7 @@ public sealed class RequestBatcherMetricsTests
 
         listener.DisableMeasurementEvents(instrument);
         Assert.False(instrument.Enabled);
-        using (RequestBatcherMetrics.StartBatch("Int32", "prices", 3))
+        using (metrics.StartBatch("Int32", "prices", 3))
         {
         }
 
@@ -257,7 +261,8 @@ public sealed class RequestBatcherMetricsTests
     [Fact]
     public void MeterListener_OneSubscriberDisposed_KeepsOtherSubscriberEnabled()
     {
-        RequestBatcherMetrics.RecordSubmissionSize("Int32", "prices", "multi", 3);
+        using var metrics = new RequestBatcherMetrics(3);
+        metrics.RecordSubmissionSize("Int32", "prices", "multi", 3);
         var firstMeasurements = new ConcurrentQueue<MeasurementRecord>();
         var secondMeasurements = new ConcurrentQueue<MeasurementRecord>();
         Instrument? firstInstrument = null;
@@ -301,7 +306,7 @@ public sealed class RequestBatcherMetricsTests
             var secondTarget = secondInstrument!;
             Assert.True(firstTarget.Enabled);
 
-            using (RequestBatcherMetrics.StartBatch("Int32", "prices", 3))
+            using (metrics.StartBatch("Int32", "prices", 3))
             {
             }
 
@@ -310,7 +315,7 @@ public sealed class RequestBatcherMetricsTests
 
             first.Dispose();
             Assert.True(secondTarget.Enabled);
-            using (RequestBatcherMetrics.StartBatch("Int32", "prices", 3))
+            using (metrics.StartBatch("Int32", "prices", 3))
             {
             }
 
@@ -330,6 +335,7 @@ public sealed class RequestBatcherMetricsTests
     [Fact]
     public void StartBatch_NoSubscriberAtCreation_DoesNotBackfillMeasurement()
     {
+        using var metrics = new RequestBatcherMetrics(3);
         var measurements = new ConcurrentQueue<MeasurementRecord>();
         Instrument? batchSize = null;
         using var listener = new MeterListener
@@ -347,7 +353,7 @@ public sealed class RequestBatcherMetricsTests
             measurements.Enqueue(new MeasurementRecord(instrument.Name, value, tags)));
         listener.Start();
 
-        var scope = RequestBatcherMetrics.StartBatch("Int32", "prices", 3);
+        var scope = metrics.StartBatch("Int32", "prices", 3);
         Assert.NotNull(batchSize);
         var instrument = batchSize!;
         Assert.False(instrument.Enabled);
@@ -355,7 +361,7 @@ public sealed class RequestBatcherMetricsTests
         scope.Dispose();
 
         Assert.Empty(measurements);
-        using (RequestBatcherMetrics.StartBatch("Int32", "prices", 3))
+        using (metrics.StartBatch("Int32", "prices", 3))
         {
         }
 

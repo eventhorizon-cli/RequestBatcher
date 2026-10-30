@@ -1,5 +1,4 @@
-using Microsoft.Extensions.DependencyInjection;
-using RequestBatcher.OpenTelemetry.Diagnostics;
+using RequestBatcher.Diagnostics;
 
 namespace OpenTelemetry.Metrics;
 
@@ -12,11 +11,9 @@ public static class RequestBatcherMeterProviderBuilderExtensions
     /// Registers RequestBatcher meters with the supplied meter provider builder.
     /// </summary>
     /// <remarks>
-    /// At provider construction, size histogram buckets are derived from the largest BatchSize snapshot among
-    /// RequestBatcher pipelines registered in the same service collection. Bucket counts are bounded independently of
-    /// pipeline count; submission-size buckets also cover multiples of BatchSize. Duration buckets retain SDK defaults.
-    /// Register only the Meter with
-    /// AddMeter("RequestBatcher") to supply custom views instead. Without pipeline metadata, SDK defaults are retained.
+    /// The core package supplies size histogram bucket advice when its instruments are created, based on the largest
+    /// BatchSize registered in the application's service collection. Direct Meter registration uses the same advice.
+    /// Application views can override the advice. Duration buckets retain SDK defaults.
     /// </remarks>
     /// <param name="builder">The meter provider builder to configure.</param>
     /// <returns>The same builder instance for fluent configuration.</returns>
@@ -25,17 +22,6 @@ public static class RequestBatcherMeterProviderBuilderExtensions
     {
         ArgumentNullException.ThrowIfNull(builder);
 
-        builder.ConfigureServices(services =>
-        {
-            if (services.Any(descriptor => descriptor.ServiceType == typeof(RequestBatcherMeterProviderConfiguration)))
-            {
-                return;
-            }
-
-            services.AddSingleton(new RequestBatcherMeterProviderConfiguration());
-            services.ConfigureOpenTelemetryMeterProvider(static (provider, meterBuilder) =>
-                provider.GetRequiredService<RequestBatcherMeterProviderConfiguration>().ConfigureBuilder(provider, meterBuilder));
-        });
-        return builder.AddMeter("RequestBatcher");
+        return builder.AddMeter(RequestBatcherMetrics.MeterName);
     }
 }

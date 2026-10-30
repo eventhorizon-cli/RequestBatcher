@@ -462,10 +462,13 @@ public sealed class ExecuteMetricsTests
             release.TrySetResult();
         }
         await Task.WhenAll(leader, queued).WaitAsync(Timeout);
-        await provider.DisposeAsync();
+        await ((IAsyncDisposable)batcher).DisposeAsync();
         await Assert.ThrowsAsync<ObjectDisposedException>(() => batcher.ExecuteAsync(3));
         Assert.Equal(4, capture.Measurements.Count);
         AssertMeasurement(capture.Measurements.Last(), "single", "error");
+        await provider.DisposeAsync();
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => batcher.ExecuteAsync(4));
+        Assert.Equal(4, capture.Measurements.Count);
     }
 
     [Theory]
