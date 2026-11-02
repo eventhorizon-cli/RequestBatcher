@@ -731,7 +731,7 @@ public sealed class RequestBatchCoordinatorTests
     }
 
     [Fact]
-    public async Task AddRequestBatcher_MultipleRequestTypes_ShareInternalQueue()
+    public async Task AddRequestBatcher_MultipleRequestTypes_IsolateTopicsInSharedQueue()
     {
         var integerHandler = new Mock<IRequestBatchHandler<int>>(MockBehavior.Strict);
         integerHandler
@@ -756,6 +756,10 @@ public sealed class RequestBatchCoordinatorTests
 
         await using var provider = services.BuildServiceProvider(
             new ServiceProviderOptions { ValidateOnBuild = true, ValidateScopes = true });
+
+        Assert.NotEqual(
+            provider.GetRequiredService<RequestBatcherConfiguration<int>>().TopicName,
+            provider.GetRequiredService<RequestBatcherConfiguration<string>>().TopicName);
 
         await Task.WhenAll(
             provider.GetRequiredService<IRequestBatcher<int>>().ExecuteAsync(42),

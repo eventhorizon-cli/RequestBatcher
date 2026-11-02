@@ -20,7 +20,6 @@ namespace RequestBatcher;
 /// <typeparam name="TRequest">The request type.</typeparam>
 internal sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TRequest>, IAsyncDisposable
 {
-    internal const string TopicName = "request-batcher";
     internal const string ConsumerGroupName = "request-batcher-consumers";
     private const int Running = 0;
     private const int Stopping = 1;

@@ -27,9 +27,12 @@ partition keys still provide no handler ordering or serialization guarantee.
 
 ## Internal Flow
 
-All pipelines use the application's shared `IBufferQueue`. Each named pipeline
-registers an internally generated unique topic name. The coordinator receives
-it for both producer and consumer creation. Topics and queue APIs remain internal.
+All pipelines use the application's shared `IBufferQueue`. Every pipeline,
+including the unnamed default, registers a unique GUID-suffixed topic name through
+the same helper. The batcher configuration generates and owns the name, which is
+passed to queue registration and used by the coordinator for both producer and
+consumer creation. Queue isolation does not rely on BufferQueue's item-type
+scoping. Topics and queue APIs remain internal.
 
 The application handler is registered as a keyed service with the supplied name
 and lifetime. Singleton handlers are resolved during coordinator composition;
