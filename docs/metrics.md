@@ -137,6 +137,36 @@ can inspect `Histogram<long>.Advice.HistogramBucketBoundaries`, but receives raw
 
 ## MeterListener
 
+**Check the histogram bucket configuration when using a listener or a library built on one.** `MeterListener` receives raw
+measurements; it does not aggregate them into buckets or apply advice automatically. If a consumer ignores advice, configure
+its histogram boundaries explicitly. Defaults designed for other units or value ranges can put many measurements into the
+same bucket, reducing P95/P99 accuracy.
+
+For RequestBatcher's `long` and `double` histograms, this helper reads the advised boundaries using only .NET Metrics APIs:
+
+```csharp
+using System.Diagnostics.Metrics;
+using System.Linq;
+
+static double[]? GetAdvisedBuckets(Instrument instrument) => instrument switch
+{
+    Histogram<long> histogram => histogram.Advice?.HistogramBucketBoundaries
+        ?.Select(static value => (double)value).ToArray(),
+    Histogram<double> histogram => histogram.Advice?.HistogramBucketBoundaries?.ToArray(),
+    _ => null
+};
+```
+
+Read the advice when the instrument is published and pass the boundaries to your consumer's histogram configuration;
+reading them alone does not change aggregation. This avoids allocating an array on each measurement. A `null` result means
+there is no advice: retain the consumer's default resolver or supply application-specific boundaries. An empty array means
+advice requests only count and sum, so do not replace it with default buckets. See the
+[.NET bucket advice contract](https://learn.microsoft.com/en-us/dotnet/api/system.diagnostics.metrics.instrumentadvice-1.histogrambucketboundaries).
+RequestBatcher currently supplies advice only for request-count histograms. Configure duration boundaries separately in
+`ms`, according to the latency range you need to measure; do not reuse the request-count boundaries. Consumers other than
+OpenTelemetry do not necessarily use the OpenTelemetry defaults listed above. Instances whose buckets are aggregated
+together must use compatible boundaries.
+
 With a custom `System.Diagnostics.Metrics.MeterListener`, explicitly subscribe to each instrument:
 
 ```csharp

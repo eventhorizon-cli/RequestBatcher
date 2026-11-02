@@ -209,11 +209,11 @@ options.UsePartitionKey(query => query.ProductId, partitionCount: 8);
 
 Partition 路由只决定请求进入哪个 Partition：它不会强制同一键值的全部请求进入同一个处理批次，也不会自动去重。
 RequestBatcher 不提供全局、Partition 内或 Partition Key 级别的 Handler 执行顺序保证；Partition 路由只是路由规则，
-不能用于串行化或提供互斥。
+不能保证串行执行或互斥。
 
 字符串路由使用完整键值，共同前缀本身不会强制不同键值进入同一 Partition。具体分区归属由内部实现决定，
 可能随版本变化；同一个 Batcher 实例中的相同键值仍会路由到同一 Partition。这些变化可能影响处理批次
-的组成，以及 Handler 在单个批次内能够合并的重复工作量。
+的组成，以及 Handler 在单个批次内能减少多少重复处理。
 
 ### Partition 与 MaxConcurrency 的配置建议
 
@@ -867,8 +867,8 @@ builder.Services.AddRequestBatcher<PriceLookup, decimal?, CatalogHandler>(
 中等待，不会进入应用自行维护的转交队列。执行名额在一次 Handler 批次调用完成后释放，而不是批次内某个请求单独
 完成时释放。任一批次完成后，调度循环就可以拉取并启动下一批，无需等待其他正在执行的批次全部完成。
 
-启用按 Key 路由时，队列会在有数据的 Partition 之间轮转拉取机会，但不保证 Handler 执行时间相等，也不保证不同
-键值之间公平。
+启用按 Key 路由时，队列会轮流尝试从各 Partition 拉取批次，跳过没有数据的 Partition；但不保证各 Partition
+占用 Handler 的时间相等，也不保证不同键值之间公平。
 
 Handler 会在分发调用链上执行，直到完成或遇到尚未完成的异步等待。在此之前的 CPU 密集计算或同步阻塞会
 推迟其他批次的分发，即使仍有空闲执行名额。`MaxConcurrency` 是并发上限，不会自动将同步 Handler 代码并行化。
@@ -938,10 +938,14 @@ Handler 需要 DI 作用域时，应先停止提交并等待未完成的调用�
 ## 性能调优与压测
 
 **不要只看高流量压测结果；日常流量下也应对比接入 RequestBatcher 前后的性能。** 在相同资源和下游配置下，
-分别模拟日常、高峰及短时突发流量，保持接入前后的请求到达节奏、项数和数据分布一致，对比吞吐、端到端平均延迟及 P95/P99、
+分别模拟日常、高峰及短时突发流量，保持接入前后的请求频率、突发情况、项数和数据分布一致，对比吞吐、端到端平均延迟及 P95/P99、
 实际批大小、下游调用次数和资源开销。日常流量下合批机会可能较少，合批收益未必能抵消入队和调度的额外开销；
 如果执行名额已被占满，还会产生排队等待。
 高负载下的吞吐收益不能替代日常流量下的延迟验证。
+
+**尤其是通过 `ExecuteAsync(request)` 每次提交一个请求项时，流量不高的情况下，相比直接调用下游，整体性能可能略有下降。**
+多次单条提交仍可合并为一个 Handler 批次，但请求到达稀疏时，合批机会较少，等待执行名额期间也未必有多少新请求可以合批。
+应根据实际流量评估这种提交方式。
 
 ### 让 Agent 协助制定初步配置
 
@@ -1279,12 +1283,17 @@ builder.Services.AddOpenTelemetry()
 ```
 
 也可以安装 [`RequestBatcher.OpenTelemetry`](https://www.nuget.org/packages/RequestBatcher.OpenTelemetry)，
-使用前面示例中的 `AddRequestBatcherInstrumentation()` 扩展。两种方式都使用 core 根据同一服务集合中最大的 `BatchSize`
-提供的大小 Histogram 建议桶边界（Advice）；应用通过 `AddView` 设置的边界优先。
+使用前面示例中的 `AddRequestBatcherInstrumentation()` 扩展。两种方式下，核心包都会根据同一服务集合中最大的 `BatchSize`，
+为记录请求数量的 Histogram 提供建议桶边界（Advice）；应用通过 `AddView` 设置的边界优先。
+
+**通过 `MeterListener` 或基于它的采集库接入时，请确认采集端是否采用这些建议桶边界。** Listener 接收的是原始测量值，
+不会自动按 Advice 分桶；如果采集端未采用 Advice，需要在采集端显式配置。请求数量和耗时应分别选择合适的边界，
+耗时指标的单位为 `ms`。默认分桶若不适合实际数据，可能影响 P95/P99 的估算精度。读取 Advice 的示例见
+[Metrics 指南](docs/metrics.zh-CN.md#meterlistener)。
 
 | 指标名称 | 类型 | 单位 | 含义 |
 | --- | --- | --- | --- |
-| `requestbatcher.submission.size` | `Histogram<long>` | `{request}` | 到达 RequestBatcher 接纳边界的每次提交所含请求数。 |
+| `requestbatcher.submission.size` | `Histogram<long>` | `{request}` | 每次提交所含的请求项数，在参数、取消和运行状态检查通过后记录；随后因容量不足而失败的提交也计入。 |
 | `requestbatcher.batch.size` | `Histogram<long>` | `{request}` | 每个已完成 Handler 批次的请求数，包含失败尝试；分发前取消的请求不计。 |
 | `requestbatcher.handle.duration` | `Histogram<double>` | `ms` | Handler 批次耗时，包含 Handler 作用域释放。 |
 | `requestbatcher.execute.duration` | `Histogram<double>` | `ms` | 每次公开 `ExecuteAsync` 调用的端到端耗时，包含容量等待、排队、所有 Handler 批次及响应组装。 |

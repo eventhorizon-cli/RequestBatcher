@@ -12,8 +12,8 @@ builder.Services.AddOpenTelemetry()
 ```
 
 也可安装 `RequestBatcher.OpenTelemetry` 并使用
-`.WithMetrics(metrics => metrics.AddRequestBatcherInstrumentation())`。两种方式都会注册 Meter，并使用 core 提供的
-大小 Histogram 建议桶边界（Advice）。应先完成所有 Batcher 注册，再构建服务容器。首次解析 Batcher 时，共享的 Metrics 服务
+`.WithMetrics(metrics => metrics.AddRequestBatcherInstrumentation())`。两种方式都会注册 Meter，并使用核心包为记录请求数量的
+Histogram 提供的建议桶边界（Advice）。应先完成所有 Batcher 注册，再构建服务容器。首次解析 Batcher 时，共享的 Metrics 服务
 根据已注册的最大 `BatchSize` 创建固定的 Advice，无需解析其他 Batcher 或 Handler。容器在 Batcher 排空后异步释放 Metrics 服务；
 Metrics 会等待已开始的 Execute 测量完成记录，再释放 Meter。
 不同容器可提供不同桶边界；不要将边界不兼容的指标合并到同一指标流中。
@@ -23,7 +23,7 @@ Metrics 会等待已开始的 Execute 测量完成记录，再释放 Meter。
 
 | 指标名称 | 类型 | 单位 | 含义 |
 | --- | --- | --- | --- |
-| `requestbatcher.submission.size` | `Histogram<long>` | `{request}` | 到达 RequestBatcher 接纳边界的每次提交所含请求数。 |
+| `requestbatcher.submission.size` | `Histogram<long>` | `{request}` | 每次提交所含的请求项数，在参数、取消和运行状态检查通过后记录；随后因容量不足而失败的提交也计入。 |
 | `requestbatcher.batch.size` | `Histogram<long>` | `{request}` | 每个已完成 Handler 批次的请求数，包含失败尝试；分发前取消的请求不计。 |
 | `requestbatcher.handle.duration` | `Histogram<double>` | `ms` | Handler 批次耗时，包含 Handler 作用域释放。 |
 | `requestbatcher.execute.duration` | `Histogram<double>` | `ms` | 每次公开 `ExecuteAsync` 调用的端到端耗时，包含容量等待、排队、所有 Handler 批次及响应组装。 |
@@ -119,6 +119,32 @@ SDK 为每个 Histogram 添加 `+Inf`。每个大小 Histogram 最多有 25 个 
 原生 `MeterListener` 可读取 `Histogram<long>.Advice.HistogramBucketBoundaries`，但接收的仍是原始测量值，需要自行聚合。
 
 ## MeterListener
+
+**通过 Listener 或基于它的采集库接入时，需要确认 Histogram 的分桶配置。** `MeterListener` 接收的是原始测量值，
+不会自动聚合到桶中，也不会自动应用 Advice。如果采集端未采用 Advice，需要显式配置桶边界。默认边界若适用于其他单位或数值范围，
+可能使大量测量值落入同一个桶，影响 P95/P99 的估算精度。
+
+下面的方法只使用 .NET Metrics API，读取 RequestBatcher 所用的 `long` 和 `double` Histogram 的建议桶边界：
+
+```csharp
+using System.Diagnostics.Metrics;
+using System.Linq;
+
+static double[]? GetAdvisedBuckets(Instrument instrument) => instrument switch
+{
+    Histogram<long> histogram => histogram.Advice?.HistogramBucketBoundaries
+        ?.Select(static value => (double)value).ToArray(),
+    Histogram<double> histogram => histogram.Advice?.HistogramBucketBoundaries?.ToArray(),
+    _ => null
+};
+```
+
+在指标发布时读取 Advice，将边界传给采集端的 Histogram 配置；仅读取这些值不会改变聚合行为，也不需要在每次测量时重新创建数组。
+返回 `null` 表示没有建议边界，此时保留采集端原有的默认分桶逻辑，或使用应用自行配置的边界。
+空数组则表示建议只记录 count 和 sum，不应替换为默认桶，详见
+[.NET 桶边界建议的定义](https://learn.microsoft.com/zh-cn/dotnet/api/system.diagnostics.metrics.instrumentadvice-1.histogrambucketboundaries)。
+RequestBatcher 目前只为请求数量指标提供 Advice。耗时指标应根据关注的延迟范围，以 `ms` 为单位单独配置边界，不要复用请求数量的边界。
+其他采集端未必使用上文列出的 OpenTelemetry 默认值。需要合并多个实例的桶进行计算时，各实例应采用兼容的边界。
 
 自定义 `System.Diagnostics.Metrics.MeterListener` 时，需要显式订阅想采集的指标：
 
