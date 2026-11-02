@@ -235,6 +235,11 @@ downstream call counts, and resource costs. Typical traffic may offer fewer batc
 may not offset admission and scheduling overhead; requests also queue when no execution slot is available.
 High-load throughput gains do not replace this comparison.
 
+**Pay particular attention to single-item submissions through `ExecuteAsync(request)` at low traffic levels:** overall
+performance may be slightly worse than direct downstream calls. Multiple single-item submissions can still form one
+Handler batch, but sparse arrivals offer fewer batching opportunities, and waiting for an execution slot may not bring
+many additional requests into the next batch. Evaluate this submission mode at your actual arrival rates.
+
 Before tuning, collect the existing system's per-instance typical and peak QPS, request-item counts, downstream RT and batch limits,
 and latency target; see [Preparing Inputs for an Agent](https://github.com/eventhorizon-cli/RequestBatcher#preparing-inputs-for-an-agent).
 These inputs support an initial configuration proposal, not a performance guarantee.
@@ -347,6 +352,9 @@ in `{request}`; `requestbatcher.handle.duration` and `requestbatcher.execute.dur
 excluding capacity waits and active Handler work.
 Core supplies size-histogram bucket advice from the largest `BatchSize` registered in the same service collection.
 Direct `AddMeter` and the integration extension use the same advice; custom `AddView` settings override it.
+When using `MeterListener` or a library built on it, check whether the consumer honors this advice; listeners receive raw
+measurements and do not automatically bucket them. If advice is ignored, configure buckets explicitly at the consumer.
+Choose separate boundaries for request counts and durations (`ms`); unsuitable defaults can reduce P95/P99 accuracy.
 Histogram `sum / count` gives the mean. For metric semantics, tags, queries, and bucket rules, see the
 [RequestBatcher Metrics guide](https://github.com/eventhorizon-cli/RequestBatcher/blob/main/docs/metrics.md).
 

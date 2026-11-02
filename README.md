@@ -1026,6 +1026,11 @@ opportunities, so batching savings may not offset admission and scheduling overh
 queueing when no slot is available. Throughput gains at high load
 do not replace latency validation under typical traffic.
 
+**Pay particular attention to single-item submissions through `ExecuteAsync(request)` at low traffic levels:** overall
+performance may be slightly worse than direct downstream calls. Multiple single-item submissions can still form one
+Handler batch, but sparse arrivals offer fewer batching opportunities, and waiting for an execution slot may not bring
+many additional requests into the next batch. Evaluate this submission mode at your actual arrival rates.
+
 ### Preparing Inputs for an Agent
 
 If you want an AI Agent to help choose an initial configuration before adopting RequestBatcher, share the following
@@ -1391,6 +1396,12 @@ builder.Services.AddOpenTelemetry()
 Alternatively, install [`RequestBatcher.OpenTelemetry`](https://www.nuget.org/packages/RequestBatcher.OpenTelemetry) and
 use the `AddRequestBatcherInstrumentation()` extension shown above. Both use the size-histogram bucket advice supplied
 by core from the largest `BatchSize` registered in the same service collection. Custom `AddView` settings override this advice.
+
+**When using `MeterListener` or a library built on it, check whether the consumer honors the advised bucket boundaries.**
+Listeners receive raw measurements; they do not automatically bucket values using advice. If the consumer ignores advice,
+configure its buckets explicitly. Choose separate boundaries for request counts and durations, whose unit is `ms`.
+Defaults that do not fit the data can reduce P95/P99 accuracy. See the [metrics guide](docs/metrics.md#meterlistener)
+for an example of reading the advice.
 
 | Instrument | Type | Unit | Meaning |
 | --- | --- | --- | --- |
