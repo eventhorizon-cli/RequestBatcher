@@ -16,6 +16,7 @@ public sealed class ConsumerFailureTests
     [Fact]
     public async Task DisposeAsync_ConsumerFailsSynchronously_IsolatesStartupContextAndReportsFailure()
     {
+        var configuration = new RequestBatcherConfiguration<int>();
         using var activity = new Activity("initializing-request").Start();
         var ambient = new AsyncLocal<string?> { Value = "initializing-request" };
         var expected = new TestConsumerException();
@@ -32,7 +33,7 @@ public sealed class ConsumerFailureTests
             .Throws(expected);
         var bufferQueue = new Mock<IBufferQueue>(MockBehavior.Strict);
         bufferQueue.Setup(candidate => candidate.GetProducer<PendingBatchRequest<int>>(
-                RequestBatchCoordinator<int>.TopicName))
+                configuration.TopicName))
             .Returns(producer.Object);
         bufferQueue.Setup(candidate => candidate.CreatePullConsumers<PendingBatchRequest<int>>(
                 It.IsAny<BufferPullConsumerOptions>(), 1))
@@ -45,7 +46,7 @@ public sealed class ConsumerFailureTests
             Options.Create(new RequestBatchOptions<int>()),
             NullLogger<RequestBatchCoordinator<int>>.Instance,
             metrics,
-            new RequestBatcherConfiguration<int>(RequestBatchCoordinator<int>.TopicName));
+            configuration);
 
         Assert.Same(activity, Activity.Current);
         Assert.Equal("initializing-request", ambient.Value);
@@ -64,21 +65,22 @@ public sealed class ConsumerFailureTests
     [Fact]
     public async Task DisposeAsync_ConsumerBatchListFails_ReportsFailureOnRepeatedCalls()
     {
+        var configuration = new RequestBatcherConfiguration<int>();
         var expected = new TestConsumerException();
         var submitted = new TaskCompletionSource<PendingBatchRequest<int>>(
             TaskCreationOptions.RunContinuationsAsynchronously);
-        var producer = new TestProducer(submitted);
-        var consumer = new TestConsumer(submitted.Task, expected);
+        var producer = new TestProducer(configuration.TopicName, submitted);
+        var consumer = new TestConsumer(configuration.TopicName, submitted.Task, expected);
 
         var bufferQueue = new Mock<IBufferQueue>(MockBehavior.Strict);
         bufferQueue
             .Setup(candidate => candidate.GetProducer<PendingBatchRequest<int>>(
-                RequestBatchCoordinator<int>.TopicName))
+                configuration.TopicName))
             .Returns(producer);
         bufferQueue
             .Setup(candidate => candidate.CreatePullConsumers<PendingBatchRequest<int>>(
                 It.Is<BufferPullConsumerOptions>(options =>
-                    options.TopicName == RequestBatchCoordinator<int>.TopicName &&
+                    options.TopicName == configuration.TopicName &&
                     options.GroupName == RequestBatchCoordinator<int>.ConsumerGroupName &&
                     options.BatchSize == 128 &&
                     options.AutoCommit),
@@ -92,7 +94,7 @@ public sealed class ConsumerFailureTests
             Options.Create(new RequestBatchOptions<int> { MaxConcurrency = 64 }),
             NullLogger<RequestBatchCoordinator<int>>.Instance,
             metrics,
-            new RequestBatcherConfiguration<int>(RequestBatchCoordinator<int>.TopicName));
+            configuration);
 
         var processing = coordinator.ExecuteAsync(42);
 
@@ -114,6 +116,7 @@ public sealed class ConsumerFailureTests
     [InlineData(true)]
     public async Task ExecuteAsync_ConsumerFails_IsolatesFailureContext(bool alreadySuppressed)
     {
+        var configuration = new RequestBatcherConfiguration<int>();
         using var activity = new Activity("initializing-request").Start();
         var ambient = new AsyncLocal<string?> { Value = "initializing-request" };
         var expected = new TestConsumerException();
@@ -157,7 +160,7 @@ public sealed class ConsumerFailureTests
         var bufferQueue = new Mock<IBufferQueue>(MockBehavior.Strict);
         bufferQueue
             .Setup(candidate => candidate.GetProducer<PendingBatchRequest<int>>(
-                RequestBatchCoordinator<int>.TopicName))
+                configuration.TopicName))
             .Returns(producer.Object);
         bufferQueue
             .Setup(candidate => candidate.CreatePullConsumers<PendingBatchRequest<int>>(
@@ -174,7 +177,7 @@ public sealed class ConsumerFailureTests
                 Options.Create(new RequestBatchOptions<int>()),
                 NullLogger<RequestBatchCoordinator<int>>.Instance,
                 metrics,
-                new RequestBatcherConfiguration<int>(RequestBatchCoordinator<int>.TopicName));
+                configuration);
 
             Assert.Equal(alreadySuppressed, ExecutionContext.IsFlowSuppressed());
             Assert.Same(activity, Activity.Current);
@@ -215,6 +218,7 @@ public sealed class ConsumerFailureTests
     [Fact]
     public async Task ExecuteAsync_ConsumerFailsBeforeDispatch_FailsQueuedRequestsAndRejectsLaterSubmissions()
     {
+        var configuration = new RequestBatcherConfiguration<int>();
         var expected = new TestConsumerException();
         var allSubmitted = new TaskCompletionSource(
             TaskCreationOptions.RunContinuationsAsynchronously);
@@ -245,12 +249,12 @@ public sealed class ConsumerFailureTests
         var bufferQueue = new Mock<IBufferQueue>(MockBehavior.Strict);
         bufferQueue
             .Setup(candidate => candidate.GetProducer<PendingBatchRequest<int>>(
-                RequestBatchCoordinator<int>.TopicName))
+                configuration.TopicName))
             .Returns(producer.Object);
         bufferQueue
             .Setup(candidate => candidate.CreatePullConsumers<PendingBatchRequest<int>>(
                 It.Is<BufferPullConsumerOptions>(options =>
-                    options.TopicName == RequestBatchCoordinator<int>.TopicName &&
+                    options.TopicName == configuration.TopicName &&
                     options.GroupName == RequestBatchCoordinator<int>.ConsumerGroupName &&
                     options.BatchSize == 128 &&
                     options.AutoCommit),
@@ -268,7 +272,7 @@ public sealed class ConsumerFailureTests
             Options.Create(new RequestBatchOptions<int>()),
             NullLogger<RequestBatchCoordinator<int>>.Instance,
             metrics,
-            new RequestBatcherConfiguration<int>(RequestBatchCoordinator<int>.TopicName));
+            configuration);
 
         var first = coordinator.ExecuteAsync(1);
         var second = coordinator.ExecuteAsync(2);
@@ -311,6 +315,7 @@ public sealed class ConsumerFailureTests
     public async Task ExecuteAsync_ConsumerStopsWithoutShutdown_FailsQueuedRequestsAndReportsSameFailure(
         bool canceled)
     {
+        var configuration = new RequestBatcherConfiguration<int>();
         var allSubmitted = new TaskCompletionSource(
             TaskCreationOptions.RunContinuationsAsynchronously);
         var allowConsumerToStop = new TaskCompletionSource(
@@ -346,12 +351,12 @@ public sealed class ConsumerFailureTests
         var bufferQueue = new Mock<IBufferQueue>(MockBehavior.Strict);
         bufferQueue
             .Setup(candidate => candidate.GetProducer<PendingBatchRequest<int>>(
-                RequestBatchCoordinator<int>.TopicName))
+                configuration.TopicName))
             .Returns(producer.Object);
         bufferQueue
             .Setup(candidate => candidate.CreatePullConsumers<PendingBatchRequest<int>>(
                 It.Is<BufferPullConsumerOptions>(options =>
-                    options.TopicName == RequestBatchCoordinator<int>.TopicName &&
+                    options.TopicName == configuration.TopicName &&
                     options.GroupName == RequestBatchCoordinator<int>.ConsumerGroupName &&
                     options.BatchSize == 128 &&
                     options.AutoCommit),
@@ -369,7 +374,7 @@ public sealed class ConsumerFailureTests
             Options.Create(new RequestBatchOptions<int>()),
             NullLogger<RequestBatchCoordinator<int>>.Instance,
             metrics,
-            new RequestBatcherConfiguration<int>(RequestBatchCoordinator<int>.TopicName));
+            configuration);
 
         try
         {
@@ -492,10 +497,11 @@ public sealed class ConsumerFailureTests
     }
 
     private sealed class TestProducer(
+        string topicName,
         TaskCompletionSource<PendingBatchRequest<int>> submitted)
         : IBufferProducer<PendingBatchRequest<int>>
     {
-        public string TopicName => RequestBatchCoordinator<int>.TopicName;
+        public string TopicName => topicName;
 
         public ValueTask<bool> TryProduceAsync(
             PendingBatchRequest<int> item,
@@ -527,11 +533,12 @@ public sealed class ConsumerFailureTests
     }
 
     private sealed class TestConsumer(
+        string topicName,
         Task<PendingBatchRequest<int>> submitted,
         Exception exception)
         : IBufferPullConsumer<PendingBatchRequest<int>>
     {
-        public string TopicName => RequestBatchCoordinator<int>.TopicName;
+        public string TopicName => topicName;
 
         public string GroupName => RequestBatchCoordinator<int>.ConsumerGroupName;
 

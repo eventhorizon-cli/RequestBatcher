@@ -66,6 +66,14 @@ public sealed class NamedRequestBatcherTests
 
         await using var provider = BuildProvider(services);
 
+        var topicNames = new[]
+        {
+            provider.GetRequiredService<RequestBatcherConfiguration<int>>().TopicName,
+            provider.GetRequiredKeyedService<RequestBatcherConfiguration<int>>(firstName).TopicName,
+            provider.GetRequiredKeyedService<RequestBatcherConfiguration<int>>(secondName).TopicName,
+        };
+        Assert.Equal(3, topicNames.Distinct(StringComparer.Ordinal).Count());
+
         await Task.WhenAll(
                 provider.GetRequiredService<IRequestBatcher<int>>().ExecuteAsync(1),
                 provider.GetRequiredKeyedService<IRequestBatcher<int>>(firstName).ExecuteAsync(2),

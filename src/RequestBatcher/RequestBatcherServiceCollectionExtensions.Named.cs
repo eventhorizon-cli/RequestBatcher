@@ -138,9 +138,9 @@ public static partial class RequestBatcherServiceCollectionExtensions
         RequestBatchOptions<TRequest> options,
         string? batcherName)
     {
-        var topicName = $"request-batcher-{Guid.NewGuid():N}";
-        AddBatcherServices(services, options, topicName);
-        services.AddKeyedSingleton(serviceKey, new RequestBatcherConfiguration<TRequest>(topicName, batcherName, options));
+        var configuration = new RequestBatcherConfiguration<TRequest>(batcherName, options);
+        AddBatcherServices(services, options, configuration.TopicName);
+        services.AddKeyedSingleton(serviceKey, configuration);
         RegisterHandlerDelegate<TRequest>(services, handlerLifetime, serviceKey);
         services.AddKeyedSingleton<RequestBatchCoordinator<TRequest>>(serviceKey);
     }

@@ -84,9 +84,9 @@ public static partial class RequestBatcherServiceCollectionExtensions
         var optionsSnapshot = ConfigureOptions(services, configure);
 
         registerHandler(services);
-        AddBatcherServices<TRequest>(services, optionsSnapshot);
-        services.AddSingleton(new RequestBatcherConfiguration<TRequest>(
-            RequestBatchCoordinator<TRequest>.TopicName, null));
+        var configuration = new RequestBatcherConfiguration<TRequest>();
+        AddBatcherServices(services, optionsSnapshot, configuration.TopicName);
+        services.AddSingleton(configuration);
         RegisterHandlerDelegate<TRequest>(services, handlerLifetime);
         services.AddSingleton<RequestBatchCoordinator<TRequest>>();
         services.AddSingleton<IRequestBatcher<TRequest>>(
@@ -152,7 +152,7 @@ public static partial class RequestBatcherServiceCollectionExtensions
     private static void AddBatcherServices<TRequest>(
         IServiceCollection services,
         RequestBatchOptions<TRequest> options,
-        string topicName = RequestBatchCoordinator<TRequest>.TopicName)
+        string topicName)
     {
         services.AddSingleton(new RequestBatcherMetricsConfiguration(options.BatchSize));
         services.TryAddSingleton<RequestBatcherMetrics>();

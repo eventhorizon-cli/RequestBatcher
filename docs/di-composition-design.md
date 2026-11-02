@@ -11,6 +11,11 @@ container-owned singleton, separate from tracing. No nested provider is created.
 
 Each batcher registers immutable composition metadata: its topic name, public batcher name, and (for keyed batchers)
 validated options snapshot. Default coordinators continue to obtain their options through `IOptions<T>`.
+Every registration, default or named, creates one batcher configuration that generates and owns a unique GUID-suffixed
+topic name. The registration helper receives that name explicitly; the coordinator uses the same configuration for
+its producer and consumer. Queue isolation belongs to each batcher registration and does not rely on BufferQueue
+distinguishing item types or on public batcher names being globally unique. The application still shares one
+`IBufferQueue` entry point.
 The configuration creates one immutable `RequestBatcherMetadata` shared by the coordinator, adapters and consumer.
 It holds one short request type name shared by logs, metrics and traces, the batcher name, and precomputed trace name/tags. This is data
 only: Metrics and Tracing keep separate recording behavior, tag constants and resource ownership.
@@ -40,6 +45,9 @@ The coordinator becomes an internal implementation type. Consumers must use `IRe
 reference `RequestBatchCoordinator<TRequest>` directly; code using that concrete type must migrate. The implementation
 uses the already-required DI 10 abstractions on both target frameworks. Direct internal tests construct batcher
 configuration explicitly. Validate default/named and typed/delegate request-only/response batchers,
-coordinator/interface identity, option snapshots, all three handler lifetimes, and asynchronous scope disposal. Run the
-full unit suite on net8.0 and net10.0, SDK observability tests, and relevant correctness/overhead workloads. No change
-to metric names, histogram advice, trace boundaries, admission, or shutdown outcomes is intended.
+distinct topics across default registrations with different request types and named/default registrations of the same
+type, coordinator/interface identity, option snapshots, all three handler lifetimes, and asynchronous scope disposal.
+Internal topic names are not a public contract; generating them for all registrations does not change public names,
+service resolution, or options. Run the full unit suite on net8.0 and net10.0, SDK observability tests, and relevant
+correctness/overhead workloads. No change to metric names, histogram advice, trace boundaries, admission, or shutdown
+outcomes is intended.
