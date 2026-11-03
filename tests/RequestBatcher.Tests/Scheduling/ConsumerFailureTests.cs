@@ -35,9 +35,9 @@ public sealed class ConsumerFailureTests
         bufferQueue.Setup(candidate => candidate.GetProducer<PendingBatchRequest<int>>(
                 configuration.TopicName))
             .Returns(producer.Object);
-        bufferQueue.Setup(candidate => candidate.CreatePullConsumers<PendingBatchRequest<int>>(
-                It.IsAny<BufferPullConsumerOptions>(), 1))
-            .Returns([consumer.Object]);
+        bufferQueue.Setup(candidate => candidate.CreatePullConsumer<PendingBatchRequest<int>>(
+                It.IsAny<BufferPullConsumerOptions>()))
+            .Returns(consumer.Object);
 
         await using var metrics = new RequestBatcherMetrics([new(128)]);
         var coordinator = new RequestBatchCoordinator<int>(
@@ -78,14 +78,13 @@ public sealed class ConsumerFailureTests
                 configuration.TopicName))
             .Returns(producer);
         bufferQueue
-            .Setup(candidate => candidate.CreatePullConsumers<PendingBatchRequest<int>>(
+            .Setup(candidate => candidate.CreatePullConsumer<PendingBatchRequest<int>>(
                 It.Is<BufferPullConsumerOptions>(options =>
                     options.TopicName == configuration.TopicName &&
                     options.GroupName == RequestBatchCoordinator<int>.ConsumerGroupName &&
                     options.BatchSize == 128 &&
-                    options.AutoCommit),
-                1))
-            .Returns([consumer]);
+                    options.AutoCommit)))
+            .Returns(consumer);
 
         await using var metrics = new RequestBatcherMetrics([new(128)]);
         var coordinator = new RequestBatchCoordinator<int>(
@@ -163,9 +162,9 @@ public sealed class ConsumerFailureTests
                 configuration.TopicName))
             .Returns(producer.Object);
         bufferQueue
-            .Setup(candidate => candidate.CreatePullConsumers<PendingBatchRequest<int>>(
-                It.IsAny<BufferPullConsumerOptions>(), 1))
-            .Returns([consumer.Object]);
+            .Setup(candidate => candidate.CreatePullConsumer<PendingBatchRequest<int>>(
+                It.IsAny<BufferPullConsumerOptions>()))
+            .Returns(consumer.Object);
 
         await using var metrics = new RequestBatcherMetrics([new(128)]);
         RequestBatchCoordinator<int> coordinator;
@@ -252,14 +251,13 @@ public sealed class ConsumerFailureTests
                 configuration.TopicName))
             .Returns(producer.Object);
         bufferQueue
-            .Setup(candidate => candidate.CreatePullConsumers<PendingBatchRequest<int>>(
+            .Setup(candidate => candidate.CreatePullConsumer<PendingBatchRequest<int>>(
                 It.Is<BufferPullConsumerOptions>(options =>
                     options.TopicName == configuration.TopicName &&
                     options.GroupName == RequestBatchCoordinator<int>.ConsumerGroupName &&
                     options.BatchSize == 128 &&
-                    options.AutoCommit),
-                1))
-            .Returns([consumer.Object]);
+                    options.AutoCommit)))
+            .Returns(consumer.Object);
 
         await using var metrics = new RequestBatcherMetrics([new(128)]);
         var coordinator = new RequestBatchCoordinator<int>(
@@ -354,14 +352,13 @@ public sealed class ConsumerFailureTests
                 configuration.TopicName))
             .Returns(producer.Object);
         bufferQueue
-            .Setup(candidate => candidate.CreatePullConsumers<PendingBatchRequest<int>>(
+            .Setup(candidate => candidate.CreatePullConsumer<PendingBatchRequest<int>>(
                 It.Is<BufferPullConsumerOptions>(options =>
                     options.TopicName == configuration.TopicName &&
                     options.GroupName == RequestBatchCoordinator<int>.ConsumerGroupName &&
                     options.BatchSize == 128 &&
-                    options.AutoCommit),
-                1))
-            .Returns([consumer.Object]);
+                    options.AutoCommit)))
+            .Returns(consumer.Object);
 
         await using var metrics = new RequestBatcherMetrics([new(128)]);
         var coordinator = new RequestBatchCoordinator<int>(

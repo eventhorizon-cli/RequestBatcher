@@ -9,20 +9,17 @@ using RequestBatcher.PendingRequests;
 
 namespace RequestBatcher.Scheduling;
 
-internal sealed class BatchDispatchLoop<TRequest> : IDisposable
+internal sealed class BatchDispatchLoop<TRequest> : IAsyncDisposable
 {
     private readonly RequestBatchConsumer<TRequest> _batchConsumer;
     private readonly CancellationTokenSource _executionFailureCancellation = new();
     private readonly SemaphoreSlim _executionSlots;
-    private readonly object _inFlightLock = new();
     private readonly ILogger _logger;
+    private readonly int _maxConcurrency;
     private readonly RequestBatcherMetrics _metrics;
     private readonly RequestBatcherMetadata _metadata;
 
-    private TaskCompletionSource _drained = CreateCompletedSource();
     private Exception? _executionFailure;
-    private int _inFlightCount;
-    private int _disposed;
 
     public BatchDispatchLoop(
         RequestBatchHandler<TRequest> handler,
@@ -39,16 +36,9 @@ internal sealed class BatchDispatchLoop<TRequest> : IDisposable
         _batchConsumer = new RequestBatchConsumer<TRequest>(handler, logger, metadata, metrics);
         _executionSlots = new SemaphoreSlim(maxConcurrency, maxConcurrency);
         _logger = logger;
+        _maxConcurrency = maxConcurrency;
         _metrics = metrics;
         _metadata = metadata;
-    }
-
-    public Task DrainAsync()
-    {
-        lock (_inFlightLock)
-        {
-            return _drained.Task;
-        }
     }
 
     public async Task RunAsync(
@@ -60,6 +50,7 @@ internal sealed class BatchDispatchLoop<TRequest> : IDisposable
         using var dispatchCancellation = CancellationTokenSource.CreateLinkedTokenSource(
             cancellationToken,
             _executionFailureCancellation.Token);
+        var dispatchToken = dispatchCancellation.Token;
         using var backlogRegistration = _metrics.RegisterBacklog(
             consumer,
             _metadata.RequestTypeName,
@@ -68,12 +59,12 @@ internal sealed class BatchDispatchLoop<TRequest> : IDisposable
         try
         {
             await using var enumerator = consumer
-                .ConsumeAsync(dispatchCancellation.Token)
-                .GetAsyncEnumerator(dispatchCancellation.Token);
+                .ConsumeAsync(dispatchToken)
+                .GetAsyncEnumerator(dispatchToken);
 
             while (true)
             {
-                await _executionSlots.WaitAsync(dispatchCancellation.Token).ConfigureAwait(false);
+                await _executionSlots.WaitAsync(dispatchToken).ConfigureAwait(false);
                 var executionStarted = false;
                 try
                 {
@@ -109,13 +100,15 @@ internal sealed class BatchDispatchLoop<TRequest> : IDisposable
         }
     }
 
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
-        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        // The coordinator calls this once after awaiting RunAsync, so no new execution can acquire a permit.
+        for (var i = 0; i < _maxConcurrency; i++)
         {
-            return;
+            await _executionSlots.WaitAsync().ConfigureAwait(false);
         }
 
+        // Every execution has finished failure handling and returned its permit before resources are released.
         _executionFailureCancellation.Dispose();
         _executionSlots.Dispose();
     }
@@ -124,11 +117,9 @@ internal sealed class BatchDispatchLoop<TRequest> : IDisposable
         IReadOnlyList<PendingBatchRequest<TRequest>> pendingRequests,
         CancellationToken cancellationToken)
     {
-        TrackExecution();
         var processing = _batchConsumer.ExecuteAsync(pendingRequests, cancellationToken);
         if (processing.IsCompletedSuccessfully)
         {
-            CompleteExecution();
             _executionSlots.Release();
             return;
         }
@@ -151,45 +142,9 @@ internal sealed class BatchDispatchLoop<TRequest> : IDisposable
         }
         finally
         {
-            CompleteExecution();
             _executionSlots.Release();
         }
     }
 
     private Exception? GetExecutionFailure() => Volatile.Read(ref _executionFailure);
-
-    private void TrackExecution()
-    {
-        lock (_inFlightLock)
-        {
-            if (_inFlightCount == 0)
-            {
-                _drained = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            }
-
-            _inFlightCount++;
-        }
-    }
-
-    private void CompleteExecution()
-    {
-        TaskCompletionSource? drained = null;
-        lock (_inFlightLock)
-        {
-            _inFlightCount--;
-            if (_inFlightCount == 0)
-            {
-                drained = _drained;
-            }
-        }
-
-        drained?.TrySetResult();
-    }
-
-    private static TaskCompletionSource CreateCompletedSource()
-    {
-        var source = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        source.SetResult();
-        return source;
-    }
 }

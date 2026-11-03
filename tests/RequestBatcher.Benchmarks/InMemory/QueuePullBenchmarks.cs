@@ -70,16 +70,14 @@ public class QueuePullBenchmarks
         _provider = services.BuildServiceProvider();
         var queue = _provider.GetRequiredService<IBufferQueue>();
         _producer = queue.GetProducer<QueueItem>(TopicName);
-        _consumer = queue.CreatePullConsumers<QueueItem>(
-                new BufferPullConsumerOptions
-                {
-                    TopicName = TopicName,
-                    GroupName = $"queue-pull-benchmark-{Guid.NewGuid():N}",
-                    BatchSize = BatchSize,
-                    AutoCommit = true,
-                },
-                1)
-            .Single();
+        _consumer = queue.CreatePullConsumer<QueueItem>(
+            new BufferPullConsumerOptions
+            {
+                TopicName = TopicName,
+                GroupName = $"queue-pull-benchmark-{Guid.NewGuid():N}",
+                BatchSize = BatchSize,
+                AutoCommit = true,
+            });
         _items = Enumerable.Range(0, RequestCount)
             .Select(static id => new QueueItem(id))
             .ToArray();

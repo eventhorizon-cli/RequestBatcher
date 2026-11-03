@@ -109,16 +109,14 @@ public sealed class QueueRoutingTests
             .ToArray();
         await producer.ProduceAsync(items.AsMemory());
 
-        var consumer = queue.CreatePullConsumers<PendingBatchRequest<int>>(
-                new BufferPullConsumerOptions
-                {
-                    TopicName = TopicName,
-                    GroupName = $"routing-{Guid.NewGuid():N}",
-                    BatchSize = 1,
-                    AutoCommit = autoCommit,
-                },
-                1)
-            .Single();
+        var consumer = queue.CreatePullConsumer<PendingBatchRequest<int>>(
+            new BufferPullConsumerOptions
+            {
+                TopicName = TopicName,
+                GroupName = $"routing-{Guid.NewGuid():N}",
+                BatchSize = 1,
+                AutoCommit = autoCommit,
+            });
         using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         var consumed = new List<int>(itemsToConsume);
 

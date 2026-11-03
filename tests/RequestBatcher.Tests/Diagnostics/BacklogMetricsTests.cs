@@ -184,7 +184,7 @@ public sealed class BacklogMetricsTests
 
         using var capture = new Capture();
         await using var metrics = new RequestBatcherMetrics([new(1)]);
-        using var dispatchLoop = new BatchDispatchLoop<int>(
+        await using var dispatchLoop = new BatchDispatchLoop<int>(
             (_, _) => ValueTask.CompletedTask,
             1,
             NullLogger.Instance,

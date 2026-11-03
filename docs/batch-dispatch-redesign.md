@@ -72,7 +72,7 @@ count so I/O-bound services can choose enough key-local queues for their
 workload.
 
 BufferQueue has `effectivePartitionCount` memory partitions. RequestBatcher
-creates one pull consumer for the group, allowing that consumer to own all
+creates one pull consumer through `CreatePullConsumer` for the group, allowing that consumer to own all
 partitions. BufferQueue chooses the readable partition for each pull, which
 lets one global execution window balance work across partitions instead of
 reserving one handler task per partition.
@@ -150,8 +150,8 @@ workload and sampling matrix, reporting timing and managed allocation separately
 
 ## BatchDispatchLoop
 
-`BatchDispatchLoop` is the queue-facing scheduling loop. Its implementation
-uses a semaphore with `H` permits and an in-flight completion tracker.
+`BatchDispatchLoop` is the queue-facing scheduling loop. A semaphore with `H`
+permits both bounds execution and accounts for batches that have not finished cleanup.
 
 1. Wait for one execution permit.
 2. Advance the BufferQueue async enumerator once. The consumer has
@@ -159,14 +159,14 @@ uses a semaphore with `H` permits and an in-flight completion tracker.
 3. Hand BufferQueue's `IReadOnlyList` snapshot directly to an execution task.
 4. Invoke the handler-batch async method on the dispatch call path. Return to
    step 1 when it completes or reaches its first incomplete asynchronous wait.
-5. The execution task completes each request from the handler outcome, removes
-   itself from the in-flight tracker, and releases its permit in `finally`.
+5. The execution task completes each request from the handler outcome and
+   releases its permit in `finally`, after completion and failure handling.
 
 When `RequestBatchConsumer.ExecuteAsync` returns a synchronously completed
 `ValueTask`, the dispatch loop completes the execution inline and releases the
 permit without creating an additional async `Task` wrapper. An incomplete
 `ValueTask` uses the asynchronous completion path. Both paths keep the same
-exactly-once request completion, in-flight tracking, failure propagation, and
+exactly-once request completion, failure propagation, and
 permit-release behavior.
 
 There is no `Task.WhenAll` in the normal dispatch path and no per-superbatch
@@ -174,11 +174,32 @@ barrier. A handler suspended on an incomplete asynchronous wait holds only its
 own execution permit; batches already running in other slots complete normally.
 Synchronous work before that suspension, including handler construction and
 scope resolution, delays the next pull even if other execution slots are free.
-The dispatch loop does not offload each handler to the ThreadPool. The in-flight tracker is used only to
-observe terminal drain and task failures without creating a second queue.
+The dispatch loop does not offload each handler to the ThreadPool.
 
-`RequestBatchConsumer` reuses the queue's immutable pending-item snapshot when
-all requests enter processing. On the first skipped request, it creates a
+After stopping admission and waiting for accepted requests to finish, the
+coordinator cancels and awaits `RunAsync` before disposing the dispatch loop.
+`BatchDispatchLoop.DisposeAsync` then acquires all `H` permits without a
+cancellation token and disposes the semaphore and failure cancellation source.
+No new batch can acquire a permit once the loop has exited, so obtaining every
+permit proves that all started executions have finished using those resources.
+Disposal retains the permits until the semaphore is disposed. The coordinator's
+public disposal operation already serializes concurrent and repeated calls and
+disposes its dispatcher exactly once. The internal dispatcher therefore needs
+no disposal lock or cached disposal task. There is no separate `DrainAsync`,
+in-flight counter, or per-batch completion source.
+
+The linked dispatch token is created once per `RunAsync`, combining the owner's
+stop token with infrastructure-failure cancellation. It wakes a loop waiting
+for a permit or queue data. Cancellation is a notification, not an execution
+join: a batch may still be completing requests or reporting failure after the
+loop exits. Handler exceptions are delivered to their requests and do not stop
+dispatch; an unexpected execution failure records the original exception and
+cancels the loop. Handler invocations retain the owner's token, so an unrelated
+infrastructure failure does not cancel already-dispatched handlers.
+
+`RequestBatchConsumer` reads the queue's immutable pending-item snapshot by index,
+without allocating an interface enumerator, and reuses it when all requests
+enter processing. On the first skipped request, it creates a
 filtered list containing the requests already started, then appends any later
 requests that enter processing. The returned collection contains only active
 requests, and its `Count` always represents the number to process; callers do
@@ -195,11 +216,17 @@ retained across subsequent dispatches. The delayed-downstream benchmark checks
 allocation and timing under both sustained single/batch submissions and bursts.
 
 The coordinator keeps accepted requests in a concurrent pending registry so
-terminal request completion does not take the lifecycle lock for every item.
+terminal request completion does not take the lifecycle lock.
 Admission and stop transitions still use the lifecycle lock. A finished item
-is removed from the registry and decrements the pending count atomically; only
-the transition from one pending item to zero re-enters the lifecycle lock to
-capture and signal the current drain source. Consumer-failure snapshots may
+is removed from the registry and decrements the pending count atomically.
+The pending-request drain signal uses one completion source for the coordinator's
+entire lifetime and is signaled only after admission stops and the pending count reaches zero.
+Disposal publishes the stopping state with an interlocked exchange before
+checking the count; a last-item callback checks
+it again after observing the stopped admission state. This recheck prevents a
+delayed callback from an earlier idle interval from signaling while newer
+accepted requests remain. Idle-to-active transitions allocate no drain source.
+Consumer-failure snapshots may
 observe requests that finish concurrently, and each request's terminal state
 still prevents duplicate completion or capacity release.
 
@@ -328,7 +355,9 @@ lifecycle tests cover disposal before background startup and subsequent drain.
   terminal result, then cancels the dispatch loop. A loop blocked waiting for an
   execution permit observes this cancellation. Running handlers are allowed to
   report their actual outcome before shutdown completes. Disposal then waits for
-  consumer supervision to finish and releases coordinator-owned resources.
+  the dispatch loop and consumer supervision to finish, and asynchronously
+  disposes the dispatcher after every execution permit has been returned.
+  Only then are coordinator-owned resources released.
 - `DisposeAsync` is the sole public shutdown entry point. Concurrent and repeated
   calls share one task, including its failure. DI owns disposal in registered
   applications; no separate stop or restart operation is exposed.
@@ -353,7 +382,20 @@ The implementation must add or adjust deterministic tests for:
 - a slow batch not blocking a later batch that can use a different free slot;
 - queue backpressure while every execution slot is occupied;
 - handler failure, enumeration failure, cancellation, and stop/drain behavior;
+- cancellation while all execution permits are occupied, with disposal still
+  waiting for handlers and completion callbacks after the loop exits;
+- original infrastructure-failure reporting without waiting for unrelated
+  active handlers, followed by asynchronous cleanup and repeated coordinator disposal;
+- repeated idle/active admission cycles followed by disposal with pending work;
+- indexed batch selection failures and exactly-once completion of the started prefix;
 - removal of ordering guarantees from the public contract and tests.
+
+Public APIs, framework targets, capacity limits, cancellation boundaries, and
+in-process durability are unchanged. Validation compares the same synchronous
+single/explicit submission workloads before and after the change, plus the
+existing 4,096-request dispatch-capacity matrix with synchronous and 20 ms
+handlers. Response stress tests cover concurrent single, explicit, and mixed
+submissions, response correlation, collection order, and exactly-once handling.
 
 ## Evaluation Evidence
 
@@ -362,6 +404,9 @@ varies partition count independently for single and explicit submissions while
 holding batch size and handler concurrency fixed. The
 [queue pull evaluation](evaluations/queue-pull-capacity/README.md) checks dispatch
 capacity with asynchronous workloads.
+The [dispatch overhead evaluation](evaluations/dispatch-loop-overhead/README.md)
+measures semaphore-based disposal bookkeeping with synchronous single/explicit
+submissions and the 20 ms dispatch-capacity matrix on .NET 10.
 These measurements are evidence for tradeoffs, not throughput guarantees.
 The [paced-arrival evaluation](evaluations/arrival-scheduling/README.md) adds
 caller latency, occupied-slot wall time, batch formation, and PostgreSQL/Redis

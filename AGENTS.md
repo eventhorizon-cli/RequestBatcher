@@ -75,6 +75,21 @@ You are an AI coding assistant for this repository.
 - Do not decompile NuGet package assemblies. When implementation details of a dependency are necessary, inspect the
   corresponding source repository at the commit recorded in the package metadata.
 
+## Performance-sensitive code
+
+- RequestBatcher is performance-sensitive. Review per-request and per-batch CPU, allocation, and synchronization costs
+  in admission, queue adapters, dispatch, handler adapters, response completion, cancellation bookkeeping, and diagnostics.
+- In these hot paths, use indexed `for` loops for arrays, spans, and collections with O(1) indexed access, such as
+  `List<T>` and the queue's `IReadOnlyList<T>` snapshots. Do not use `foreach` for these indexable collections.
+  Enumeration through interfaces such as `IEnumerable<T>` or `IReadOnlyList<T>` can allocate or box an enumerator.
+- Direct `foreach` over arrays and spans can be lowered to indexed loops; concrete collections with value-type
+  enumerators can also avoid enumerator allocation. Preserve native enumeration for non-indexable collections and
+  asynchronous streams when required. Do not introduce `ToArray()`, `ToList()`, repeated `ElementAt()` calls, or unsafe
+  access merely to replace a loop with indexed access; preserve streaming, cancellation, and backpressure semantics.
+- Check the collection's static type and iteration behavior when reviewing a hot-path loop. Verify performance changes
+  with the comparable benchmarks and correctness stress tests required below; a syntax change alone does not establish
+  a performance gain. Startup, service registration, tests, and samples do not need the same loop-style restriction.
+
 ## Documentation
 
 - When maintaining a single language version of a document, use English. Generate a separate `zh-CN` Chinese version

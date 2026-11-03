@@ -474,6 +474,61 @@ public sealed class RequestBatchCoordinatorTests
     }
 
     [Fact]
+    public async Task DisposeAsync_AfterCompletedWaves_DrainsNewSingleAndExplicitSubmissions()
+    {
+        const int completedRequests = 32;
+        var handlerStarted = NewSource();
+        var releaseHandler = NewSource();
+        var handled = new ConcurrentDictionary<int, int>();
+        await using var provider = CreateProvider<int>(async (requests, cancellationToken) =>
+        {
+            foreach (var request in requests)
+            {
+                handled.AddOrUpdate(request, 1, static (_, count) => count + 1);
+            }
+
+            if (requests.Contains(completedRequests))
+            {
+                handlerStarted.SetResult();
+                await releaseHandler.Task.WaitAsync(cancellationToken);
+            }
+        }, options => options.MaxPendingRequests = 1);
+        var coordinator = provider.GetRequiredService<RequestBatchCoordinator<int>>();
+
+        for (var i = 0; i < completedRequests; i++)
+        {
+            await coordinator.ExecuteAsync(i).WaitAsync(TimeSpan.FromSeconds(5));
+        }
+
+        var single = coordinator.ExecuteAsync(completedRequests);
+        await handlerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var batch = coordinator.ExecuteAsync(new[] { completedRequests + 1, completedRequests + 2 });
+        var disposal = coordinator.DisposeAsync().AsTask();
+
+        try
+        {
+            Assert.False(disposal.IsCompleted);
+            Assert.False(single.IsCompleted);
+            Assert.False(batch.IsCompleted);
+            await Assert.ThrowsAsync<ObjectDisposedException>(
+                () => coordinator.ExecuteAsync(completedRequests + 3));
+        }
+        finally
+        {
+            releaseHandler.TrySetResult();
+        }
+
+        await Task.WhenAll(single, batch, disposal).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(completedRequests + 3, handled.Count);
+        for (var i = 0; i < completedRequests + 3; i++)
+        {
+            Assert.Equal(1, handled[i]);
+        }
+
+        Assert.Same(disposal, coordinator.DisposeAsync().AsTask());
+    }
+
+    [Fact]
     public async Task DisposeAsync_ConcurrentAndRepeatedCalls_ShareDrainAndRejectNewWork()
     {
         var handlerStarted = NewSource();

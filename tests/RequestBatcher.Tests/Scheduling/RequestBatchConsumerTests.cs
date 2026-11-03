@@ -182,11 +182,11 @@ public sealed class RequestBatchConsumerTests : IAsyncLifetime
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task ExecuteAsync_EnumerationFailsAfterStartedRequests_FaultsOnlyStartedRequests(
+    public async Task ExecuteAsync_BatchSelectionFailsAfterStartedRequests_FaultsOnlyStartedRequests(
         bool includeCanceledRequest)
     {
         using var cancellation = new CancellationTokenSource();
-        var expected = new EnumerationTestException();
+        var expected = new BatchSelectionTestException();
         var finishedCounts = new int[3];
         var first = CreatePendingRequest(1, CancellationToken.None, finishedCounts);
         var unvisited = CreatePendingRequest(3, CancellationToken.None, finishedCounts);
@@ -223,12 +223,12 @@ public sealed class RequestBatchConsumerTests : IAsyncLifetime
             cancellation.Cancel();
         }
 
-        var actual = await Assert.ThrowsAsync<EnumerationTestException>(
+        var actual = await Assert.ThrowsAsync<BatchSelectionTestException>(
             () => subject.ExecuteAsync(batch.Object, CancellationToken.None).AsTask());
 
         Assert.Same(expected, actual);
         Assert.Equal(0, Volatile.Read(ref handlerInvocationCount));
-        Assert.Same(expected, await Assert.ThrowsAsync<EnumerationTestException>(
+        Assert.Same(expected, await Assert.ThrowsAsync<BatchSelectionTestException>(
             () => first.Completion));
         Assert.Equal(1, Volatile.Read(ref finishedCounts[0]));
 
@@ -344,32 +344,22 @@ public sealed class RequestBatchConsumerTests : IAsyncLifetime
         var batch = new Mock<IReadOnlyList<PendingBatchRequest<int>>>(MockBehavior.Strict);
         batch.Setup(candidate => candidate.Count).Returns(requests.Count);
         batch.Setup(candidate => candidate[It.IsAny<int>()])
-            .Returns((int index) => requests[index]);
-        batch.Setup(candidate => candidate.GetEnumerator())
-            .Returns(() => EnumerateUntilFailure(requests, throwAtIndex, exception).GetEnumerator());
+            .Returns((int index) =>
+            {
+                if (index == throwAtIndex)
+                {
+                    throw exception;
+                }
+
+                return requests[index];
+            });
         return batch;
     }
 
     private static TaskCompletionSource NewSource() =>
         new(TaskCreationOptions.RunContinuationsAsynchronously);
 
-    private static IEnumerable<PendingBatchRequest<int>> EnumerateUntilFailure(
-        IReadOnlyList<PendingBatchRequest<int>> requests,
-        int throwAtIndex,
-        Exception exception)
-    {
-        for (var index = 0; index < requests.Count; index++)
-        {
-            if (index == throwAtIndex)
-            {
-                throw exception;
-            }
-
-            yield return requests[index];
-        }
-    }
-
     private sealed class TestHandlerException : Exception;
 
-    private sealed class EnumerationTestException : Exception;
+    private sealed class BatchSelectionTestException : Exception;
 }

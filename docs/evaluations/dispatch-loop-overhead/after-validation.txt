@@ -1,0 +1,24 @@
+Dispatch validation: Concurrency=8, Partitions=1, DelayMs=0, Waves=49, RequestsPerWave=4096, CallsPerWave=128..128, MeanBatchSize=32.000, Peak=1, MeanHandlerMs=0.000739, MeanWaveMs=1.187022, HandlerOccupancy=0.997%, ExactlyOnce=True
+Dispatch validation: Concurrency=8, Partitions=1, DelayMs=0, Waves=49, RequestsPerWave=4096, CallsPerWave=128..128, MeanBatchSize=32.000, Peak=1, MeanHandlerMs=0.000735, MeanWaveMs=1.173380, HandlerOccupancy=1.002%, ExactlyOnce=True
+Dispatch validation: Concurrency=8, Partitions=1, DelayMs=20, Waves=49, RequestsPerWave=4096, CallsPerWave=128..128, MeanBatchSize=32.000, Peak=8, MeanHandlerMs=20.981237, MeanWaveMs=338.436039, HandlerOccupancy=99.192%, ExactlyOnce=True
+Dispatch validation: Concurrency=8, Partitions=1, DelayMs=20, Waves=49, RequestsPerWave=4096, CallsPerWave=128..128, MeanBatchSize=32.000, Peak=8, MeanHandlerMs=21.031710, MeanWaveMs=339.334563, HandlerOccupancy=99.167%, ExactlyOnce=True
+Dispatch validation: Concurrency=8, Partitions=16, DelayMs=0, Waves=49, RequestsPerWave=4096, CallsPerWave=128..128, MeanBatchSize=32.000, Peak=1, MeanHandlerMs=0.000756, MeanWaveMs=1.235114, HandlerOccupancy=0.979%, ExactlyOnce=True
+Dispatch validation: Concurrency=8, Partitions=16, DelayMs=0, Waves=49, RequestsPerWave=4096, CallsPerWave=128..128, MeanBatchSize=32.000, Peak=1, MeanHandlerMs=0.000729, MeanWaveMs=1.213798, HandlerOccupancy=0.961%, ExactlyOnce=True
+Dispatch validation: Concurrency=8, Partitions=16, DelayMs=20, Waves=49, RequestsPerWave=4096, CallsPerWave=128..128, MeanBatchSize=32.000, Peak=8, MeanHandlerMs=21.044907, MeanWaveMs=339.650494, HandlerOccupancy=99.137%, ExactlyOnce=True
+Dispatch validation: Concurrency=8, Partitions=16, DelayMs=20, Waves=49, RequestsPerWave=4096, CallsPerWave=128..128, MeanBatchSize=32.000, Peak=8, MeanHandlerMs=21.040047, MeanWaveMs=339.623021, HandlerOccupancy=99.122%, ExactlyOnce=True
+Dispatch validation: Concurrency=32, Partitions=1, DelayMs=0, Waves=49, RequestsPerWave=4096, CallsPerWave=128..128, MeanBatchSize=32.000, Peak=1, MeanHandlerMs=0.000715, MeanWaveMs=1.141854, HandlerOccupancy=0.251%, ExactlyOnce=True
+Dispatch validation: Concurrency=32, Partitions=1, DelayMs=0, Waves=49, RequestsPerWave=4096, CallsPerWave=128..128, MeanBatchSize=32.000, Peak=1, MeanHandlerMs=0.000724, MeanWaveMs=1.151082, HandlerOccupancy=0.252%, ExactlyOnce=True
+Dispatch validation: Concurrency=32, Partitions=1, DelayMs=20, Waves=49, RequestsPerWave=4096, CallsPerWave=128..128, MeanBatchSize=32.000, Peak=32, MeanHandlerMs=21.131943, MeanWaveMs=86.811466, HandlerOccupancy=97.369%, ExactlyOnce=True
+Dispatch validation: Concurrency=32, Partitions=1, DelayMs=20, Waves=49, RequestsPerWave=4096, CallsPerWave=128..128, MeanBatchSize=32.000, Peak=32, MeanHandlerMs=21.108619, MeanWaveMs=86.642810, HandlerOccupancy=97.451%, ExactlyOnce=True
+Dispatch validation: Concurrency=32, Partitions=16, DelayMs=0, Waves=49, RequestsPerWave=4096, CallsPerWave=128..128, MeanBatchSize=32.000, Peak=1, MeanHandlerMs=0.000703, MeanWaveMs=1.188850, HandlerOccupancy=0.236%, ExactlyOnce=True
+Dispatch validation: Concurrency=32, Partitions=16, DelayMs=0, Waves=49, RequestsPerWave=4096, CallsPerWave=128..128, MeanBatchSize=32.000, Peak=1, MeanHandlerMs=0.000725, MeanWaveMs=1.183653, HandlerOccupancy=0.245%, ExactlyOnce=True
+Dispatch validation: Concurrency=32, Partitions=16, DelayMs=20, Waves=49, RequestsPerWave=4096, CallsPerWave=128..128, MeanBatchSize=32.000, Peak=32, MeanHandlerMs=21.034688, MeanWaveMs=86.790130, HandlerOccupancy=96.945%, ExactlyOnce=True
+Dispatch validation: Concurrency=32, Partitions=16, DelayMs=20, Waves=49, RequestsPerWave=4096, CallsPerWave=128..128, MeanBatchSize=32.000, Peak=32, MeanHandlerMs=21.064116, MeanWaveMs=86.462727, HandlerOccupancy=97.448%, ExactlyOnce=True
+Dispatch overhead validation: BatchSize=1, Waves=16485, RequestsPerWave=1024, ExactlyOnce=True, DispatchBounds=True
+Dispatch overhead validation: BatchSize=1, Waves=16485, RequestsPerWave=1024, ExactlyOnce=True, DispatchBounds=True
+Dispatch overhead validation: BatchSize=1, Waves=65637, RequestsPerWave=1024, ExactlyOnce=True, DispatchBounds=True
+Dispatch overhead validation: BatchSize=1, Waves=65637, RequestsPerWave=1024, ExactlyOnce=True, DispatchBounds=True
+Dispatch overhead validation: BatchSize=32, Waves=16485, RequestsPerWave=1024, ExactlyOnce=True, DispatchBounds=True
+Dispatch overhead validation: BatchSize=32, Waves=32869, RequestsPerWave=1024, ExactlyOnce=True, DispatchBounds=True
+Dispatch overhead validation: BatchSize=32, Waves=65637, RequestsPerWave=1024, ExactlyOnce=True, DispatchBounds=True
+Dispatch overhead validation: BatchSize=32, Waves=65637, RequestsPerWave=1024, ExactlyOnce=True, DispatchBounds=True

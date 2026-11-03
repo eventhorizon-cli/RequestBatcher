@@ -27,7 +27,7 @@ public sealed class BatchDispatchLoopTests : IAsyncLifetime
             Interlocked.Increment(ref consumeCount) == 1
                 ? firstSequence.Sequence.Object
                 : secondSequence.Sequence.Object);
-        using var subject = new BatchDispatchLoop<int>(
+        await using var subject = new BatchDispatchLoop<int>(
             (_, _) => ValueTask.CompletedTask,
             1,
             NullLogger.Instance,
@@ -56,21 +56,115 @@ public sealed class BatchDispatchLoopTests : IAsyncLifetime
     }
 
     [Fact]
-    public async Task RunAsync_ExhaustedConsumer_DrainsAfterBlockedHandlerCompletes()
+    public async Task RunAsync_CanceledWithExecutionSlotsOccupied_DisposalWaitsForHandlers()
+    {
+        var firstHandlerStarted = NewSource();
+        var secondHandlerStarted = NewSource();
+        var releaseFirstHandler = NewSource();
+        var releaseSecondHandler = NewSource();
+        var thirdBatchPullRequested = NewSource();
+        var requests = new[]
+        {
+            new PendingBatchRequest<int>(1, default, _ => { }),
+            new PendingBatchRequest<int>(2, default, _ => { }),
+            new PendingBatchRequest<int>(3, default, _ => { })
+        };
+        var consumer = CreateConsumer(cancellationToken =>
+            YieldThreeBatches(
+                [requests[0]],
+                [requests[1]],
+                [requests[2]],
+                thirdBatchPullRequested,
+                cancellationToken));
+        using var cancellation = new CancellationTokenSource();
+        var subject = new BatchDispatchLoop<int>(
+            async (batchRequests, _) =>
+            {
+                switch (Assert.Single(batchRequests))
+                {
+                    case 1:
+                        firstHandlerStarted.SetResult();
+                        await releaseFirstHandler.Task;
+                        break;
+                    case 2:
+                        secondHandlerStarted.SetResult();
+                        await releaseSecondHandler.Task;
+                        break;
+                }
+            },
+            2,
+            NullLogger.Instance,
+            new RequestBatcherMetadata("Int32"),
+            _metrics);
+
+        Task? disposalTask = null;
+        Task DisposeSubjectAsync() => disposalTask ??= subject.DisposeAsync().AsTask();
+
+        var running = subject.RunAsync(consumer.Object, cancellation.Token);
+        try
+        {
+            await firstHandlerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await secondHandlerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.False(thirdBatchPullRequested.Task.IsCompleted);
+
+            cancellation.Cancel();
+            await running.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.False(thirdBatchPullRequested.Task.IsCompleted);
+
+            var disposing = DisposeSubjectAsync();
+            Assert.False(disposing.IsCompleted);
+            Assert.All(requests, request => Assert.False(request.Completion.IsCompleted));
+
+            releaseFirstHandler.TrySetResult();
+            releaseSecondHandler.TrySetResult();
+            foreach (var request in requests.Take(2))
+            {
+                await request.Completion.WaitAsync(TimeSpan.FromSeconds(5));
+            }
+
+            await disposing.WaitAsync(TimeSpan.FromSeconds(5));
+            consumer.VerifyAll();
+        }
+        finally
+        {
+            releaseFirstHandler.TrySetResult();
+            releaseSecondHandler.TrySetResult();
+            cancellation.Cancel();
+            if (!running.IsCompleted)
+            {
+                await running.WaitAsync(TimeSpan.FromSeconds(5));
+            }
+
+            await DisposeSubjectAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        }
+    }
+
+    [Fact]
+    public async Task DisposeAsync_FinishCallbackBlocks_DisposalWaitsAfterCompletionPublished()
     {
         var handlerStarted = NewSource();
         var releaseHandler = NewSource();
+        var finishCallbackStarted = NewSource();
+        using var releaseFinishCallback = new ManualResetEventSlim();
         var finishCount = 0;
         var request = new PendingBatchRequest<int>(
             1,
             default,
-            _ => Interlocked.Increment(ref finishCount));
+            _ =>
+            {
+                Interlocked.Increment(ref finishCount);
+                finishCallbackStarted.SetResult();
+                if (!releaseFinishCallback.Wait(TimeSpan.FromSeconds(5)))
+                {
+                    throw new TimeoutException("The test did not release the completion callback.");
+                }
+            });
         var sequence = CreateSingleItemSequence(request);
         var consumer = CreateConsumer(_ => sequence.Sequence.Object);
-        using var subject = new BatchDispatchLoop<int>(
-            async (requests, _) =>
+        using var cancellation = new CancellationTokenSource();
+        var subject = new BatchDispatchLoop<int>(
+            async (_, _) =>
             {
-                Assert.Equal(1, Assert.Single(requests));
                 handlerStarted.SetResult();
                 await releaseHandler.Task;
             },
@@ -79,28 +173,134 @@ public sealed class BatchDispatchLoopTests : IAsyncLifetime
             new RequestBatcherMetadata("Int32"),
             _metrics);
 
-        var running = subject.RunAsync(consumer.Object, CancellationToken.None);
-        await handlerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        var draining = subject.DrainAsync();
+        Task? disposalTask = null;
+        Task DisposeSubjectAsync() => disposalTask ??= subject.DisposeAsync().AsTask();
 
-        await running.WaitAsync(TimeSpan.FromSeconds(5));
-        sequence.Sequence.Verify(
-            candidate => candidate.GetAsyncEnumerator(It.IsAny<CancellationToken>()),
-            Times.Once);
-        sequence.Enumerator.Verify(candidate => candidate.MoveNextAsync(), Times.Exactly(2));
-        sequence.Enumerator.VerifyGet(candidate => candidate.Current, Times.Once);
-        sequence.Enumerator.Verify(candidate => candidate.DisposeAsync(), Times.Once);
-        Assert.False(request.Completion.IsCompleted);
-        Assert.False(draining.IsCompleted);
+        var running = subject.RunAsync(consumer.Object, cancellation.Token);
+        try
+        {
+            await handlerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            releaseHandler.TrySetResult();
+            await finishCallbackStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.True(request.Completion.IsCompletedSuccessfully);
 
-        releaseHandler.SetResult();
-        await request.Completion.WaitAsync(TimeSpan.FromSeconds(5));
-        await draining.WaitAsync(TimeSpan.FromSeconds(5));
+            await running.WaitAsync(TimeSpan.FromSeconds(5));
+            sequence.Enumerator.Verify(candidate => candidate.MoveNextAsync(), Times.Exactly(2));
+            sequence.Enumerator.Verify(candidate => candidate.DisposeAsync(), Times.Once);
 
-        Assert.Equal(1, Volatile.Read(ref finishCount));
-        consumer.Verify(
-            candidate => candidate.ConsumeAsync(It.IsAny<CancellationToken>()),
-            Times.Once);
+            var disposing = DisposeSubjectAsync();
+            Assert.False(disposing.IsCompleted);
+
+            releaseFinishCallback.Set();
+            await disposing.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(1, Volatile.Read(ref finishCount));
+            consumer.VerifyAll();
+        }
+        finally
+        {
+            releaseHandler.TrySetResult();
+            releaseFinishCallback.Set();
+            cancellation.Cancel();
+            if (!running.IsCompleted)
+            {
+                await running.WaitAsync(TimeSpan.FromSeconds(5));
+            }
+
+            await DisposeSubjectAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        }
+    }
+
+    [Fact]
+    public async Task RunAsync_CompletionCallbackFails_ReportsOriginalFailureAndWaitsForOtherHandler()
+    {
+        var firstHandlerStarted = NewSource();
+        var secondHandlerStarted = NewSource();
+        var releaseFirstHandler = NewSource();
+        var releaseSecondHandler = NewSource();
+        var secondBatchPullRequested = NewSource();
+        var expected = new CompletionCallbackTestException();
+        var firstHandlerToken = new TaskCompletionSource<CancellationToken>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var failingFinishCount = 0;
+        var firstRequest = new PendingBatchRequest<int>(1, default, _ => { });
+        var secondRequest = new PendingBatchRequest<int>(
+            2,
+            default,
+            _ =>
+            {
+                Interlocked.Increment(ref failingFinishCount);
+                throw expected;
+            });
+        var consumer = CreateConsumer(cancellationToken =>
+            YieldTwoBatches(
+                [firstRequest],
+                [secondRequest],
+                secondBatchPullRequested,
+                cancellationToken));
+        using var cancellation = new CancellationTokenSource();
+        var subject = new BatchDispatchLoop<int>(
+            async (requests, handlerCancellationToken) =>
+            {
+                switch (Assert.Single(requests))
+                {
+                    case 1:
+                        firstHandlerToken.TrySetResult(handlerCancellationToken);
+                        firstHandlerStarted.SetResult();
+                        await releaseFirstHandler.Task;
+                        break;
+                    case 2:
+                        secondHandlerStarted.SetResult();
+                        await releaseSecondHandler.Task;
+                        break;
+                }
+            },
+            2,
+            NullLogger.Instance,
+            new RequestBatcherMetadata("Int32"),
+            _metrics);
+
+        Task? disposalTask = null;
+        Task DisposeSubjectAsync() => disposalTask ??= subject.DisposeAsync().AsTask();
+
+        var running = subject.RunAsync(consumer.Object, cancellation.Token);
+        try
+        {
+            await firstHandlerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await secondBatchPullRequested.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await secondHandlerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            releaseSecondHandler.TrySetResult();
+
+            var actual = await Assert.ThrowsAsync<CompletionCallbackTestException>(
+                () => running.WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.Same(expected, actual);
+            var activeHandlerToken = await firstHandlerToken.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(cancellation.Token, activeHandlerToken);
+            Assert.False(activeHandlerToken.IsCancellationRequested);
+            Assert.False(cancellation.IsCancellationRequested);
+            Assert.False(firstRequest.Completion.IsCompleted);
+            Assert.True(secondRequest.Completion.IsCompletedSuccessfully);
+            Assert.Equal(1, Volatile.Read(ref failingFinishCount));
+
+            var disposing = DisposeSubjectAsync();
+            Assert.False(disposing.IsCompleted);
+
+            releaseFirstHandler.TrySetResult();
+            await firstRequest.Completion.WaitAsync(TimeSpan.FromSeconds(5));
+            await disposing.WaitAsync(TimeSpan.FromSeconds(5));
+            consumer.VerifyAll();
+        }
+        finally
+        {
+            releaseFirstHandler.TrySetResult();
+            releaseSecondHandler.TrySetResult();
+            cancellation.Cancel();
+            if (!running.IsCompleted)
+            {
+                await running.WaitAsync(TimeSpan.FromSeconds(5));
+            }
+
+            await DisposeSubjectAsync().WaitAsync(TimeSpan.FromSeconds(5));
+        }
     }
 
     [Fact]
@@ -118,7 +318,7 @@ public sealed class BatchDispatchLoopTests : IAsyncLifetime
                 secondBatchPullRequested,
                 cancellationToken));
         using var cancellation = new CancellationTokenSource();
-        using var subject = new BatchDispatchLoop<int>(
+        await using var subject = new BatchDispatchLoop<int>(
             async (requests, _) =>
             {
                 if (Assert.Single(requests) == 1)
@@ -133,17 +333,26 @@ public sealed class BatchDispatchLoopTests : IAsyncLifetime
             _metrics);
 
         var running = subject.RunAsync(consumer.Object, cancellation.Token);
-        await firstHandlerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        try
+        {
+            await firstHandlerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
-        Assert.False(secondBatchPullRequested.Task.IsCompleted);
+            Assert.False(secondBatchPullRequested.Task.IsCompleted);
 
-        releaseFirstHandler.SetResult();
-        await secondBatchPullRequested.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        await secondRequest.Completion.WaitAsync(TimeSpan.FromSeconds(5));
+            releaseFirstHandler.TrySetResult();
+            await secondBatchPullRequested.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await secondRequest.Completion.WaitAsync(TimeSpan.FromSeconds(5));
 
-        cancellation.Cancel();
-        await running.WaitAsync(TimeSpan.FromSeconds(5));
-        consumer.VerifyAll();
+            cancellation.Cancel();
+            await running.WaitAsync(TimeSpan.FromSeconds(5));
+            consumer.VerifyAll();
+        }
+        finally
+        {
+            releaseFirstHandler.TrySetResult();
+            cancellation.Cancel();
+            await running.WaitAsync(TimeSpan.FromSeconds(5));
+        }
     }
 
     [Fact]
@@ -166,7 +375,7 @@ public sealed class BatchDispatchLoopTests : IAsyncLifetime
                 thirdBatchPullRequested,
                 cancellationToken));
         using var cancellation = new CancellationTokenSource();
-        using var subject = new BatchDispatchLoop<int>(
+        await using var subject = new BatchDispatchLoop<int>(
             async (requests, _) =>
             {
                 switch (Assert.Single(requests))
@@ -190,25 +399,35 @@ public sealed class BatchDispatchLoopTests : IAsyncLifetime
             _metrics);
 
         var running = subject.RunAsync(consumer.Object, cancellation.Token);
-        await firstHandlerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        await secondHandlerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        try
+        {
+            await firstHandlerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await secondHandlerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
-        Assert.False(thirdBatchPullRequested.Task.IsCompleted);
+            Assert.False(thirdBatchPullRequested.Task.IsCompleted);
 
-        releaseSecondHandler.SetResult();
-        await thirdBatchPullRequested.Task.WaitAsync(TimeSpan.FromSeconds(5));
-        await thirdHandlerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            releaseSecondHandler.TrySetResult();
+            await thirdBatchPullRequested.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await thirdHandlerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
 
-        Assert.False(firstRequest.Completion.IsCompleted);
+            Assert.False(firstRequest.Completion.IsCompleted);
 
-        releaseFirstHandler.SetResult();
-        await firstRequest.Completion.WaitAsync(TimeSpan.FromSeconds(5));
-        await secondRequest.Completion.WaitAsync(TimeSpan.FromSeconds(5));
-        await thirdRequest.Completion.WaitAsync(TimeSpan.FromSeconds(5));
+            releaseFirstHandler.TrySetResult();
+            await firstRequest.Completion.WaitAsync(TimeSpan.FromSeconds(5));
+            await secondRequest.Completion.WaitAsync(TimeSpan.FromSeconds(5));
+            await thirdRequest.Completion.WaitAsync(TimeSpan.FromSeconds(5));
 
-        cancellation.Cancel();
-        await running.WaitAsync(TimeSpan.FromSeconds(5));
-        consumer.VerifyAll();
+            cancellation.Cancel();
+            await running.WaitAsync(TimeSpan.FromSeconds(5));
+            consumer.VerifyAll();
+        }
+        finally
+        {
+            releaseFirstHandler.TrySetResult();
+            releaseSecondHandler.TrySetResult();
+            cancellation.Cancel();
+            await running.WaitAsync(TimeSpan.FromSeconds(5));
+        }
     }
 
     private static Mock<IBufferPullConsumer<PendingBatchRequest<int>>> CreateConsumer(
@@ -298,4 +517,6 @@ public sealed class BatchDispatchLoopTests : IAsyncLifetime
 
         public Mock<IAsyncEnumerator<IReadOnlyList<PendingBatchRequest<int>>>> Enumerator { get; } = enumerator;
     }
+
+    private sealed class CompletionCallbackTestException : Exception;
 }

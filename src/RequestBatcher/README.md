@@ -299,7 +299,8 @@ their parent.
 - Explicit group responses preserve input order and duplicates even when the group spans handler batches or partitions.
 - Queue capacity excludes executing requests: up to `MaxConcurrency * BatchSize` pulled requests may be in flight in addition.
 - `DisposeAsync` stops new admissions, drains accepted work including submissions waiting for capacity, and releases owned
-  resources. Concurrent and repeated disposal calls share one operation. When registered through DI, the application
+  resources after the canceled consumer loop exits and final batch cleanup completes.
+  Concurrent and repeated disposal calls share one operation. When registered through DI, the application
   container owns async disposal. When handlers need DI scopes, stop producers and await outstanding calls before
   disposing the container; pending batches cannot create new scopes once container disposal begins.
 

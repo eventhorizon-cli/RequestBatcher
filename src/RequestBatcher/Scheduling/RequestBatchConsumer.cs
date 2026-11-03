@@ -74,8 +74,9 @@ internal sealed class RequestBatchConsumer<TRequest>(
 
         try
         {
-            foreach (var pendingRequest in bufferedRequests)
+            for (var i = 0; i < bufferedRequests.Count; i++)
             {
+                var pendingRequest = bufferedRequests[i];
                 if (!pendingRequest.TryStartProcessing())
                 {
                     // Copy the started prefix once, then omit every skipped request, including trailing ones.

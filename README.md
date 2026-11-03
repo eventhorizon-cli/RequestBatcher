@@ -1010,7 +1010,8 @@ faults, otherwise it is canceled when at least one item was canceled. Completed 
 ### Shutdown and Disposal
 
 `DisposeAsync` stops accepting new requests, drains every accepted submission (including submissions waiting for
-capacity) before canceling the consumer, then releases coordinator-owned resources. A stalled downstream call can keep
+capacity) before canceling the consumer. It waits for the consumer loop and final batch cleanup before releasing
+coordinator-owned resources. A stalled downstream call can keep
 disposal waiting. Concurrent and repeated disposal calls share the same operation.
 When registered through `AddRequestBatcher`, the application container owns async disposal.
 Stop producers and await outstanding calls before disposing the container when handlers need DI scopes.

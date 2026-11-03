@@ -927,7 +927,8 @@ var prices = await store.FindAsync(keys, batchTimeout.Token).ConfigureAwait(fals
 
 ### 停止与释放
 
-`DisposeAsync` 会停止接收新请求，处理完已经接收的所有提交（包括仍在等待容量的提交），然后释放协调器持有的资源。
+`DisposeAsync` 会停止接收新请求，处理完已经接收的所有提交（包括仍在等待容量的提交），再取消消费循环。
+它会等待消费循环退出、批次清理完成后，才释放协调器持有的资源。
 并发或重复调用会共享同一次释放操作。通过 `AddRequestBatcher` 注册时，由应用容器负责异步释放。
 Handler 需要 DI 作用域时，应先停止提交并等待未完成的调用结束，再释放容器。
 容器开始释放后，待执行的批次无法再创建作用域来解析服务。

@@ -38,10 +38,11 @@ internal sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TReque
     private readonly BatchDispatchLoop<TRequest> _batchDispatchLoop;
     private readonly Task _dispatchLoopTask;
     private readonly Task _dispatchLoopMonitorTask;
+    private readonly TaskCompletionSource _pendingRequestsDrained =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
 
     private Task? _disposeTask;
     private Exception? _consumerFailure;
-    private TaskCompletionSource _drained = CreateCompletedSource();
     private int _pendingRequestCount;
     private int _state;
 
@@ -74,16 +75,14 @@ internal sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TReque
             _logger,
             _metadata,
             _metrics);
-        var consumer = bufferQueue.CreatePullConsumers<PendingBatchRequest<TRequest>>(
+        var consumer = bufferQueue.CreatePullConsumer<PendingBatchRequest<TRequest>>(
             new BufferPullConsumerOptions
             {
                 TopicName = topicName,
                 GroupName = ConsumerGroupName,
                 BatchSize = _options.BatchSize,
                 AutoCommit = true,
-            },
-            1)
-            .Single();
+            });
 
         _dispatchLoopTask = ExecutionContextIsolation.Run(
             () => _batchDispatchLoop.RunAsync(consumer, _consumerCancellation.Token));
@@ -195,8 +194,14 @@ internal sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TReque
         {
             if (_disposeTask is null)
             {
-                _state = Stopping;
-                _disposeTask = DisposeCoreAsync(_drained.Task);
+                // Publish closed admission before checking for the last request's concurrent completion.
+                Interlocked.Exchange(ref _state, Stopping);
+                if (Volatile.Read(ref _pendingRequestCount) == 0)
+                {
+                    _pendingRequestsDrained.TrySetResult();
+                }
+
+                _disposeTask = DisposeCoreAsync(_pendingRequestsDrained.Task);
             }
 
             return new ValueTask(_disposeTask);
@@ -218,7 +223,7 @@ internal sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TReque
                 return Task.FromException(CreateStoppedException());
             }
 
-            TrackRequestsLocked(1);
+            Interlocked.Increment(ref _pendingRequestCount);
             if (completion is null && completionObserver is not null)
             {
                 completion = new TracedRequestCompletion(completionObserver);
@@ -247,7 +252,7 @@ internal sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TReque
                 return Task.FromException(CreateStoppedException());
             }
 
-            TrackRequestsLocked(requests.Length);
+            Interlocked.Add(ref _pendingRequestCount, requests.Length);
             batchCompletion = completionObserver is null
                 ? new BatchSubmissionCompletion(requests.Length, cancellationToken)
                 : new TracedBatchSubmissionCompletion(requests.Length, cancellationToken, completionObserver);
@@ -279,31 +284,16 @@ internal sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TReque
             return;
         }
 
-        if (Interlocked.Decrement(ref _pendingRequestCount) != 0)
+        if (Interlocked.Decrement(ref _pendingRequestCount) != 0 || Volatile.Read(ref _state) == Running)
         {
             return;
         }
 
-        TaskCompletionSource? drained = null;
-        lock (_lifecycleLock)
-        {
-            if (Volatile.Read(ref _pendingRequestCount) == 0)
-            {
-                drained = _drained;
-            }
-        }
-
-        drained?.TrySetResult();
-    }
-
-    private void TrackRequestsLocked(int requestCount)
-    {
+        // A previous idle interval may have ended before admission stopped. Recheck after observing shutdown.
         if (Volatile.Read(ref _pendingRequestCount) == 0)
         {
-            _drained = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _pendingRequestsDrained.TrySetResult();
         }
-
-        Interlocked.Add(ref _pendingRequestCount, requestCount);
     }
 
     private async Task DisposeCoreAsync(Task pendingRequestsDrained)
@@ -315,7 +305,6 @@ internal sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TReque
         try
         {
             await pendingRequestsDrained.ConfigureAwait(false);
-            await _batchDispatchLoop.DrainAsync().ConfigureAwait(false);
             await _consumerCancellation.CancelAsync().ConfigureAwait(false);
             await _dispatchLoopTask.ConfigureAwait(ConfigureAwaitOptions.SuppressThrowing);
             await _dispatchLoopMonitorTask.ConfigureAwait(false);
@@ -332,7 +321,7 @@ internal sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TReque
             try
             {
                 await _dispatchLoopMonitorTask.ConfigureAwait(false);
-                _batchDispatchLoop.Dispose();
+                await _batchDispatchLoop.DisposeAsync().ConfigureAwait(false);
                 _producerCancellation.Dispose();
                 _consumerCancellation.Dispose();
             }
@@ -370,7 +359,7 @@ internal sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TReque
             }
 
             _consumerFailure ??= exception;
-            _state = Stopping;
+            Interlocked.Exchange(ref _state, Stopping);
 
             pendingRequests = _pendingRequests.Keys.ToArray();
         }
@@ -408,11 +397,4 @@ internal sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TReque
         RequestBatcherTracing.Source.HasListeners()
             ? RequestBatcherTracing.TraceCall(_metadata, state, submit)
             : submit(state, null, null);
-
-    private static TaskCompletionSource CreateCompletedSource()
-    {
-        var source = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        source.SetResult();
-        return source;
-    }
 }
