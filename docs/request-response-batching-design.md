@@ -118,7 +118,11 @@ change routing, response assignment, or the completion flow described below.
 
 The handler sets a response with `SetResponse(TResponse)`. The response slot
 accepts exactly one assignment. A second assignment throws and preserves the
-first value.
+first value. Each entry has one writer within its owning handler batch. Backend
+work for different entries may run concurrently, but the handler awaits all
+response-producing work before returning. The entry stores its response and a
+plain assigned flag; handler completion and request-task completion provide the
+handoff boundaries before framework validation and caller-side result assembly.
 
 `SetResponses(IEnumerable<TResponse>)` assigns a complete ordered result set:
 
@@ -127,8 +131,12 @@ first value.
 - the response count must equal the item count;
 - the response sequence is fully materialized and validated before any item is
   changed;
-- an enumeration failure, count mismatch, or existing assignment leaves all
-  previously unset items unchanged.
+- an enumeration failure or count mismatch leaves all previously unset items
+  unchanged;
+- assignment uses one indexed pass. An existing assignment throws at that entry
+  and preserves its value; earlier entries assigned by the same call retain
+  their new values. Assignment does not publish request completion, and an
+  unhandled assignment error fails the entire handler batch.
 
 After a response handler completes successfully, every item is validated. An
 unset item fails its handler batch.
@@ -144,6 +152,22 @@ returns null for missing products; applications choose their own missing-result
 policy. All responses are computed before assignment, so a factory failure leaves
 previously unset entries unchanged. Reference-type results may be shared between
 duplicate callers; the library does not clone them.
+
+The factory overload owns one temporary response array. After computing every
+response, it validates the count and assigns directly from that array. The
+ordered sequence overload snapshots caller-owned input once. Both overloads
+keep a single assignment loop in their entry points; `SetResponse` performs the
+per-entry duplicate check without a separate batch precheck.
+After the factory completes, a changed entry count throws `InvalidOperationException`
+before assignment. The sequence overload uses `ArgumentException` for a supplied
+response count mismatch.
+The factory's owned array is not copied through the public sequence overload.
+Both typed and delegate response adapters call `EnsureResponseIsSet` by index
+before publishing batch success. This validates the assigned flag without
+returning and discarding a response value. Result assembly uses `GetResponse`,
+which checks the same flag before returning the stored value.
+These loops read the stable batch count once per phase, avoiding repeated
+interface property calls for reference-type generic response paths.
 
 The response sample deduplicates lookup keys with standard LINQ `Distinct`,
 performs one backend query for those keys, builds a result dictionary, and calls
@@ -209,10 +233,26 @@ IRequestBatchHandler<TRequest, TResponse>
 forwards the item batch to the application handler and validates every response
 slot before the coordinator marks the physical requests successful.
 
-The explicit-batch facade retains its item sequence until processing finishes,
+The coordinator owns the explicit-submission admission boundary. It checks
+shutdown and cancellation before invoking a static materialization callback,
+captures enumeration failures as task failures, and rechecks shutdown and
+cancellation before admitting the complete snapshot. Public request-only
+submissions copy their input into an owned array. The response facade supplies
+a static projection callback that creates one array of response entries and
+receives that same array back for ordered result assembly. It does not retain
+a second list of those entry references or feed a bookkeeping iterator through
+the coordinator. Known array and list inputs are projected by index; other
+sequences are enumerated once. Caller-owned input containers are never retained
+as the coordinator's owned snapshot.
+
+The explicit-batch facade retains this entry array until processing finishes,
 then reads responses in that same sequence. The returned
 `IReadOnlyList<TResponse>` therefore follows caller input order even when queue
 routing splits items across partitions or handler invocations.
+
+This materialization contract is internal. Public APIs, input-order results,
+all-or-nothing admission, caller cancellation before dispatch, handler response
+validation, and scope disposal boundaries are unchanged.
 
 ## Configuration and Routing
 
@@ -302,10 +342,21 @@ Deterministic tests cover:
 
 - single and explicit-batch response ordering;
 - missing and duplicate response assignment;
-- ordered bulk assignment and all-or-nothing validation;
+- ordered bulk assignment, validation before enumeration/count/factory failures,
+  and duplicate rejection that preserves the existing value and earlier writes;
 - handler failure and caller cancellation;
 - stop and drain behavior;
 - handler registration and per-batch scope ownership;
 - duplicate logical-pipeline registration;
 - partition-key projection from the original request;
 - public and projected option snapshots.
+
+Focused allocation coverage checks response-factory failure and preassigned
+entries during assignment. Submission tests cover precanceled and stopped
+inputs without enumeration, one-pass enumeration, cancellation or shutdown
+during materialization, caller input mutation after admission, and enumeration
+failure without partial dispatch. Concurrent single, explicit, and mixed
+response stress tests validate every result, input order, and exactly-once
+handling on both supported runtimes. Matched .NET 10 benchmarks cover typed
+and service-free delegate handlers, response assignment, and synchronous/20 ms
+handler work; allocation and elapsed time are recorded separately.

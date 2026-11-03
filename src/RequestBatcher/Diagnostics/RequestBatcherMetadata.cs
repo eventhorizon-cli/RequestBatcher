@@ -9,6 +9,7 @@ internal sealed class RequestBatcherMetadata
         RequestTypeName = requestTypeName;
         BatcherName = batcherName;
         TraceCallName = RequestBatcherTracing.GetCallName(batcherName);
+        TraceBatchName = RequestBatcherTracing.GetBatchName(batcherName);
         KeyValuePair<string, object?>[] tags = batcherName is null
             ? [new(RequestBatcherTraceTags.RequestType, requestTypeName)]
             :
@@ -22,6 +23,7 @@ internal sealed class RequestBatcherMetadata
     public string RequestTypeName { get; }
     public string? BatcherName { get; }
     public string TraceCallName { get; }
+    public string TraceBatchName { get; }
 
     public IEnumerable<KeyValuePair<string, object?>> TraceTags { get; }
 }

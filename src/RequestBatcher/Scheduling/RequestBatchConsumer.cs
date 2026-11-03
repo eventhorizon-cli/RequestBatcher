@@ -25,7 +25,7 @@ internal sealed class RequestBatchConsumer<TRequest>(
         }
 
         var requests = CreateHandlerInput(activeRequests);
-        using var activity = RequestBatcherTracing.StartBatch(metadata.RequestTypeName, activeRequests, metadata.BatcherName);
+        using var activity = RequestBatcherTracing.StartBatch(metadata, activeRequests);
         var metricScope = metrics.StartBatch(metadata.RequestTypeName, metadata.BatcherName, requests.Length);
         Exception? failure = null;
 

@@ -422,7 +422,10 @@ Propagation-only state contains the submission context. A separate recorded-stat
 context directly and allocates a collection only for additional batches, protected against concurrent dispatch.
 Completing the state drains those contexts exactly once and ignores later additions. The recorded-only fields do not
 increase propagation-state size. Neither state holds an Activity or participates in a pool.
-Fixed call names and immutable sampling tags are prepared once per batcher configuration rather than per submission.
+Fixed call and batch names and immutable sampling tags are prepared once per batcher configuration rather than per
+submission or handler batch. The consumer passes the shared metadata directly to batch tracing. Indexable pending-item
+snapshots and completed submission-link lists are traversed by index, avoiding interface enumerators on the batch path.
+Batch tracing reads the stable snapshot count once and reuses it for sampling checks, link traversal, and batch-size tags.
 They remain available to samplers at Activity creation and are not mutable through the shared tag collection.
 The metadata type, sampling-dependent state, deduplication, and Activity lifetime stay under Diagnostics. Submission
 adapters only hold metadata and invoke the tracing boundary; queue admission, capacity, dispatch, and request
@@ -448,12 +451,31 @@ available context and do not collect links to Handle. Traced pending items carry
 completion source; request payloads, routing, cancellation, and public lifecycle semantics stay unchanged.
 
 An enabled call starts its Activity, invokes the core path, and restores caller ambient context synchronously.
+Dispatch-loop and monitor isolation applies only when those background tasks start. The synchronous tracing boundary
+runs in the submitting caller's context, so it must restore that context explicitly when returning its Task.
+Submission-time sequence enumeration, partition-key selection, and call-span sampling/start callbacks run in that
+caller context. Those callbacks own any other ambient values they modify; the tracing boundary restores its own
+`Activity.Current` mutation. Explicit response projection additionally runs inside its async result-assembly method.
+Restoration assigns `Activity.Current` only when its current reference differs from the saved parent; a call that has
+already restored that parent does not repeat the AsyncLocal setter. The generic and request-only tracing boundaries
+follow the same rule, preserving the caller's context for success, synchronous failure, and pending completion.
 An observed completion registers before admission. It holds publication until the submission boundary identifies
 the returned Task. When that Task is the registered completion's Task, Diagnostics ends the span and publishes the
 existing completion directly, eliminating the extra tracing TCS and async waiter. A lock on the observer coordinates
 completion racing with submission; callbacks run outside the lock and publication occurs exactly once. The observer
-captures ExecutionContext while the call Activity is current and restores it for span completion without leaking the
-Activity or AsyncLocal values into consumer/cancellation threads.
+attempts to capture ExecutionContext while the call Activity is current so completion listeners can observe the
+submission's ambient values when capture is available. Completion restores the invoking context without leaking
+Activity or AsyncLocal mutations into consumer/cancellation threads.
+The shared `ExecutionContextIsolation.RunSynchronously` helper runs completion through `ExecutionContext.Run` with a
+static callback and state. It uses the submission's captured context when available. Without one, it snapshots the
+completion thread's current context for synchronous restoration. If that thread also suppresses flow, the helper
+temporarily enables capture and restores suppression before invoking any callback. A callback wrapper preserves
+suppression inside `ExecutionContext.Run`; Run restores the original context and suppression before returning or
+rethrowing. This uncommon path allocates one callback-state object. No asynchronous method, blocking wait, or queued
+work is involved. Span completion finishes before the original completion Task is published. The helper's separate
+background-startup entry uses `Task.Run` with flow suppression only for the dispatch loop and monitor. Listener changes
+to arbitrary `AsyncLocal` values remain inside the completion callback in either path; restoring only `Activity.Current`
+would leave those other values on the completion thread.
 Already completed unobserved tasks are returned unchanged after ending the span. Producer slow paths and response-group
 materialization can return a different Task; their observed source is released without ending the span, and a Diagnostics
 completion bridge covers the entire returned Task. This preserves admission cleanup, response conversion, all original
@@ -494,9 +516,18 @@ deduplication of links from Execute to Handle. Activity lifetimes, original exce
 tokens are unchanged by allocation reductions.
 Completion tests cover outcome preparation before and after observer attachment, direct Task identity, fallback wrapper
 identity, captured AsyncLocal/Activity restoration, aggregate faults, and exactly-once span completion before publication.
+Completion-listener tests write an `AsyncLocal` and verify that it cannot affect the completion thread, with submission
+and completion flow suppression independently enabled or disabled. Pending-call tests assert the Execute Activity is
+current during submission, the parent is restored immediately, and the same Execute Activity stops only on completion.
+Shared isolation-helper tests also cover same-thread execution, exception propagation, ambient restoration, and
+preserving caller-owned flow suppression with or without a captured context. Exception filters must see the restored
+Activity, AsyncLocal, synchronization context, and flow state before an error is rethrown to the caller.
 Focused tests cover zero/one/multiple links from Execute to Handle, concurrent additions, idempotent completion, sparse repeated
 contexts, multiple enumeration of sampler links, and both propagation-only and record-only states. Compare isolated
 source snapshots before/after the reduction, including disabled tracing, low sampling, full sampling, and explicit groups.
+Named tracing tests cover cached call/batch names and creation-time tags without cross-pipeline mixing. Bounded named
+batch tracing measurements compare disabled, propagation-only, and recorded listeners with synchronous handlers; a
+matched 20 ms SDK sampling workload checks that allocation reductions preserve I/O behavior and correlation correctness.
 Tracing and metrics registration extensions ship in the optional RequestBatcher.OpenTelemetry package.
 
 ## Live integration coverage

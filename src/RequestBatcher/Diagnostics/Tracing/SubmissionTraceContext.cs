@@ -83,9 +83,9 @@ internal class SubmissionTraceContext
 
             if (additionalBatches is not null)
             {
-                foreach (var batch in additionalBatches)
+                for (var index = 0; index < additionalBatches.Count; index++)
                 {
-                    activity.AddLink(new ActivityLink(batch));
+                    activity.AddLink(new ActivityLink(additionalBatches[index]));
                 }
             }
         }

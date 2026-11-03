@@ -20,7 +20,7 @@ public sealed class TracingSamplingContractTests
         var submission = StartPendingSubmission("unsampled");
         var requests = new[] { NewRequest(submission, new RequestCompletion()) };
 
-        using var batch = RequestBatcherTracing.StartBatch("int", requests);
+        using var batch = RequestBatcherTracing.StartBatch(new("int"), requests);
 
         Assert.NotNull(batch);
         Assert.Empty(capture.BatchCreationLinks.Single());
@@ -57,7 +57,7 @@ public sealed class TracingSamplingContractTests
             NewRequest(first, sampledFirst ? sampledCompletion : unsampledCompletion),
         };
 
-        using var batch = RequestBatcherTracing.StartBatch("int", requests);
+        using var batch = RequestBatcherTracing.StartBatch(new("int"), requests);
 
         Assert.NotNull(batch);
         var creationLinks = Assert.Single(capture.BatchCreationLinks);
@@ -88,7 +88,7 @@ public sealed class TracingSamplingContractTests
             : ActivitySamplingResult.AllDataAndRecorded);
         var submission = StartPendingSubmission("record-only");
         using var batch = RequestBatcherTracing.StartBatch(
-            "int", [NewRequest(submission, new RequestCompletion())]);
+            new("int"), [NewRequest(submission, new RequestCompletion())]);
 
         Assert.NotNull(batch);
         Assert.Empty(batch!.Links);
@@ -114,7 +114,7 @@ public sealed class TracingSamplingContractTests
             new(4, default, static _ => { }),
         };
 
-        using var batch = RequestBatcherTracing.StartBatch("int", requests);
+        using var batch = RequestBatcherTracing.StartBatch(new("int"), requests);
 
         Assert.NotNull(batch);
         Assert.Equal(3, Assert.IsType<int>(batch!.GetTagItem("requestbatcher.batch.submission.count")));
@@ -132,7 +132,7 @@ public sealed class TracingSamplingContractTests
     {
         using var capture = new SamplingCapture(_ => ActivitySamplingResult.AllDataAndRecorded);
 
-        using var batch = RequestBatcherTracing.StartBatch<int>("int", []);
+        using var batch = RequestBatcherTracing.StartBatch<int>(new("int"), []);
 
         Assert.NotNull(batch);
         Assert.Empty(batch!.Links);
@@ -154,7 +154,7 @@ public sealed class TracingSamplingContractTests
             new(4, default, static _ => { }, new RequestCompletion()),
         };
 
-        using var batch = RequestBatcherTracing.StartBatch("int", requests);
+        using var batch = RequestBatcherTracing.StartBatch(new("int"), requests);
 
         Assert.NotNull(batch);
         Assert.Empty(batch!.Links);

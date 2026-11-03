@@ -31,7 +31,7 @@ public sealed class LinkedBatchSamplingTests
             NewRequest(unsampled, unsampledCompletion),
         };
 
-        using var batch = RequestBatcherTracing.StartBatch("Int32", requests, "orders");
+        using var batch = RequestBatcherTracing.StartBatch(new("Int32", "orders"), requests);
 
         Assert.NotNull(batch);
         Assert.True(batch!.Recorded);
@@ -59,9 +59,8 @@ public sealed class LinkedBatchSamplingTests
         var first = StartSubmission("first");
         var second = StartSubmission("second");
         using var batch = RequestBatcherTracing.StartBatch(
-            "Int32",
-            [NewRequest(first, new RequestCompletion()), NewRequest(second, new RequestCompletion())],
-            "orders");
+            new("Int32", "orders"),
+            [NewRequest(first, new RequestCompletion()), NewRequest(second, new RequestCompletion())]);
 
         Assert.NotNull(batch);
         Assert.False(batch!.Recorded);
@@ -85,7 +84,7 @@ public sealed class LinkedBatchSamplingTests
         using var listener = CreatePropagationCapture(startedBatches);
         var submission = StartSubmission("request");
         var batch = RequestBatcherTracing.StartBatch(
-            "Int32", [NewRequest(submission, new RequestCompletion())], "pricing-queries");
+            new("Int32", "pricing-queries"), [NewRequest(submission, new RequestCompletion())]);
 
         Assert.NotNull(batch);
         var started = Assert.Single(startedBatches);
@@ -124,7 +123,7 @@ public sealed class LinkedBatchSamplingTests
 
         // Match dispatch isolation so the batch cannot inherit the caller's sampled flag as a parent.
         Activity.Current = null;
-        using var batch = RequestBatcherTracing.StartBatch("Int32", [request]);
+        using var batch = RequestBatcherTracing.StartBatch(new("Int32"), [request]);
 
         Assert.NotNull(batch);
         Assert.Equal(default, batch!.ParentSpanId);
@@ -149,7 +148,7 @@ public sealed class LinkedBatchSamplingTests
         var submission = StartSubmission("request");
         Activity.Current = null;
         var batch = RequestBatcherTracing.StartBatch(
-            "Int32", [NewRequest(submission, new RequestCompletion())]);
+            new("Int32"), [NewRequest(submission, new RequestCompletion())]);
         using var applicationSource = new ActivitySource("LinkedBatchSamplingTests.Application");
         var child = applicationSource.StartActivity("handler-child");
 
@@ -205,7 +204,7 @@ public sealed class LinkedBatchSamplingTests
         using var tracing = BuildTracer(sampler, capture, useInstrumentation: false);
         var submission = StartSubmission("sampled");
         var batch = RequestBatcherTracing.StartBatch(
-            "Int32", [NewRequest(submission, new RequestCompletion())]);
+            new("Int32"), [NewRequest(submission, new RequestCompletion())]);
 
         Assert.NotNull(batch);
         Assert.False(batch!.Recorded);
@@ -237,7 +236,7 @@ public sealed class LinkedBatchSamplingTests
             setSamplerBeforeInstrumentation: setBefore);
         var submission = StartSubmission("sampled");
         using var batch = RequestBatcherTracing.StartBatch(
-            "Int32", [NewRequest(submission, new RequestCompletion())]);
+            new("Int32"), [NewRequest(submission, new RequestCompletion())]);
 
         Assert.NotNull(batch);
         Assert.True(batch!.Recorded);

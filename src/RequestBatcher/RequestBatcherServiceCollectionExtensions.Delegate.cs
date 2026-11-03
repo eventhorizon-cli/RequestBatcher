@@ -188,9 +188,10 @@ public static partial class RequestBatcherServiceCollectionExtensions
     private static void ValidateResponses<TRequest, TResponse>(
         IReadOnlyList<RequestBatchEntry<TRequest, TResponse>> entries)
     {
-        foreach (var entry in entries)
+        var count = entries.Count;
+        for (var index = 0; index < count; index++)
         {
-            _ = entry.GetResponse();
+            entries[index].EnsureResponseIsSet();
         }
     }
 }

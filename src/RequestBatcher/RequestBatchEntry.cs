@@ -5,14 +5,13 @@ namespace RequestBatcher;
 /// </summary>
 /// <typeparam name="TRequest">The request type.</typeparam>
 /// <typeparam name="TResponse">The response type.</typeparam>
+/// <remarks>
+/// Each entry has one writer. Await all response-producing work before the handler returns.
+/// </remarks>
 public sealed class RequestBatchEntry<TRequest, TResponse>
 {
-    private const int ResponseUnset = 0;
-    private const int ResponseSetting = 1;
-    private const int ResponseSet = 2;
-
     private TResponse _response = default!;
-    private int _responseState;
+    private bool _hasResponse;
 
     internal RequestBatchEntry(TRequest request) => Request = request;
 
@@ -33,31 +32,28 @@ public sealed class RequestBatchEntry<TRequest, TResponse>
     /// <exception cref="InvalidOperationException">A response was already assigned to this entry.</exception>
     public void SetResponse(TResponse response)
     {
-        if (Interlocked.CompareExchange(ref _responseState, ResponseSetting, ResponseUnset) != ResponseUnset)
+        if (_hasResponse)
         {
             throw new InvalidOperationException("A response has already been assigned to this batch entry.");
         }
 
         _response = response;
-        Volatile.Write(ref _responseState, ResponseSet);
+        // Handler completion and request completion publish these single-writer values to their readers.
+        _hasResponse = true;
     }
 
     internal TResponse GetResponse()
     {
-        if (Volatile.Read(ref _responseState) != ResponseSet)
-        {
-            throw new InvalidOperationException(
-                "The response handler returned without assigning a response to this batch entry.");
-        }
-
+        EnsureResponseIsSet();
         return _response;
     }
 
-    internal void EnsureResponseIsUnset()
+    internal void EnsureResponseIsSet()
     {
-        if (Volatile.Read(ref _responseState) != ResponseUnset)
+        if (!_hasResponse)
         {
-            throw new InvalidOperationException("A response has already been assigned to this batch entry.");
+            throw new InvalidOperationException(
+                "The response handler returned without assigning a response to this batch entry.");
         }
     }
 }

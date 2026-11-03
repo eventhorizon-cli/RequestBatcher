@@ -28,6 +28,8 @@ internal static class RequestBatcherTracing
         Func<TState, SubmissionTraceContext?, IRequestCompletionObserver?, Task> submit,
         bool observeCompletion = true)
     {
+        // Keep this boundary synchronous so it can return the original completion Task without an async wrapper.
+        // Dispatch and monitor isolation applies only to background work, not this caller-side Activity scope.
         var parent = Activity.Current;
         var activity = StartCall(metadata);
         var context = CreateContext(activity, parent);
@@ -67,8 +69,13 @@ internal static class RequestBatcherTracing
         }
         finally
         {
-            // The Activity remains alive until completion, but must not become the caller's ambient span.
-            Activity.Current = parent;
+            // Restore the caller's span before returning the Task, keeping the Execute Activity alive until completion.
+            // The completion observer's ExecutionContext.Run restores its invoking context, not this submission boundary.
+            // A redundant setter can materialize parent.Id while validating an unchanged Activity reference.
+            if (!ReferenceEquals(Activity.Current, parent))
+            {
+                Activity.Current = parent;
+            }
         }
     }
 
@@ -78,6 +85,8 @@ internal static class RequestBatcherTracing
         Func<TState, SubmissionTraceContext?, IRequestCompletionObserver?, Task<TResult>> submit,
         bool observeCompletion = true)
     {
+        // Keep this boundary synchronous so it can return the original completion Task without an async wrapper.
+        // Dispatch and monitor isolation applies only to background work, not this caller-side Activity scope.
         var parent = Activity.Current;
         var activity = StartCall(metadata);
         var context = CreateContext(activity, parent);
@@ -117,14 +126,19 @@ internal static class RequestBatcherTracing
         }
         finally
         {
-            Activity.Current = parent;
+            // Restore the caller's span before returning the Task, keeping the Execute Activity alive until completion.
+            // The completion observer's ExecutionContext.Run restores its invoking context, not this submission boundary.
+            // A redundant setter can materialize parent.Id while validating an unchanged Activity reference.
+            if (!ReferenceEquals(Activity.Current, parent))
+            {
+                Activity.Current = parent;
+            }
         }
     }
 
     public static Activity? StartBatch<TRequest>(
-        string requestTypeName,
-        IReadOnlyList<PendingBatchRequest<TRequest>> requests,
-        string? batcherName = null)
+        RequestBatcherMetadata metadata,
+        IReadOnlyList<PendingBatchRequest<TRequest>> requests)
     {
         if (!Source.HasListeners())
         {
@@ -134,11 +148,12 @@ internal static class RequestBatcherTracing
         BatchTraceLinks? links = null;
         // A sampled Execute context enables links to every participating context, including unsampled ones.
         // With no sampled context, omit the collector; the optional linked-batch sampler treats no links as Drop.
-        if (HasSampledSubmission(requests))
+        var count = requests.Count;
+        if (HasSampledSubmission(requests, count))
         {
-            foreach (var request in requests)
+            for (var index = 0; index < count; index++)
             {
-                if (request is not TracedPendingBatchRequest<TRequest> traced)
+                if (requests[index] is not TracedPendingBatchRequest<TRequest> traced)
                 {
                     continue;
                 }
@@ -154,15 +169,15 @@ internal static class RequestBatcherTracing
             }
         }
 
-        var tags = CreateTags(requestTypeName, batcherName);
-        tags.Add(RequestBatcherTraceTags.BatchSize, requests.Count);
+        var tags = CreateTags(metadata.RequestTypeName, metadata.BatcherName);
+        tags.Add(RequestBatcherTraceTags.BatchSize, count);
 
         // Dispatch runs in an isolated context. Links describe the many-to-many relationship with calls.
         // Listeners sample these creation-time inputs before allocating the Activity object. Still call StartActivity
         // when no Execute is sampled: the SDK may retain an unsampled root Activity for propagation to Handler children.
         // A non-null Activity therefore does not imply recording; collect additional data only when requested below.
         var activity = Source.StartActivity(
-            GetBatchName(batcherName),
+            metadata.TraceBatchName,
             ActivityKind.Consumer,
             parentContext: default,
             tags: tags,
@@ -179,11 +194,13 @@ internal static class RequestBatcherTracing
         return activity;
     }
 
-    private static bool HasSampledSubmission<TRequest>(IReadOnlyList<PendingBatchRequest<TRequest>> requests)
+    private static bool HasSampledSubmission<TRequest>(
+        IReadOnlyList<PendingBatchRequest<TRequest>> requests,
+        int count)
     {
-        foreach (var request in requests)
+        for (var index = 0; index < count; index++)
         {
-            if (request is TracedPendingBatchRequest<TRequest> traced &&
+            if (requests[index] is TracedPendingBatchRequest<TRequest> traced &&
                 (traced.TraceContext.Context.TraceFlags & ActivityTraceFlags.Recorded) != 0)
             {
                 return true;
