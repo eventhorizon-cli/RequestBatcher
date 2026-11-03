@@ -173,6 +173,10 @@ the factory in entry order and creates every response before assigning any entry
 one response per entry and assigns them in entry order. Assigning `null` is valid for nullable response types; every entry
 must be assigned exactly once before the handler returns successfully.
 
+Each entry has one writer. Await all response-producing work before the handler returns. The helpers reject an already
+assigned entry and preserve its value; earlier assignments from the same helper call remain in place. An unhandled
+assignment error fails the entire Handler batch.
+
 ### Delegate Handlers
 
 Use `AddDelegateRequestBatcher` for short handling logic supplied to `ExecuteAsync` as a **static delegate**.

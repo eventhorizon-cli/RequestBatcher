@@ -17,8 +17,10 @@ public static class RequestBatchEntryExtensions
     /// The sequences must have exactly the same number of elements. <paramref name="responses"/> is enumerated once
     /// before any entry is modified, so an enumeration failure or count mismatch cannot leave a partially assigned
     /// batch.
+    /// An already assigned entry keeps its value and causes assignment to throw; earlier assignments are retained.
     /// </remarks>
     /// <exception cref="ArgumentException">The response count does not match the request count.</exception>
+    /// <exception cref="InvalidOperationException">An entry already has a response.</exception>
     public static void SetResponses<TRequest, TResponse>(
         this IReadOnlyList<RequestBatchEntry<TRequest, TResponse>> entries,
         IEnumerable<TResponse> responses)
@@ -27,15 +29,15 @@ public static class RequestBatchEntryExtensions
         ArgumentNullException.ThrowIfNull(responses);
 
         var responseArray = responses.ToArray();
-        if (responseArray.Length != entries.Count)
+        var count = entries.Count;
+        if (responseArray.Length != count)
         {
             throw new ArgumentException(
                 "The response sequence must contain exactly one response for each request item.",
                 nameof(responses));
         }
 
-        EnsureResponsesAreUnset(entries);
-        for (var index = 0; index < entries.Count; index++)
+        for (var index = 0; index < count; index++)
         {
             entries[index].SetResponse(responseArray[index]);
         }
@@ -51,7 +53,11 @@ public static class RequestBatchEntryExtensions
     /// <remarks>
     /// The factory is evaluated in request order. All responses are created before any entry is modified, so a factory
     /// failure cannot leave a partially assigned batch.
+    /// An already assigned entry keeps its value and causes assignment to throw; earlier assignments are retained.
     /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    /// An entry already has a response, or the entry count changes while the factory executes.
+    /// </exception>
     public static void SetResponses<TRequest, TResponse>(
         this IReadOnlyList<RequestBatchEntry<TRequest, TResponse>> entries,
         Func<TRequest, TResponse> responseFactory)
@@ -59,21 +65,24 @@ public static class RequestBatchEntryExtensions
         ArgumentNullException.ThrowIfNull(entries);
         ArgumentNullException.ThrowIfNull(responseFactory);
 
-        var responses = new TResponse[entries.Count];
-        for (var index = 0; index < entries.Count; index++)
+        var count = entries.Count;
+        var responses = new TResponse[count];
+        for (var index = 0; index < count; index++)
         {
             responses[index] = responseFactory(entries[index].Request);
         }
 
-        entries.SetResponses(responses);
-    }
-
-    private static void EnsureResponsesAreUnset<TRequest, TResponse>(
-        IReadOnlyList<RequestBatchEntry<TRequest, TResponse>> entries)
-    {
-        for (var index = 0; index < entries.Count; index++)
+        // Factory callbacks may change the input collection; validate its count again before assigning.
+        count = entries.Count;
+        if (responses.Length != count)
         {
-            entries[index].EnsureResponseIsUnset();
+            throw new InvalidOperationException(
+                "The request entry count changed while the response factory was executing.");
+        }
+
+        for (var index = 0; index < count; index++)
+        {
+            entries[index].SetResponse(responses[index]);
         }
     }
 }

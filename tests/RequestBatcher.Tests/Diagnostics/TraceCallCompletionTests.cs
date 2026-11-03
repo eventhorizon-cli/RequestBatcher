@@ -74,6 +74,7 @@ public sealed class TraceCallCompletionTests
     {
         using var capture = listenerDisabled ? null : new ActivityCapture();
         var previous = Activity.Current;
+        using var parent = new Activity("parent").Start();
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
         var expected = new InvalidOperationException("completed failure");
@@ -95,8 +96,11 @@ public sealed class TraceCallCompletionTests
                 faulted = genericFaulted;
                 canceled = genericCanceled;
                 returnedSuccess = InvokeGeneric("success", genericSuccess);
+                Assert.Same(parent, Activity.Current);
                 returnedFault = InvokeGeneric("fault", genericFaulted);
+                Assert.Same(parent, Activity.Current);
                 returnedCanceled = InvokeGeneric("canceled", genericCanceled);
+                Assert.Same(parent, Activity.Current);
             }
             else
             {
@@ -107,8 +111,11 @@ public sealed class TraceCallCompletionTests
                 faulted = voidFaulted;
                 canceled = voidCanceled;
                 returnedSuccess = InvokeVoid("success", voidSuccess);
+                Assert.Same(parent, Activity.Current);
                 returnedFault = InvokeVoid("fault", voidFaulted);
+                Assert.Same(parent, Activity.Current);
                 returnedCanceled = InvokeVoid("canceled", voidCanceled);
+                Assert.Same(parent, Activity.Current);
             }
 
             Assert.Same(success, returnedSuccess);

@@ -1,11 +1,32 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
+using RequestBatcher.Scheduling;
 
 namespace RequestBatcher.Tests;
 
 public sealed class ExecutionContextIsolationTests
 {
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void RunSynchronously_CallbackChangesContext_RestoresCallerContext(
+        bool useCapturedContext,
+        bool suppressFlow) =>
+        VerifySynchronousIsolation(useCapturedContext, suppressFlow, throwFromCallback: false);
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public void RunSynchronously_CallbackThrows_RestoresContextBeforeRethrowing(
+        bool useCapturedContext,
+        bool suppressFlow) =>
+        VerifySynchronousIsolation(useCapturedContext, suppressFlow, throwFromCallback: true);
+
     [Fact]
     public async Task AddRequestBatcher_ResolveAndSubmit_DoesNotFlowCallerExecutionContextToHandler()
     {
@@ -111,6 +132,96 @@ public sealed class ExecutionContextIsolationTests
             probe.Ambient.Value = null;
         }
     }
+
+    private static void VerifySynchronousIsolation(
+        bool useCapturedContext,
+        bool suppressFlow,
+        bool throwFromCallback)
+    {
+        var ambient = new AsyncLocal<string?> { Value = "captured" };
+        using var parent = new Activity("caller").Start();
+        var context = useCapturedContext ? ExecutionContext.Capture() : null;
+        ambient.Value = "caller";
+        using var callbackActivity = new Activity("callback");
+        var synchronizationContext = SynchronizationContext.Current;
+        var expectedError = throwFromCallback ? new InvalidOperationException("callback failure") : null;
+        var state = new SynchronousCallbackState(
+            ambient,
+            callbackActivity,
+            Environment.CurrentManagedThreadId,
+            useCapturedContext ? "captured" : "caller",
+            useCapturedContext ? false : suppressFlow,
+            expectedError);
+
+        void InvokeAndVerify()
+        {
+            Exception? error = null;
+            var contextRestoredBeforeFilter = false;
+            bool ObserveExceptionContext()
+            {
+                contextRestoredBeforeFilter = ReferenceEquals(parent, Activity.Current)
+                    && ambient.Value == "caller"
+                    && ReferenceEquals(synchronizationContext, SynchronizationContext.Current)
+                    && suppressFlow == ExecutionContext.IsFlowSuppressed();
+                return true;
+            }
+
+            try
+            {
+                ExecutionContextIsolation.RunSynchronously(
+                    context,
+                    static value =>
+                    {
+                        var callback = (SynchronousCallbackState)value!;
+                        Assert.Equal(callback.ThreadId, Environment.CurrentManagedThreadId);
+                        Assert.Equal(callback.InitialAmbient, callback.Ambient.Value);
+                        Assert.Equal(callback.FlowSuppressed, ExecutionContext.IsFlowSuppressed());
+                        callback.Ambient.Value = "callback";
+                        callback.Activity.Start();
+                        SynchronizationContext.SetSynchronizationContext(new SynchronizationContext());
+                        if (callback.Error is { } exception)
+                        {
+                            throw exception;
+                        }
+                    },
+                    state);
+            }
+            catch (Exception exception) when (ObserveExceptionContext())
+            {
+                error = exception;
+            }
+
+            Assert.Same(expectedError, error);
+            if (throwFromCallback)
+            {
+                Assert.True(contextRestoredBeforeFilter);
+            }
+            Assert.Same(parent, Activity.Current);
+            Assert.Equal("caller", ambient.Value);
+            Assert.Same(synchronizationContext, SynchronizationContext.Current);
+            Assert.Equal(suppressFlow, ExecutionContext.IsFlowSuppressed());
+        }
+
+        if (suppressFlow)
+        {
+            using (ExecutionContext.SuppressFlow())
+            {
+                InvokeAndVerify();
+            }
+        }
+        else
+        {
+            InvokeAndVerify();
+        }
+    }
+
+    private sealed record SynchronousCallbackState(
+        AsyncLocal<string?> Ambient,
+        Activity Activity,
+        int ThreadId,
+        string InitialAmbient,
+        bool FlowSuppressed,
+        Exception? Error);
 
     private sealed class ExecutionContextProbe
     {

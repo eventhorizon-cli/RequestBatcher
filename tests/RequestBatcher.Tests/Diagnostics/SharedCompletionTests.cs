@@ -174,6 +174,62 @@ public sealed class SharedCompletionTests
         }
     }
 
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task CallCompletionObserver_ListenerWritesAsyncLocal_RestoresCompletionContext(
+        bool suppressSubmissionFlow,
+        bool suppressCompletionFlow)
+    {
+        var ambient = new AsyncLocal<string?> { Value = "submitter" };
+        using var capture = new ActivityCapture(() =>
+        {
+            var observed = ambient.Value;
+            ambient.Value = "listener";
+            return observed;
+        });
+        var previous = Activity.Current;
+        var activity = StartActivity();
+        CallCompletionObserver observer;
+        using (suppressSubmissionFlow ? ExecutionContext.SuppressFlow() : default)
+        {
+            observer = new CallCompletionObserver(activity, null);
+        }
+
+        try
+        {
+            var completion = new TracedRequestCompletion(observer);
+            Assert.True(observer.TryAttach(completion.Task));
+            Activity.Current = previous;
+            using var workerParent = new Activity("completion-worker").Start();
+            ambient.Value = "worker";
+
+            using (suppressCompletionFlow ? ExecutionContext.SuppressFlow() : default)
+            {
+                completion.CompleteSuccessfully();
+
+                Assert.Equal("worker", ambient.Value);
+                Assert.Same(workerParent, Activity.Current);
+                Assert.Equal(suppressCompletionFlow, ExecutionContext.IsFlowSuppressed());
+            }
+
+            await completion.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            var stopped = Assert.Single(capture.Stopped);
+            Assert.Equal(suppressSubmissionFlow ? "worker" : "submitter", stopped.GetTagItem("test.marker"));
+            Assert.Same(workerParent, Activity.Current);
+            Assert.Equal("worker", ambient.Value);
+            Assert.False(ExecutionContext.IsFlowSuppressed());
+        }
+        finally
+        {
+            activity.Dispose();
+            Activity.Current = previous;
+            ambient.Value = null;
+        }
+    }
+
     [Fact]
     public async Task TracedResponseCompletion_AttachAndPublish_ReturnsTypedResultAndStopsSpan()
     {

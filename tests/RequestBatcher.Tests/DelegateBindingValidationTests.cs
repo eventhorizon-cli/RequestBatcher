@@ -101,7 +101,7 @@ public sealed class DelegateBindingValidationTests
     }
 
     [Fact]
-    public void SetResponses_PreassignedEntry_RejectsWithoutChangingOtherEntries()
+    public void SetResponses_PreassignedEntry_PreservesExistingAndEarlierResponses()
     {
         IReadOnlyList<RequestBatchEntry<int, int>> entries = [new(1), new(2), new(3)];
         entries[1].SetResponse(20);
@@ -109,9 +109,8 @@ public sealed class DelegateBindingValidationTests
         Assert.Throws<InvalidOperationException>(() => entries.SetResponses([10, 200, 30]));
 
         Assert.Equal(20, entries[1].GetResponse());
-        Assert.Throws<InvalidOperationException>(() => entries[0].GetResponse());
+        Assert.Equal(10, entries[0].GetResponse());
         Assert.Throws<InvalidOperationException>(() => entries[2].GetResponse());
-        entries[0].SetResponse(10);
         entries[2].SetResponse(30);
         Assert.Equal([10, 20, 30], entries.Select(entry => entry.GetResponse()).ToArray());
     }

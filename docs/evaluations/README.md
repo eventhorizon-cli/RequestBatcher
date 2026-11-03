@@ -26,6 +26,7 @@ Find reports by question; versions, workloads, and limitations are documented in
 
 ## Completion Paths and Allocation
 
+- [response-hot-paths](response-hot-paths/README.md): compares shared response snapshots, direct factory assignment, indexed validation, and cached tracing metadata, including a value/reference temporary-array pooling experiment and matched 20 ms SDK tracing workloads on .NET 10.
 - [typed-response-completion](typed-response-completion/README.md): measures typed completion objects on success, failure, and pre-dispatch cancellation paths (in-process).
 - [completion-callback](completion-callback/README.md): measures coordinator completion callback reuse and pending-request delegate allocation (in-process).
 - [shared-completion-source](shared-completion-source/README.md): measures shared completion objects and explicit-submission allocation (in-process).

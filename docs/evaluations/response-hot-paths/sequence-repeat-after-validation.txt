@@ -1,0 +1,4 @@
+Response assignment validation: Method=OrderedSequenceAssignment, BatchSize=32, ValidatedBatchCount=33554531, ResponseValues=True
+Response assignment validation: Method=OrderedSequenceAssignment, BatchSize=32, ValidatedBatchCount=33554531, ResponseValues=True
+Response assignment validation: Method=OrderedSequenceAssignment, BatchSize=256, ValidatedBatchCount=4194403, ResponseValues=True
+Response assignment validation: Method=OrderedSequenceAssignment, BatchSize=256, ValidatedBatchCount=4194403, ResponseValues=True

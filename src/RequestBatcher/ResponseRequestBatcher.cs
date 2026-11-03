@@ -71,18 +71,22 @@ internal sealed class ResponseRequestBatcher<TRequest, TResponse>(
         CancellationToken cancellationToken,
         SubmissionTraceContext? traceContext)
     {
-        var entries = new List<RequestBatchEntry<TRequest, TResponse>>();
         await batcher
-            .ExecuteCoreAsync(CreateEntries(requests, entries), cancellationToken, traceContext)
+            .ExecuteBatchCoreAsync(
+                requests,
+                static input => CreateEntries(input),
+                cancellationToken,
+                out var entries,
+                traceContext)
             .ConfigureAwait(false);
 
-        if (entries.Count == 0)
+        if (entries.Length == 0)
         {
             return Array.Empty<TResponse>();
         }
 
-        var responses = new TResponse[entries.Count];
-        for (var index = 0; index < entries.Count; index++)
+        var responses = new TResponse[entries.Length];
+        for (var index = 0; index < entries.Length; index++)
         {
             responses[index] = entries[index].GetResponse();
         }
@@ -90,16 +94,23 @@ internal sealed class ResponseRequestBatcher<TRequest, TResponse>(
         return responses;
     }
 
-    private static IEnumerable<RequestBatchEntry<TRequest, TResponse>> CreateEntries(
-        IEnumerable<TRequest> requests,
-        ICollection<RequestBatchEntry<TRequest, TResponse>> entries)
-    {
-        foreach (var request in requests)
+    private static RequestBatchEntry<TRequest, TResponse>[] CreateEntries(IEnumerable<TRequest> requests) =>
+        requests switch
         {
-            var entry = new RequestBatchEntry<TRequest, TResponse>(request);
-            entries.Add(entry);
-            yield return entry;
+            TRequest[] array => CreateEntries((IReadOnlyList<TRequest>)array),
+            List<TRequest> list => CreateEntries((IReadOnlyList<TRequest>)list),
+            _ => requests.Select(static request => new RequestBatchEntry<TRequest, TResponse>(request)).ToArray(),
+        };
+
+    private static RequestBatchEntry<TRequest, TResponse>[] CreateEntries(IReadOnlyList<TRequest> requests)
+    {
+        var entries = new RequestBatchEntry<TRequest, TResponse>[requests.Count];
+        for (var index = 0; index < entries.Length; index++)
+        {
+            entries[index] = new RequestBatchEntry<TRequest, TResponse>(requests[index]);
         }
+
+        return entries;
     }
 
     private Task<TResult> ExecuteCall<TResult, TState>(

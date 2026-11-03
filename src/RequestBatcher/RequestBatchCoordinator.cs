@@ -144,7 +144,24 @@ internal sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TReque
         IRequestCompletionObserver? completionObserver = null)
     {
         ArgumentNullException.ThrowIfNull(requests);
+        return ExecuteBatchCoreAsync(
+            requests,
+            static input => input.ToArray(),
+            cancellationToken,
+            out _,
+            traceContext,
+            completionObserver);
+    }
 
+    internal Task ExecuteBatchCoreAsync<TState>(
+        TState state,
+        Func<TState, TRequest[]> materializeRequests,
+        CancellationToken cancellationToken,
+        out TRequest[] requests,
+        SubmissionTraceContext? traceContext = default,
+        IRequestCompletionObserver? completionObserver = null)
+    {
+        requests = [];
         if (Volatile.Read(ref _state) != Running)
         {
             return Task.FromException(CreateStoppedException());
@@ -155,10 +172,10 @@ internal sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TReque
             return Task.FromCanceled(cancellationToken);
         }
 
-        TRequest[] requestArray;
         try
         {
-            requestArray = requests.ToArray();
+            // The callback creates an owned snapshot only after admission and cancellation prechecks.
+            requests = materializeRequests(state);
         }
         catch (Exception exception)
         {
@@ -175,13 +192,13 @@ internal sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TReque
             return Task.FromCanceled(cancellationToken);
         }
 
-        if (requestArray.Length == 0)
+        if (requests.Length == 0)
         {
             _metrics.RecordSubmissionSize(_metadata.RequestTypeName, _metadata.BatcherName, RequestBatcherMetricTags.MultiSubmission, 0);
             return Task.CompletedTask;
         }
 
-        return AcceptBatch(requestArray, cancellationToken, traceContext, completionObserver);
+        return AcceptBatch(requests, cancellationToken, traceContext, completionObserver);
     }
 
     /// <summary>

@@ -44,6 +44,9 @@ You are an AI coding assistant for this repository.
   transient handlers inside an async scope owned by one batch; never capture them in the singleton coordinator.
 - A request accepted by the coordinator must complete exactly once with success, cancellation, or the handler failure
   for its batch. Capacity must be released exactly once on every terminal path.
+- Each response entry has one writer in its owning Handler batch. Await response-producing work before the Handler
+  returns; completion boundaries publish response values to framework validation and caller result assembly. Keep
+  per-entry storage simple, retain sequential duplicate checks, and validate missing responses before publishing success.
 - RequestBatcher provides no global, partition-local, or partition-key handler execution ordering guarantee.
   `UsePartitionKey` routes equal keys to one queue partition only; separate batches for equal keys can execute
   concurrently. Do not imply that an entire key is collected into one batch or that routing serializes execution.
@@ -82,13 +85,21 @@ You are an AI coding assistant for this repository.
 - In these hot paths, use indexed `for` loops for arrays, spans, and collections with O(1) indexed access, such as
   `List<T>` and the queue's `IReadOnlyList<T>` snapshots. Do not use `foreach` for these indexable collections.
   Enumeration through interfaces such as `IEnumerable<T>` or `IReadOnlyList<T>` can allocate or box an enumerator.
+- For a collection that remains unchanged during traversal, read `Count` once before the loop and reuse that value.
+  Helpers scanning the same stable batch snapshot should share the captured count. Preserve live-count behavior when
+  mutation during traversal is part of the contract.
+- Review interface `Count` and indexer calls as well as enumerator costs. Replacing `foreach` with `for` can exchange
+  enumeration overhead for repeated interface property calls; do not assume the JIT removes those calls.
 - Direct `foreach` over arrays and spans can be lowered to indexed loops; concrete collections with value-type
-  enumerators can also avoid enumerator allocation. Preserve native enumeration for non-indexable collections and
+  enumerators can also avoid enumerator allocation. This does not make traversal free or prove that either syntax is
+  faster. Preserve native enumeration for non-indexable collections and
   asynchronous streams when required. Do not introduce `ToArray()`, `ToList()`, repeated `ElementAt()` calls, or unsafe
   access merely to replace a loop with indexed access; preserve streaming, cancellation, and backpressure semantics.
 - Check the collection's static type and iteration behavior when reviewing a hot-path loop. Verify performance changes
   with the comparable benchmarks and correctness stress tests required below; a syntax change alone does not establish
-  a performance gain. Startup, service registration, tests, and samples do not need the same loop-style restriction.
+  a performance gain. Compare execution time and allocation separately, and investigate or revise a loop rewrite that
+  regresses representative workloads. Startup, service registration, tests, and samples do not need the same loop-style
+  restriction.
 
 ## Documentation
 

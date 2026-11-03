@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using RequestBatcher.PendingRequests;
+using RequestBatcher.Scheduling;
 
 namespace RequestBatcher.Diagnostics.Tracing;
 
@@ -7,7 +8,10 @@ namespace RequestBatcher.Diagnostics.Tracing;
 // knows whether that Task is the completion itself or a wrapper covering additional asynchronous work.
 internal sealed class CallCompletionObserver(Activity activity, SubmissionTraceContext? context) : IRequestCompletionObserver
 {
-    private readonly ExecutionContext? _executionContext = ExecutionContext.Capture();
+    // Capture while the Execute Activity is current so completion listeners see the submission's ambient values.
+    // Null means submission flow was suppressed. The callback starts with completion-thread ambient values;
+    // Run restores that thread after callback mutations without importing a submission context.
+    private readonly ExecutionContext? _submissionExecutionContext = ExecutionContext.Capture();
     private IRequestCompletionNotification? _completion;
     private bool _attached;
     private bool _direct;
@@ -63,22 +67,10 @@ internal sealed class CallCompletionObserver(Activity activity, SubmissionTraceC
         {
             if (_direct)
             {
-                if (_executionContext is { } executionContext)
-                {
-                    ExecutionContext.Run(executionContext, static state => ((CallCompletionObserver)state!).EndCall(), this);
-                }
-                else
-                {
-                    var previous = Activity.Current;
-                    try
-                    {
-                        EndCall();
-                    }
-                    finally
-                    {
-                        Activity.Current = previous;
-                    }
-                }
+                ExecutionContextIsolation.RunSynchronously(
+                    _submissionExecutionContext,
+                    static state => ((CallCompletionObserver)state!).EndCall(),
+                    this);
             }
         }
         finally

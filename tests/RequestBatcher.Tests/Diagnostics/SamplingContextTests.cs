@@ -22,6 +22,7 @@ public sealed class SamplingContextTests
         using var parent = new Activity("parent").Start();
         var pending = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
         TaskCompletionSource? voidPending = null;
+        Activity? submissionActivity = null;
 
         try
         {
@@ -31,18 +32,31 @@ public sealed class SamplingContextTests
                 returned = RequestBatcherTracing.TraceCall(
                     new RequestBatcherMetadata("sampled-out"),
                     pending,
-                    static (state, _) => state.Task);
+                    (state, _) =>
+                    {
+                        submissionActivity = Activity.Current;
+                        return state.Task;
+                    });
             }
             else
             {
                 returned = RequestBatcherTracing.TraceCall(
                     new RequestBatcherMetadata("sampled-out"),
                     voidPending = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously),
-                    static (state, _) => state.Task);
+                    (state, _) =>
+                    {
+                        submissionActivity = Activity.Current;
+                        return state.Task;
+                    });
                 Assert.Same(parent, Activity.Current);
             }
 
             Assert.False(returned.IsCompleted);
+            Assert.NotNull(submissionActivity);
+            Assert.NotSame(parent, submissionActivity);
+            Assert.Equal(RequestBatcherTracing.CallName, submissionActivity.OperationName);
+            Assert.Equal(parent.SpanId, submissionActivity.ParentSpanId);
+            Assert.False(submissionActivity.IsStopped);
             Assert.Same(parent, Activity.Current);
             Assert.Empty(capture.Stopped);
 
@@ -59,6 +73,8 @@ public sealed class SamplingContextTests
 
             Assert.Same(parent, Activity.Current);
             var stopped = Assert.Single(capture.Stopped);
+            Assert.Same(submissionActivity, stopped);
+            Assert.True(stopped.IsStopped);
             Assert.Equal(RequestBatcherTracing.CallName, stopped.OperationName);
             Assert.False(stopped.Recorded);
             Assert.Equal(parent.TraceId, stopped.TraceId);
@@ -110,7 +126,7 @@ public sealed class SamplingContextTests
                 NewRequest(propagated.TraceContext, propagatedCompletion),
             };
 
-            var batch = RequestBatcherTracing.StartBatch("int", requests);
+            var batch = RequestBatcherTracing.StartBatch(new("int"), requests);
             Assert.NotNull(batch);
             using (batch)
             {

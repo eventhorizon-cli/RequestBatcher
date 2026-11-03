@@ -10,9 +10,10 @@ internal sealed class ResponseRequestBatchHandler<TRequest, TResponse>(
     {
         await handler.HandleAsync(entries, cancellationToken).ConfigureAwait(false);
 
-        foreach (var entry in entries)
+        var count = entries.Count;
+        for (var index = 0; index < count; index++)
         {
-            _ = entry.GetResponse();
+            entries[index].EnsureResponseIsSet();
         }
     }
 }

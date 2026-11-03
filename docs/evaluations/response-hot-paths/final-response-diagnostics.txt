@@ -1,0 +1,36 @@
+// Benchmark: ResponseAssignmentBenchmarks.'Ordered response sequence': ResponseAssignment(IterationCount=10, LaunchCount=2, RunStrategy=Throughput, UnrollFactor=1, WarmupCount=3) [BatchSize=32]
+// Benchmark Process 21202 has exited with code 0.
+// Benchmark Process 21253 has exited with code 0.
+// Benchmark: ResponseAssignmentBenchmarks.'Response factory overload': ResponseAssignment(IterationCount=10, LaunchCount=2, RunStrategy=Throughput, UnrollFactor=1, WarmupCount=3) [BatchSize=32]
+// Benchmark Process 21294 has exited with code 0.
+// Benchmark Process 21339 has exited with code 0.
+// Benchmark: ResponseAssignmentBenchmarks.'Ordered response sequence': ResponseAssignment(IterationCount=10, LaunchCount=2, RunStrategy=Throughput, UnrollFactor=1, WarmupCount=3) [BatchSize=256]
+// Benchmark Process 21366 has exited with code 0.
+// Benchmark Process 21417 has exited with code 0.
+// Benchmark: ResponseAssignmentBenchmarks.'Response factory overload': ResponseAssignment(IterationCount=10, LaunchCount=2, RunStrategy=Throughput, UnrollFactor=1, WarmupCount=3) [BatchSize=256]
+// Benchmark Process 21499 has exited with code 0.
+// Benchmark Process 21536 has exited with code 0.
+// Benchmark: ResponseHotPathBenchmarks.'Concurrent single calls': ResponseHotPaths(InvocationCount=4, IterationCount=8, LaunchCount=2, RunStrategy=Throughput, UnrollFactor=1, WarmupCount=3) [UseDelegate=False, HandlerDelayMilliseconds=0]
+// Benchmark Process 21616 has exited with code 0.
+// Benchmark Process 21617 has exited with code 0.
+// Benchmark: ResponseHotPathBenchmarks.'One explicit batch': ResponseHotPaths(InvocationCount=4, IterationCount=8, LaunchCount=2, RunStrategy=Throughput, UnrollFactor=1, WarmupCount=3) [UseDelegate=False, HandlerDelayMilliseconds=0]
+// Benchmark Process 21618 has exited with code 0.
+// Benchmark Process 21619 has exited with code 0.
+// Benchmark: ResponseHotPathBenchmarks.'Concurrent single calls': ResponseHotPaths(InvocationCount=4, IterationCount=8, LaunchCount=2, RunStrategy=Throughput, UnrollFactor=1, WarmupCount=3) [UseDelegate=False, HandlerDelayMilliseconds=20]
+// Benchmark Process 21620 has exited with code 0.
+// Benchmark Process 21627 has exited with code 0.
+// Benchmark: ResponseHotPathBenchmarks.'One explicit batch': ResponseHotPaths(InvocationCount=4, IterationCount=8, LaunchCount=2, RunStrategy=Throughput, UnrollFactor=1, WarmupCount=3) [UseDelegate=False, HandlerDelayMilliseconds=20]
+// Benchmark Process 21635 has exited with code 0.
+// Benchmark Process 21642 has exited with code 0.
+// Benchmark: ResponseHotPathBenchmarks.'Concurrent single calls': ResponseHotPaths(InvocationCount=4, IterationCount=8, LaunchCount=2, RunStrategy=Throughput, UnrollFactor=1, WarmupCount=3) [UseDelegate=True, HandlerDelayMilliseconds=0]
+// Benchmark Process 21650 has exited with code 0.
+// Benchmark Process 21651 has exited with code 0.
+// Benchmark: ResponseHotPathBenchmarks.'One explicit batch': ResponseHotPaths(InvocationCount=4, IterationCount=8, LaunchCount=2, RunStrategy=Throughput, UnrollFactor=1, WarmupCount=3) [UseDelegate=True, HandlerDelayMilliseconds=0]
+// Benchmark Process 21652 has exited with code 0.
+// Benchmark Process 21654 has exited with code 0.
+// Benchmark: ResponseHotPathBenchmarks.'Concurrent single calls': ResponseHotPaths(InvocationCount=4, IterationCount=8, LaunchCount=2, RunStrategy=Throughput, UnrollFactor=1, WarmupCount=3) [UseDelegate=True, HandlerDelayMilliseconds=20]
+// Benchmark Process 21655 has exited with code 0.
+// Benchmark Process 21664 has exited with code 0.
+// Benchmark: ResponseHotPathBenchmarks.'One explicit batch': ResponseHotPaths(InvocationCount=4, IterationCount=8, LaunchCount=2, RunStrategy=Throughput, UnrollFactor=1, WarmupCount=3) [UseDelegate=True, HandlerDelayMilliseconds=20]
+// Benchmark Process 21675 has exited with code 0.
+// Benchmark Process 21676 has exited with code 0.
