@@ -144,9 +144,8 @@ collection. RequestBatcher's public handler signatures remain unchanged, and
 handler-facing request arrays remain independent of pending-request state.
 Tests cover batch lifetime across overlapping executions, cancellation filtering,
 consumer failures, capacity handoff, routing, and shutdown on both target frameworks.
-The [BufferQueue 2.1.0 tracing I/O evaluation](evaluations/bufferqueue-2.1.0/README.md) compares matched source snapshots
-using 2.0.3 and 2.1.0 with the required API adaptation, retaining the same 20 ms
-workload and sampling matrix, reporting timing and managed allocation separately.
+Dependency comparisons use matched source snapshots with the required API adaptation and the same 20 ms
+workload and sampling matrix, reporting timing and managed allocation separately in local reports.
 
 ## BatchDispatchLoop
 
@@ -292,8 +291,6 @@ exercise the public success, failure, partial-cancellation, capacity-waiting,
 and mixed-submission paths for small and large groups. Timing and allocation
 results must both be reported; primitive wins alone do not establish an
 end-to-end throughput gain.
-The [error-accounting evaluation](evaluations/batch-error-aggregation/README.md)
-records the matched measurements and their limits.
 
 The permit is acquired before advancing the BufferQueue enumerator. With all
 handler slots occupied, the loop does not consume more work. The bounded
@@ -397,21 +394,14 @@ existing 4,096-request dispatch-capacity matrix with synchronous and 20 ms
 handlers. Response stress tests cover concurrent single, explicit, and mixed
 submissions, response correlation, collection order, and exactly-once handling.
 
-## Evaluation Evidence
+## Performance Validation
 
-The [partition submission evaluation](evaluations/partition-submissions/README.md)
-varies partition count independently for single and explicit submissions while
-holding batch size and handler concurrency fixed. The
-[queue pull evaluation](evaluations/queue-pull-capacity/README.md) checks dispatch
-capacity with asynchronous workloads.
-The [dispatch overhead evaluation](evaluations/dispatch-loop-overhead/README.md)
-measures semaphore-based disposal bookkeeping with synchronous single/explicit
-submissions and the 20 ms dispatch-capacity matrix on .NET 10.
-These measurements are evidence for tradeoffs, not throughput guarantees.
-The [paced-arrival evaluation](evaluations/arrival-scheduling/README.md) adds
-caller latency, occupied-slot wall time, batch formation, and PostgreSQL/Redis
-checks. It supports retaining direct dispatch for asynchronous workloads;
-bounded offloading does not show a consistent benefit in those cases.
+The [benchmark index](../tests/RequestBatcher.Benchmarks/README.md) covers partition routing,
+queue pulling, dispatch bookkeeping, and synchronous/20 ms handler workloads. Compare the same source/runtime
+configuration while holding unrelated settings fixed. The
+[paced-arrival probe](../scripts/scheduling-evaluation/README.arrival.md) adds caller latency,
+occupied-slot wall time, batch formation, and PostgreSQL/Redis checks.
+Keep machine-specific measurements and conclusions in local reports outside the repository.
 
 ## Acceptance Criteria
 

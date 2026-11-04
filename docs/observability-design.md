@@ -9,7 +9,7 @@ own subsection, including the direct Meter and custom MeterListener options.
 
 Keep SDK sampler decoration and operation recognition, Activity creation and flags, caller-context fallback,
 creation-time versus completion-time links, completion notifications, allocation behavior, and benchmark setup here
-or in the linked evaluation reports. These implementation details do not belong in the README setup path. The detailed
+or in local evaluation reports outside the repository. These implementation details do not belong in the README setup path. The detailed
 sampling diagram below documents those mechanics; the README keeps the span relationship diagram and a short sampling
 table. Registration snippets must not depend on a particular sample's sampler configuration.
 

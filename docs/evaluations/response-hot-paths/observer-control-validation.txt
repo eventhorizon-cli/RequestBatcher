@@ -1,4 +1,0 @@
-Named tracing validation: Method=ExplicitSubmissionAsync, Mode=Recorded, SuppressSubmissionContextFlow=False, Waves=262147, RequestsPerWave=256, Calls=262402, Batches=2097177, ExactlyOnce=True, DispatchBounds=True, SpanNames=True
-Named tracing validation: Method=ExplicitSubmissionAsync, Mode=Recorded, SuppressSubmissionContextFlow=False, Waves=262147, RequestsPerWave=256, Calls=262402, Batches=2097177, ExactlyOnce=True, DispatchBounds=True, SpanNames=True
-Named tracing validation: Method=ExplicitSubmissionAsync, Mode=Recorded, SuppressSubmissionContextFlow=True, Waves=262147, RequestsPerWave=256, Calls=262402, Batches=2097177, ExactlyOnce=True, DispatchBounds=True, SpanNames=True
-Named tracing validation: Method=ExplicitSubmissionAsync, Mode=Recorded, SuppressSubmissionContextFlow=True, Waves=262147, RequestsPerWave=256, Calls=262402, Batches=2097177, ExactlyOnce=True, DispatchBounds=True, SpanNames=True

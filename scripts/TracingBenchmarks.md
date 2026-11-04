@@ -1,13 +1,11 @@
-# Tracing evaluation guide
+# Tracing benchmark guide
 
-The [single-partition .NET 10 investigation](single-partition-net10.md) records the current bounded allocation probe,
-its raw output, and the decision to retain the existing reverse-link representation. It is not a before/after
-optimization comparison. The [observability design](../../observability-design.md) defines correlation, sampling,
-and completion contracts.
+The [observability design](../docs/observability-design.md) defines correlation, sampling, and completion contracts.
+Keep measurements, traces, and local findings outside the repository.
 
 ## Workloads
 
-[TracingIoOverheadBenchmarks](../../../tests/RequestBatcher.Benchmarks/InMemory/TracingIoOverheadBenchmarks.cs) submits
+[TracingIoOverheadBenchmarks](../tests/RequestBatcher.Benchmarks/InMemory/TracingIoOverheadBenchmarks.cs) submits
 1,024 unique requests per wave, individually or as 32 explicit groups of 32. It uses one unkeyed partition,
 `BatchSize = 32`, `MaxConcurrency = 8`, `MaxPendingRequests = 1,024`, and a singleton handler awaiting a simulated
 20 ms delay per batch. Each wave validates every request ID exactly once. Sampling decisions must match completed
@@ -45,7 +43,7 @@ dotnet run --file scripts/CompareTracingOverhead.cs -- /private/tmp/requestbatch
 
 This compares published 0.2.4 with current source. `--prepare-only` restores and verifies its baseline without running
 the benchmark; `TRACING_OVERHEAD_FILTER` selects cases. These package comparisons do not isolate one source change.
-See the [script index](../../../scripts/README.md) for entry points and arguments.
+See the [script index](README.md) for entry points and arguments.
 
 ## Allocation diagnostics
 
