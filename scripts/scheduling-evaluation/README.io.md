@@ -5,13 +5,13 @@ Run from the repository root:
 The script and its temporary Probe and Server projects target .NET 10 with C# 12.
 
 ```bash
-dotnet run --file scripts/scheduling-evaluation/EvaluateHttpScheduling.cs -- --output artifacts/http-scheduling-evaluation
+dotnet run --file scripts/scheduling-evaluation/EvaluateHttpScheduling.cs -- --output /private/tmp/http-scheduling-evaluation
 ```
 
 For a small build and loopback smoke test (one unkeyed direct/offload pair), use:
 
 ```bash
-dotnet run --file scripts/scheduling-evaluation/EvaluateHttpScheduling.cs -- --smoke --output artifacts/http-scheduling-smoke
+dotnet run --file scripts/scheduling-evaluation/EvaluateHttpScheduling.cs -- --smoke --output /private/tmp/http-scheduling-smoke
 ```
 
 This reuses the isolated source preparation in `EvaluateScheduling.cs` and replaces only the temporary
@@ -75,8 +75,8 @@ not an open-loop saturation test; its p99 is not a production latency estimate. 
 HTTP omits TLS, remote network variability, real database pools/locks, large payloads,
 retries, cache hits and rate limits. The two processes share the host's CPU resources.
 
-Generated files stay in the local output directory and should not be committed. Keep
-only concise result summaries in `docs/evaluations`. The generated `environment.json`
+Generated files and result summaries stay in the local output directory outside the repository and should not be committed.
+The generated `environment.json`
 records SDK, source commit, dirty library diff and
 experimental parameters. `measurements.jsonl` contains all measurements; `server.log`
 contains server failures, if any. The original experiment's README documents the
@@ -86,11 +86,11 @@ To control batch formation, run the five pure asynchronous HTTP cases with each 
 submitted through the explicit batch API:
 
 ```bash
-dotnet run --file scripts/scheduling-evaluation/EvaluateHttpScheduling.cs -- --batch-control --output artifacts/http-batch-control
+dotnet run --file scripts/scheduling-evaluation/EvaluateHttpScheduling.cs -- --batch-control --output /private/tmp/http-batch-control
 ```
 
-This runs 30 additional client processes by default. The explicit submission produces
-full batches in the recorded experiment; this is not a public guarantee. Its completion
+This runs 30 additional client processes by default. The explicit submission provides
+a control for batch formation; full batches are not a public guarantee. Its completion
 timestamps record when the **whole submission** completes, so use this control for
 throughput/batch-formation comparisons and do not compare its p99 directly with the
 individual-submission latency. `--launches` changes the number of fresh processes per
@@ -100,7 +100,7 @@ To measure the effect of actual external I/O latency, run the focused sweep:
 
 ```bash
 dotnet run --file scripts/scheduling-evaluation/EvaluateHttpScheduling.cs -- --latency-sweep \
-  --delays 10 100 500 --output artifacts/http-latency-sweep
+  --delays 10 100 500 --output /private/tmp/http-latency-sweep
 ```
 
 The sweep forces explicit batch submission and compares both offload modes for each delay
