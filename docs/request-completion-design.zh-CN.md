@@ -5,7 +5,7 @@
 ## 范围与契约
 
 本文说明当前 completion 类型的职责和协作方式。公开 API 见[请求与响应设计](request-response-batching-design.md)，
-追踪、指标和执行上下文契约见[可观测性设计](observability-design.md)。
+追踪、指标和 `ExecutionContext` 契约见[可观测性设计](observability-design.md)。
 
 一次提交对应一次公开的 `ExecuteAsync` 调用。一次显式提交可以包含多个请求，并拆入多个 Handler 批次；
 一个 Handler 批次也可以包含多次提交的请求。提交完成和 Handler 批次完成是两个边界。
@@ -95,7 +95,7 @@ observer 按一次提交协调结果发布。
 `observeCompletion: false`，直接跟踪包含响应组装的 Task。
 
 构造时，observer 捕获提交方的 `ExecutionContext`，并持有 Activity 和可选的 `SubmissionTraceContext`。
-若上下文流动被抑制，捕获的执行上下文为 null；回调隔离仍会恢复完成线程的上下文，但不会引入提交方上下文。
+若上下文流动被抑制，捕获的 `ExecutionContext` 为 null；回调隔离仍会恢复完成线程的上下文，但不会引入提交方上下文。
 提交委托收到 observer 后，选定的 tracing completion 在构造函数中调用 `Register(this)`。
 注册只是保存一个引用，不是订阅事件；它必须先于完成通知和 attach。显式提交注册的是共享聚合 completion，
 不会为每个请求分别注册。observer 不负责入队、请求取消注册或容量释放。
@@ -120,7 +120,7 @@ observer 按一次提交协调结果发布。
 随后 catch 记录抛出的失败、补齐链接、释放 Activity，并重新抛出异常。
 
 observer 没有 `Dispose`、后台监控、全局注册或对象池。tracing completion 持有 observer，observer 又持有
-completion；发布后不会主动清空其中的 Activity、捕获的执行上下文和链接上下文。
+completion；发布后不会主动清空其中的 Activity、捕获的 `ExecutionContext` 和链接上下文。
 当存活的 pending item 或其他操作状态不再让这组对象保持可达时，GC 可以回收它们，包括循环引用。
 发布 Task 不保证对象立即回收；结束 Activity、释放队列容量也是分别处理的生命周期操作。
 
@@ -133,7 +133,7 @@ completion；发布后不会主动清空其中的 Activity、捕获的执行上�
    锁只保护判断状态，发布回调在锁外执行。
 
 若返回的就是 completion 的 Task，observer 先补齐反向链接、结束 Execute Activity，再发布结果。
-同步回调结束后会恢复完成线程的执行上下文。直接 tracing 回调即使抛出异常，`finally` 仍会尝试发布基础 completion。
+同步回调结束后会恢复完成线程的 `ExecutionContext`。直接 tracing 回调即使抛出异常，`finally` 仍会尝试发布基础 completion。
 
 若返回的是其他 Task，observer 会先发布内部 completion，但不结束 Execute span，让生产端等待或其他外层包装能够继续。
 此时过早结束 span 会漏掉剩余工作；若一直扣住内部 completion 再等待外层 Task，则会阻碍外层完成。

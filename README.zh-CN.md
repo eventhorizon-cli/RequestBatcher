@@ -192,8 +192,8 @@ public sealed class CatalogHandler : IRequestBatchHandler<PriceLookup, decimal?>
 `Scoped` 和 `Transient` Handler 会在每个处理批次专属的异步作用域中解析一次。`Singleton` Handler 会跨批次
 复用；当 `MaxConcurrency > 1` 时，它必须保证线程安全。
 
-Handler 不会继承调用方的执行上下文，批次作用域也独立于 HTTP 请求作用域。处理所需的数据应通过请求对象显式传递，
-详见 [Handler 的执行上下文](#handler-的执行上下文)。
+Handler 不会继承调用方的 `ExecutionContext`，批次作用域也独立于 HTTP 请求作用域。处理所需的数据应通过请求对象显式传递，
+详见 [Handler 的 ExecutionContext](#handler-的-executioncontext)。
 
 ### Partition Key 路由
 
@@ -873,9 +873,9 @@ builder.Services.AddRequestBatcher<PriceLookup, decimal?, CatalogHandler>(
 Handler 会在分发调用链上执行，直到完成或遇到尚未完成的异步等待。在此之前的 CPU 密集计算或同步阻塞会
 推迟其他批次的分发，即使仍有空闲执行名额。`MaxConcurrency` 是并发上限，不会自动将同步 Handler 代码并行化。
 
-### Handler 的执行上下文
+### Handler 的 ExecutionContext
 
-**Handler 不会继承调用方的执行上下文。** 一个处理批次可能包含多个调用方的请求，因此 Handler 不在其中某个调用方的
+**Handler 不会继承调用方的 `ExecutionContext`。** 一个处理批次可能包含多个调用方的请求，因此 Handler 不在其中某个调用方的
 HTTP 请求上下文中运行。调用方设置的 `AsyncLocal` 值、`ILogger.BeginScope` 日志作用域、`Activity.Current` 和 Baggage
 不会自动传入 Handler；也不能依赖 `IHttpContextAccessor.HttpContext` 读取原 HTTP 请求。
 
@@ -884,7 +884,7 @@ Handler 使用的批次 DI Scope 与 HTTP 请求的 DI Scope 相互独立。即�
 读取，并作为不可变值放进请求对象。不要通过传递整个 `HttpContext`、请求的 Service Provider 或请求作用域中的服务实例来
 保留上下文，这些对象的生命周期仍属于原请求。
 
-链路追踪通过 Span Link 关联提交与处理批次，不会恢复调用方的执行上下文。Handler 内创建的 Activity 会关联到当前批次
+链路追踪通过 Span Link 关联提交与处理批次，不会恢复调用方的 `ExecutionContext`。Handler 内创建的 Activity 会关联到当前批次
 Span，详见[链路追踪](#链路追踪)。
 
 ### 完成与失败
@@ -1247,7 +1247,7 @@ Named RequestBatcher 会在操作名后追加注册名称，例如 `RequestBatch
   同一次提交的多项请求，在每个批次中只计一次。
 
 Handler 不会继承调用方的 HTTP Span、日志 Scope、Baggage 或其他 `AsyncLocal` 值。
-处理所需的业务数据应通过请求显式传递，详见 [Handler 的执行上下文](#handler-的执行上下文)。Handler 内创建的 Activity
+处理所需的业务数据应通过请求显式传递，详见 [Handler 的 ExecutionContext](#handler-的-executioncontext)。Handler 内创建的 Activity
 会正常关联到当前批次 Span。
 
 ![RequestBatcher 可观测性模型](docs/diagrams/observability.zh-CN.svg)
@@ -1345,13 +1345,6 @@ PostgreSQL 和 Grafana OTel LGTM。生成器并发提交含 2 到 10 条商品�
 [README](samples/RequestBatcher.Delegates/README.md)。
 
 维护者可按[发布流程](docs/package-release-design.md)独立发布两个包。
-
-## 升级说明
-
-响应包装类型统一命名为 `RequestBatchEntry<TRequest, TResponse>`。升级已有代码时，将
-`RequestBatchItem<TRequest, TResponse>` 和 `RequestBatchItemExtensions` 分别改为
-`RequestBatchEntry<TRequest, TResponse>` 和 `RequestBatchEntryExtensions`，并重新编译所有调用方。
-这是源码与二进制不兼容的变更；响应赋值与完成行为保持一致。
 
 ## 许可证
 

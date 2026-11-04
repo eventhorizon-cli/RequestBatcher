@@ -366,16 +366,12 @@ Histogram `sum / count` gives the mean. For metric semantics, tags, queries, and
 See the [full observability documentation](https://github.com/eventhorizon-cli/RequestBatcher#observability) for span names,
 links, sampling details, and exporters.
 
-## Samples and Upgrade Notes
-
-When upgrading code that used `RequestBatchItem<TRequest, TResponse>`, rename it to
-`RequestBatchEntry<TRequest, TResponse>` and rename `RequestBatchItemExtensions` to
-`RequestBatchEntryExtensions`. This is a source and binary breaking change; response assignment behavior is unchanged.
+## Samples
 
 - [Typed-handler PostgreSQL sample](https://github.com/eventhorizon-cli/RequestBatcher/tree/main/samples/RequestBatcher.Deduplication)
 - [Delegate-handler PostgreSQL sample](https://github.com/eventhorizon-cli/RequestBatcher/tree/main/samples/RequestBatcher.Delegates)
 - [Observability sample](https://github.com/eventhorizon-cli/RequestBatcher/tree/main/samples/RequestBatcher.Observability)
-- [Upgrade notes and complete API documentation](https://github.com/eventhorizon-cli/RequestBatcher#readme)
+- [Complete API documentation](https://github.com/eventhorizon-cli/RequestBatcher#readme)
 
 ## License
 
