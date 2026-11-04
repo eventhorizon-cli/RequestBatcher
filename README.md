@@ -1461,13 +1461,6 @@ handler-class version. The delegate sample has its own HTTP and database ports; 
 
 Maintainers can publish packages independently using the [release workflow](docs/package-release-design.md).
 
-## Upgrade Notes
-
-The response wrapper is `RequestBatchEntry<TRequest, TResponse>`. When upgrading code that used
-`RequestBatchItem<TRequest, TResponse>`, update that type and its extension class name to `RequestBatchEntry`
-and `RequestBatchEntryExtensions`, then rebuild all consumers. This is a source and binary breaking change;
-response assignment and completion behavior are unchanged.
-
 ## License
 
 RequestBatcher is available under the [MIT License](LICENSE).

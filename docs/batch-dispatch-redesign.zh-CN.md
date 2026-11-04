@@ -109,9 +109,9 @@ coordinator 会将已接收请求保存在并发待处理注册表中，完成�
 
 分发循环会在推进 BufferQueue 枚举器之前获取许可。当所有 Handler 名额都被占用时，循环不会继续消费工作。此时有界 BufferQueue 最多保存 `MaxPendingRequests` 个排队请求，并直接应用配置的等待或失败准入策略。
 
-## 后台执行上下文
+## 后台 ExecutionContext
 
-分发循环和 Consumer 监控器会在线程池启动，但不会捕获构造 coordinator 的调用方执行上下文。启动时只在调度每个后台任务期间抑制执行上下文流动，并在同步返回前恢复调用方原有的流动状态，也支持调用方此前已抑制流动的情况。任务边界会隔离 Consumer 枚举和监控器的同步前缀。后台任务内部仍会正常流动上下文，包括跨越 Handler 的 await。
+分发循环和 Consumer 监控器会在线程池启动，但不会捕获构造 coordinator 的调用方 `ExecutionContext`。启动时只在调度每个后台任务期间抑制 `ExecutionContext` 流动，并在同步返回前恢复调用方原有的流动状态，也支持调用方此前已抑制流动的情况。任务边界会隔离 Consumer 枚举和监控器的同步前缀。后台任务内部仍会正常流动上下文，包括跨越 Handler 的 await。
 
 因此，Handler 和 Consumer 故障监控不会继承初始化 coordinator 的 HTTP 请求中的 `Activity.Current`、日志作用域或其他 `AsyncLocal` 状态。提交请求也不会把调用方的环境上下文转移给后台任务。调用方在解析服务和等待完成后仍保留自己的上下文。租户标识等应用数据必须显式放入请求中。Singleton 服务仍遵循通常的 DI 创建语义，不得在构造函数中捕获请求级状态。
 
