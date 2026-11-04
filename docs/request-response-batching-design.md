@@ -273,6 +273,9 @@ selector; the projected options preserve this mode. Counts below one are rejecte
 
 ## Typed Single-Request Completion
 
+See the [completion design](request-completion-design.md) for the four public call paths, the shared explicit-submission
+completion, and the tracing observer's publication handshake.
+
 Single response submissions create an internal `ResponseCompletion<TRequest,
 TResponse>` result box that inherits `TaskCompletionSource<TResponse>`. It
 references the response item and implements the pending-request completion

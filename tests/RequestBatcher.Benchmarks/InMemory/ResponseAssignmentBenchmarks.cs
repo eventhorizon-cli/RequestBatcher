@@ -28,11 +28,15 @@ public class ResponseAssignmentBenchmarks
     private long _orderedSequenceValidatedBatchCount;
     private long _responseFactoryValidatedBatchCount;
 
-    /// <summary>Gets or sets the number of entries in each response-assignment batch.</summary>
+    /// <summary>
+    /// Gets or sets the number of entries in each response-assignment batch.
+    /// </summary>
     [Params(32, 256)]
     public int BatchSize { get; set; }
 
-    /// <summary>Resets successful validation counts before a benchmark case runs.</summary>
+    /// <summary>
+    /// Resets successful validation counts before a benchmark case runs.
+    /// </summary>
     [GlobalSetup]
     public void GlobalSetup()
     {
@@ -40,7 +44,9 @@ public class ResponseAssignmentBenchmarks
         _responseFactoryValidatedBatchCount = 0;
     }
 
-    /// <summary>Measures ordered response construction and sequence assignment for one batch.</summary>
+    /// <summary>
+    /// Measures ordered response construction and sequence assignment for one batch.
+    /// </summary>
     [Benchmark(Baseline = true, Description = "Ordered response sequence")]
     public int OrderedSequenceAssignment()
     {
@@ -57,7 +63,9 @@ public class ResponseAssignmentBenchmarks
         return checksum;
     }
 
-    /// <summary>Measures the response factory overload for one batch.</summary>
+    /// <summary>
+    /// Measures the response factory overload for one batch.
+    /// </summary>
     [Benchmark(Description = "Response factory overload")]
     public int ResponseFactoryAssignment()
     {
@@ -68,7 +76,9 @@ public class ResponseAssignmentBenchmarks
         return checksum;
     }
 
-    /// <summary>Writes validation counts after the benchmark case completes.</summary>
+    /// <summary>
+    /// Writes validation counts after the benchmark case completes.
+    /// </summary>
     [GlobalCleanup]
     public void GlobalCleanup()
     {

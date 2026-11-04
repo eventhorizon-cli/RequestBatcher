@@ -42,15 +42,21 @@ public class PackageComparisonBenchmarks
     private long _handlerCalls;
     private string? _method;
 
-    /// <summary>Gets or sets whether requests use the cached static delegate handler.</summary>
+    /// <summary>
+    /// Gets or sets whether requests use the cached static delegate handler.
+    /// </summary>
     [Params(false, true)]
     public bool UseDelegate { get; set; }
 
-    /// <summary>Gets or sets the simulated asynchronous downstream delay applied once per handler batch.</summary>
+    /// <summary>
+    /// Gets or sets the simulated asynchronous downstream delay applied once per handler batch.
+    /// </summary>
     [Params(0, 20)]
     public int DownstreamDelayMilliseconds { get; set; }
 
-    /// <summary>Builds and primes the same public submission pipeline outside measurement.</summary>
+    /// <summary>
+    /// Builds and primes the same public submission pipeline outside measurement.
+    /// </summary>
     [GlobalSetup]
     public void GlobalSetup()
     {
@@ -82,19 +88,27 @@ public class PackageComparisonBenchmarks
         _handlerCalls = 0;
     }
 
-    /// <summary>Measures one complete 256-request wave of single response submissions.</summary>
+    /// <summary>
+    /// Measures one complete 256-request wave of single response submissions.
+    /// </summary>
     [Benchmark(Description = "Single responses")]
     public Task SingleResponses() => RunSingleResponsesAsync();
 
-    /// <summary>Measures one complete wave from an explicit submission containing all 256 requests.</summary>
+    /// <summary>
+    /// Measures one complete wave from an explicit submission containing all 256 requests.
+    /// </summary>
     [Benchmark(Description = "Explicit responses")]
     public Task ExplicitResponses() => RunExplicitResponsesAsync();
 
-    /// <summary>Measures one complete wave from 128 single submissions and eight explicit groups of 16 requests.</summary>
+    /// <summary>
+    /// Measures one complete wave from 128 single submissions and eight explicit groups of 16 requests.
+    /// </summary>
     [Benchmark(Description = "Mixed responses")]
     public Task MixedResponses() => RunMixedResponsesAsync();
 
-    /// <summary>Drains the provider and writes one successful validation record.</summary>
+    /// <summary>
+    /// Drains the provider and writes one successful validation record.
+    /// </summary>
     [GlobalCleanup]
     public async Task GlobalCleanupAsync()
     {

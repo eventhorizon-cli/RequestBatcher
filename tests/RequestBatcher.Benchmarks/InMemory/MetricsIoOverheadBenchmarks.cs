@@ -262,16 +262,24 @@ public class MetricsIoOverheadBenchmarks
     /// </summary>
     public enum MetricsMode
     {
-        /// <summary>No OpenTelemetry meter provider is registered.</summary>
+        /// <summary>
+        /// No OpenTelemetry meter provider is registered.
+        /// </summary>
         Disabled,
 
-        /// <summary>The SDK aggregates metrics, with collection only at cleanup.</summary>
+        /// <summary>
+        /// The SDK aggregates metrics, with collection only at cleanup.
+        /// </summary>
         AggregationOnly,
 
-        /// <summary>The SDK collects metrics every 1,000 milliseconds.</summary>
+        /// <summary>
+        /// The SDK collects metrics every 1,000 milliseconds.
+        /// </summary>
         Periodic1000,
 
-        /// <summary>The SDK collects metrics every 100 milliseconds.</summary>
+        /// <summary>
+        /// The SDK collects metrics every 100 milliseconds.
+        /// </summary>
         Periodic100,
     }
 

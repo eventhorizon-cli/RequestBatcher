@@ -2,6 +2,9 @@ using RequestBatcher.PendingRequests;
 
 namespace RequestBatcher.Diagnostics.Tracing;
 
+/// <summary>
+/// Stages a typed response outcome so tracing can coordinate span finalization and task publication.
+/// </summary>
 internal sealed class TracedResponseCompletion<TRequest, TResponse> : ResponseCompletion<TRequest, TResponse>, IRequestCompletionNotification
 {
     private readonly IRequestCompletionObserver _observer;
@@ -14,6 +17,7 @@ internal sealed class TracedResponseCompletion<TRequest, TResponse> : ResponseCo
         : base(entry)
     {
         _observer = observer;
+        // This traced completion replaces the ordinary completion while retaining its response entry.
         observer.Register(this);
     }
 
@@ -23,6 +27,7 @@ internal sealed class TracedResponseCompletion<TRequest, TResponse> : ResponseCo
 
     bool IRequestCompletionNotification.IsCanceled => _isCanceled;
 
+    // The typed completion intercepts value and terminal-state publication at its virtual publication methods.
     protected override void PublishResult(TResponse result)
     {
         _result = result;

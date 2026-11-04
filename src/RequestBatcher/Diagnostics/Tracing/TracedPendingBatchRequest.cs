@@ -1,6 +1,6 @@
-using RequestBatcher.Diagnostics.Tracing;
+using RequestBatcher.PendingRequests;
 
-namespace RequestBatcher.PendingRequests;
+namespace RequestBatcher.Diagnostics.Tracing;
 
 // Keep tracing metadata off the ordinary pending item so disabled tracing does not enlarge every queued request.
 internal sealed class TracedPendingBatchRequest<TRequest>(

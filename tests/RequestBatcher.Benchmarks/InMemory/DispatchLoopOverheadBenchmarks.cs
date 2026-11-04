@@ -35,11 +35,15 @@ public class DispatchLoopOverheadBenchmarks
     private SynchronousHandler _handler = null!;
     private long _validatedWaves;
 
-    /// <summary>Gets or sets the maximum request count passed to one handler invocation.</summary>
+    /// <summary>
+    /// Gets or sets the maximum request count passed to one handler invocation.
+    /// </summary>
     [Params(1, 32)]
     public int BatchSize { get; set; }
 
-    /// <summary>Builds the public batcher and warms both submission paths outside measurement.</summary>
+    /// <summary>
+    /// Builds the public batcher and warms both submission paths outside measurement.
+    /// </summary>
     [GlobalSetup]
     public void GlobalSetup()
     {
@@ -67,20 +71,26 @@ public class DispatchLoopOverheadBenchmarks
         RunWaveAsync(explicitSubmission: true).GetAwaiter().GetResult();
     }
 
-    /// <summary>Measures 1,024 concurrent single submissions, started before awaiting their tasks.</summary>
+    /// <summary>
+    /// Measures 1,024 concurrent single submissions, started before awaiting their tasks.
+    /// </summary>
     [Benchmark(
         Baseline = true,
         OperationsPerInvoke = RequestCount,
         Description = "Concurrent single submissions")]
     public Task ConcurrentSingleSubmissionsAsync() => RunWaveAsync(explicitSubmission: false);
 
-    /// <summary>Measures one explicit submission containing all 1,024 requests.</summary>
+    /// <summary>
+    /// Measures one explicit submission containing all 1,024 requests.
+    /// </summary>
     [Benchmark(
         OperationsPerInvoke = RequestCount,
         Description = "One explicit submission")]
     public Task ExplicitSubmissionAsync() => RunWaveAsync(explicitSubmission: true);
 
-    /// <summary>Drains the batcher and disposes its service provider outside measurement.</summary>
+    /// <summary>
+    /// Drains the batcher and disposes its service provider outside measurement.
+    /// </summary>
     [GlobalCleanup]
     public async Task GlobalCleanupAsync()
     {

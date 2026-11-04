@@ -5,9 +5,13 @@ namespace RequestBatcher;
 /// </summary>
 public enum RequestBatchFullMode
 {
-    /// <summary>Asynchronously wait until capacity becomes available.</summary>
+    /// <summary>
+    /// Asynchronously wait until capacity becomes available.
+    /// </summary>
     Wait,
 
-    /// <summary>Fail the request submission immediately.</summary>
+    /// <summary>
+    /// Fail the request submission immediately.
+    /// </summary>
     Fail,
 }

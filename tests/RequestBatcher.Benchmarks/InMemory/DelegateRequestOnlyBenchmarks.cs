@@ -31,31 +31,45 @@ public class DelegateRequestOnlyBenchmarks
     private Func<BenchmarkRequest, Task> _submitSingle = null!;
     private Func<IEnumerable<BenchmarkRequest>, Task> _submitExplicit = null!;
 
-    /// <summary>Gets or sets the simulated downstream delay for each handler batch.</summary>
+    /// <summary>
+    /// Gets or sets the simulated downstream delay for each handler batch.
+    /// </summary>
     [Params(0, 20)]
     public int DownstreamDelayMilliseconds { get; set; }
 
-    /// <summary>Gets or sets whether each wave uses one explicit list submission.</summary>
+    /// <summary>
+    /// Gets or sets whether each wave uses one explicit list submission.
+    /// </summary>
     [Params(false, true)]
     public bool ExplicitSubmission { get; set; }
 
-    /// <summary>Builds, binds, and warms the typed singleton batcher outside measurement.</summary>
+    /// <summary>
+    /// Builds, binds, and warms the typed singleton batcher outside measurement.
+    /// </summary>
     [GlobalSetup(Target = nameof(TypedSingleton))]
     public void SetupTypedSingleton() => Setup(useDelegate: false);
 
-    /// <summary>Builds, binds, and warms the static delegate batcher outside measurement.</summary>
+    /// <summary>
+    /// Builds, binds, and warms the static delegate batcher outside measurement.
+    /// </summary>
     [GlobalSetup(Target = nameof(StaticDelegate))]
     public void SetupStaticDelegate() => Setup(useDelegate: true);
 
-    /// <summary>Measures a typed singleton request-only handler.</summary>
+    /// <summary>
+    /// Measures a typed singleton request-only handler.
+    /// </summary>
     [Benchmark(Baseline = true)]
     public Task TypedSingleton() => RunWaveAsync();
 
-    /// <summary>Measures a static delegate request-only handler.</summary>
+    /// <summary>
+    /// Measures a static delegate request-only handler.
+    /// </summary>
     [Benchmark]
     public Task StaticDelegate() => RunWaveAsync();
 
-    /// <summary>Drains and disposes the application-owned provider outside measurement.</summary>
+    /// <summary>
+    /// Drains and disposes the application-owned provider outside measurement.
+    /// </summary>
     [GlobalCleanup]
     public async Task CleanupAsync() => await _provider.DisposeAsync().ConfigureAwait(false);
 

@@ -1,5 +1,9 @@
 namespace RequestBatcher.PendingRequests;
 
+/// <summary>
+/// Aggregates terminal outcomes for every request in one nonempty explicit submission, across handler batches.
+/// It does not assemble or order response values.
+/// </summary>
 internal class BatchSubmissionCompletion : TaskCompletionSource, IRequestCompletion
 {
     private readonly CancellationToken _cancellationToken;
@@ -25,6 +29,7 @@ internal class BatchSubmissionCompletion : TaskCompletionSource, IRequestComplet
     {
         ArgumentNullException.ThrowIfNull(exception);
 
+        // Retain each distinct exception instance so the aggregate reports errors from all handler batches.
         var firstException = Volatile.Read(ref _firstException);
         if (firstException is null)
         {
@@ -74,6 +79,7 @@ internal class BatchSubmissionCompletion : TaskCompletionSource, IRequestComplet
 
     protected virtual void Publish()
     {
+        // Errors take precedence over cancellation; publication waits until every submitted request is terminal.
         // Error writers publish before decrementing, so the last item owns a stable exception set.
         if (Volatile.Read(ref _exceptions) is { } exceptions)
         {

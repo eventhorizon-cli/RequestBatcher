@@ -217,19 +217,29 @@ public class TracingIoOverheadBenchmarks
     /// </summary>
     public enum ListenerMode
     {
-        /// <summary>No ActivityListener is installed.</summary>
+        /// <summary>
+        /// No ActivityListener is installed.
+        /// </summary>
         Disabled,
 
-        /// <summary>The SDK drops all root spans while maintaining propagation context.</summary>
+        /// <summary>
+        /// The SDK drops all root spans while maintaining propagation context.
+        /// </summary>
         Sample0,
 
-        /// <summary>The SDK samples approximately one percent of root traces.</summary>
+        /// <summary>
+        /// The SDK samples approximately one percent of root traces.
+        /// </summary>
         Sample1,
 
-        /// <summary>The SDK samples approximately ten percent of root traces.</summary>
+        /// <summary>
+        /// The SDK samples approximately ten percent of root traces.
+        /// </summary>
         Sample10,
 
-        /// <summary>The SDK records every root trace without exporting or retaining spans.</summary>
+        /// <summary>
+        /// The SDK records every root trace without exporting or retaining spans.
+        /// </summary>
         Sample100,
     }
 

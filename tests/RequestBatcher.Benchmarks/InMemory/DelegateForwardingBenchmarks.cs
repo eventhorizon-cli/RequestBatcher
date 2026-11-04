@@ -27,7 +27,9 @@ public class DelegateForwardingBenchmarks
     private ForwardingRequest[] _requests = null!;
     private ForwardingState _state = null!;
 
-    /// <summary>Builds both handlers and binds the delegate outside measurement.</summary>
+    /// <summary>
+    /// Builds both handlers and binds the delegate outside measurement.
+    /// </summary>
     [GlobalSetup]
     public void Setup()
     {
@@ -44,15 +46,21 @@ public class DelegateForwardingBenchmarks
         RunDelegateAsync().GetAwaiter().GetResult();
     }
 
-    /// <summary>Measures typed-handler invocation with the shared asynchronous gate.</summary>
+    /// <summary>
+    /// Measures typed-handler invocation with the shared asynchronous gate.
+    /// </summary>
     [Benchmark(Baseline = true)]
     public Task TypedHandler() => RunTypedAsync();
 
-    /// <summary>Measures bound delegate forwarding with the same asynchronous gate.</summary>
+    /// <summary>
+    /// Measures bound delegate forwarding with the same asynchronous gate.
+    /// </summary>
     [Benchmark]
     public Task DelegateHandler() => RunDelegateAsync();
 
-    /// <summary>Disposes the setup provider outside measurement.</summary>
+    /// <summary>
+    /// Disposes the setup provider outside measurement.
+    /// </summary>
     [GlobalCleanup]
     public async Task CleanupAsync() => await _provider.DisposeAsync().ConfigureAwait(false);
 

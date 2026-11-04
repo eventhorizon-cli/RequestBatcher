@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1380" height="520" viewBox="0 0 1380 520" role="img" aria-labelledby="title desc">
+  <title id="title">追踪与完成结果的发布顺序</title>
+  <desc id="desc">直接路径先结束 Execute span 再发布 Task。包装路径先放行内部 Task，等待外层 Task 后再结束 span。</desc>
+  <defs><marker id="arrow" markerWidth="10" markerHeight="10" refX="9" refY="5" orient="auto" markerUnits="userSpaceOnUse"><path d="M0 0 L10 5 L0 10 Z" fill="#596773"/></marker></defs>
+  <rect width="1380" height="520" fill="white"/>
+  <g font-family="Arial, PingFang SC, sans-serif" fill="#303b44" font-size="21">
+    <text x="35" y="42">直接路径：返回的 Task 就是已注册 completion 的 Task</text>
+    <text x="35" y="248">包装路径：返回的 Task 与已注册 completion 的 Task 不同</text>
+    <g fill="none" stroke="#596773" stroke-width="2" marker-end="url(#arrow)">
+      <path d="M265 130 H305"/><path d="M535 130 H575"/>
+      <path d="M265 340 H305"/><path d="M535 340 H575"/><path d="M805 340 H845"/><path d="M1075 340 H1115"/>
+    </g>
+    <g stroke-width="1.5">
+      <rect x="35" y="82" width="230" height="96" rx="5" fill="#edf1f5" stroke="#596773"/>
+      <rect x="305" y="82" width="230" height="96" rx="5" fill="#f4edfb" stroke="#75529b"/>
+      <rect x="575" y="82" width="230" height="96" rx="5" fill="#e9f6f1" stroke="#2f6f5e"/>
+      <rect x="35" y="292" width="230" height="96" rx="5" fill="#edf1f5" stroke="#596773"/>
+      <rect x="305" y="292" width="230" height="96" rx="5" fill="#edf1f5" stroke="#596773"/>
+      <rect x="575" y="292" width="230" height="96" rx="5" fill="#eaf2ff" stroke="#3567a7"/>
+      <rect x="845" y="292" width="230" height="96" rx="5" fill="#f4edfb" stroke="#75529b"/>
+      <rect x="1115" y="292" width="230" height="96" rx="5" fill="#e9f6f1" stroke="#2f6f5e"/>
+    </g>
+    <g text-anchor="middle">
+      <text x="150" y="123"><tspan x="150">结果就绪</tspan><tspan x="150" dy="28">且已 attach</tspan></text>
+      <text x="420" y="123"><tspan x="420">结束</tspan><tspan x="420" dy="28">Execute span</tspan></text>
+      <text x="690" y="123"><tspan x="690">发布</tspan><tspan x="690" dy="28">completion Task</tspan></text>
+      <text x="150" y="333"><tspan x="150">结果就绪</tspan><tspan x="150" dy="28">且已 attach</tspan></text>
+      <text x="420" y="333"><tspan x="420">发布</tspan><tspan x="420" dy="28">内部 Task</tspan></text>
+      <text x="690" y="333"><tspan x="690">外层 Task</tspan><tspan x="690" dy="28">完成</tspan></text>
+      <text x="960" y="333"><tspan x="960">结束</tspan><tspan x="960" dy="28">Execute span</tspan></text>
+      <text x="1230" y="322" font-size="19"><tspan x="1230">发布桥接 Task</tspan><tspan x="1230" dy="25">或原样返回</tspan><tspan x="1230" dy="25">已完成的 Task</tspan></text>
+    </g>
+    <text x="35" y="435" font-size="19">外层工作可能包含接纳等待；批量响应同样跟踪外层 Task，但不使用本图的 observer。</text>
+    <text x="35" y="470" font-size="19">tracing 跟踪提交委托返回的 Task；Execute 耗时指标还可能增加一层包装。</text>
+  </g>
+</svg>

@@ -31,6 +31,7 @@ internal sealed class ResponseRequestBatcher<TRequest, TResponse>(
             ? new ResponseCompletion<TRequest, TResponse>(entry)
             : new TracedResponseCompletion<TRequest, TResponse>(entry, completionObserver);
         var submission = batcher.ExecuteCoreAsync(entry, completion, cancellationToken, traceContext);
+        // The direct fast path returns the typed completion task; slower admission needs a wrapper to read the response.
         return ReferenceEquals(submission, completion.Task)
             ? completion.Task
             : AwaitSubmissionAsync(submission, entry);
@@ -41,7 +42,8 @@ internal sealed class ResponseRequestBatcher<TRequest, TResponse>(
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(requests);
-        // The call includes response-array assembly after queue completion, so observe the returned Task instead.
+        // The returned task includes ordered response-array assembly after the shared submission completion.
+        // Trace that outer task rather than only the aggregate terminal outcome.
         return ExecuteCall(
             RequestBatcherMetricTags.MultiSubmission,
             (Batcher: this, Requests: requests, Token: cancellationToken),
@@ -71,6 +73,7 @@ internal sealed class ResponseRequestBatcher<TRequest, TResponse>(
         CancellationToken cancellationToken,
         SubmissionTraceContext? traceContext)
     {
+        // One shared completion covers all submitted entries; response ordering is assembled only after it succeeds.
         await batcher
             .ExecuteBatchCoreAsync(
                 requests,

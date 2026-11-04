@@ -15,9 +15,13 @@ public sealed class RequestBatchQueueFullException : InvalidOperationException
         RequestedCount = requestedCount;
     }
 
-    /// <summary>Gets the configured pending-request capacity.</summary>
+    /// <summary>
+    /// Gets the configured pending-request capacity.
+    /// </summary>
     public int Capacity { get; }
 
-    /// <summary>Gets the number of requests in the rejected submission.</summary>
+    /// <summary>
+    /// Gets the number of requests in the rejected submission.
+    /// </summary>
     public int RequestedCount { get; }
 }

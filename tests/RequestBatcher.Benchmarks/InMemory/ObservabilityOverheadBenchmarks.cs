@@ -155,13 +155,19 @@ public class ObservabilityOverheadBenchmarks
     /// </summary>
     public enum ObservabilityMode
     {
-        /// <summary>No OpenTelemetry provider is registered.</summary>
+        /// <summary>
+        /// No OpenTelemetry provider is registered.
+        /// </summary>
         Disabled,
 
-        /// <summary>The RequestBatcher meter is registered without tracing.</summary>
+        /// <summary>
+        /// The RequestBatcher meter is registered without tracing.
+        /// </summary>
         Metrics,
 
-        /// <summary>The RequestBatcher meter and ActivitySource are registered.</summary>
+        /// <summary>
+        /// The RequestBatcher meter and ActivitySource are registered.
+        /// </summary>
         TracingAndMetrics,
     }
 

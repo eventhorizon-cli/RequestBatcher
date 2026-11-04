@@ -32,7 +32,9 @@ public class BatchScopeBenchmarks
     private DelegateRequestBatchHandler<ScopeRequest> _delegateHandler = null!;
     private ScopeRequest[] _requests = null!;
 
-    /// <summary>Builds the provider and warms every measured path outside the benchmark.</summary>
+    /// <summary>
+    /// Builds the provider and warms every measured path outside the benchmark.
+    /// </summary>
     [GlobalSetup]
     public void Setup()
     {
@@ -57,7 +59,9 @@ public class BatchScopeBenchmarks
         EnsureSingletonUsable();
     }
 
-    /// <summary>Disposes the root provider and verifies that the singleton was disposed once.</summary>
+    /// <summary>
+    /// Disposes the root provider and verifies that the singleton was disposed once.
+    /// </summary>
     [GlobalCleanup]
     public async Task CleanupAsync()
     {
@@ -70,7 +74,9 @@ public class BatchScopeBenchmarks
         }
     }
 
-    /// <summary>Measures resolving the singleton from the root provider without a batch scope.</summary>
+    /// <summary>
+    /// Measures resolving the singleton from the root provider without a batch scope.
+    /// </summary>
     [Benchmark(Baseline = true)]
     public void RootSingletonResolution()
     {
@@ -80,7 +86,9 @@ public class BatchScopeBenchmarks
         ValidateRequest();
     }
 
-    /// <summary>Measures creating and disposing an otherwise unused async batch scope.</summary>
+    /// <summary>
+    /// Measures creating and disposing an otherwise unused async batch scope.
+    /// </summary>
     [Benchmark]
     public async ValueTask EmptyBatchScope()
     {
@@ -91,7 +99,9 @@ public class BatchScopeBenchmarks
         }
     }
 
-    /// <summary>Measures a batch scope plus resolving the singleton and invoking the handler.</summary>
+    /// <summary>
+    /// Measures a batch scope plus resolving the singleton and invoking the handler.
+    /// </summary>
     [Benchmark]
     public async ValueTask BatchScopeSingletonResolution()
     {
@@ -102,7 +112,9 @@ public class BatchScopeBenchmarks
         ValidateRequest();
     }
 
-    /// <summary>Measures the actual delegate forwarding path, including its batch scope.</summary>
+    /// <summary>
+    /// Measures the actual delegate forwarding path, including its batch scope.
+    /// </summary>
     [Benchmark]
     public ValueTask DelegateBatchScopeSingletonResolution()
     {

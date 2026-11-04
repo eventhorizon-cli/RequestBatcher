@@ -2,6 +2,9 @@ using RequestBatcher.PendingRequests;
 
 namespace RequestBatcher.Diagnostics.Tracing;
 
+/// <summary>
+/// Stages a request's outcome so tracing can coordinate span finalization and task publication.
+/// </summary>
 internal sealed class TracedRequestCompletion : RequestCompletion, IRequestCompletionNotification
 {
     private readonly IRequestCompletionObserver _observer;
@@ -12,6 +15,7 @@ internal sealed class TracedRequestCompletion : RequestCompletion, IRequestCompl
     internal TracedRequestCompletion(IRequestCompletionObserver observer)
     {
         _observer = observer;
+        // This traced completion replaces the ordinary completion; no separate base completion is allocated.
         observer.Register(this);
     }
 
@@ -19,6 +23,7 @@ internal sealed class TracedRequestCompletion : RequestCompletion, IRequestCompl
 
     bool IRequestCompletionNotification.IsCanceled => _isCanceled;
 
+    // Request completion has no result value, so tracing intercepts its terminal methods directly.
     public override void CompleteSuccessfully() => _observer.OnCompleted(this);
 
     public override void CompleteWithError(Exception exception)

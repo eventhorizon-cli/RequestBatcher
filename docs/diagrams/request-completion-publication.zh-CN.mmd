@@ -1,0 +1,10 @@
+%% 契约：比较提交委托返回的 Task，不包括可选的 metrics 外层包装。
+%% observer 收到最终完成通知和 TryAttach 两者后，才放行 completion。
+%% 直接路径：先结束 Execute span，再发布源 Task。
+%% 包装路径：先发布内部 Task，再跟踪包括接纳等待在内的外层 Task。
+%% 批量响应同样跟踪外层 Task，但不使用 observer 或 attach。
+%% 外层 Task 已完成：结束 span 后原样返回；否则结束 span 后发布桥接 Task。
+flowchart LR
+    D1[结果就绪且已 attach] --> D2[结束 Execute span] --> D3[发布 completion Task]
+    W1[结果就绪且已 attach] --> W2[发布内部 Task] --> W3[外层 Task 完成] --> W4[结束 Execute span] --> W5[发布桥接 Task 或返回已完成的原 Task]
+    %% D 节点：同一个 Task。W 节点：不同的返回 Task。SVG 中分行表示。

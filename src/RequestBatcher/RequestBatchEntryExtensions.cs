@@ -72,7 +72,7 @@ public static class RequestBatchEntryExtensions
             responses[index] = responseFactory(entries[index].Request);
         }
 
-        // Factory callbacks may change the input collection; validate its count again before assigning.
+        // External code may change the entries count during factory execution; recheck it before assigning responses.
         count = entries.Count;
         if (responses.Length != count)
         {
