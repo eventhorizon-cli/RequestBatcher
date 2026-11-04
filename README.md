@@ -254,8 +254,8 @@ A single partition can still supply several concurrent Handler batches.
 
 **Use one partition by default; add partitions only for a clear keyed-routing need with measured benefits.** More partitions do not add Handler
 execution slots. Each pull reads only one partition. **At low traffic, multiple partitions can split requests that could
-otherwise be combined, producing more small batches and increasing Handler and downstream calls even with explicit batch submission.** Use the workloads in the
-[benchmark index](tests/RequestBatcher.Benchmarks/README.md) to test this tradeoff in your environment.
+otherwise be combined, producing more small batches and increasing Handler and downstream calls even with explicit batch submission.** The independent experiments in
+[Performance Tuning and Benchmarks](#performance-tuning-and-benchmarks) measure this tradeoff.
 
 **Avoid `MaxConcurrency = 1` unless you have carefully evaluated its queueing cost and downstream constraints. Start with `2` for typical workloads.**
 Too many execution slots can pull requests earlier into smaller batches, reducing merging and deduplication opportunities;
@@ -727,7 +727,7 @@ for the unnamed default. Configure each batcher through its registration callbac
 and cannot be changed at runtime. `UsePartitionKey` routes requests within the selected batcher and
 does not select a batcher or serialize its handler batches.
 
-The [named versus unnamed benchmark](tests/RequestBatcher.Benchmarks/InMemory/NamedBatchingBenchmarks.cs) keeps request/response types,
+The [named versus unnamed benchmark](docs/evaluations/named-batching/README.md) keeps request/response types,
 handlers and batching options identical, comparing single and explicit submissions with singleton and scoped handlers.
 
 The runnable [PostgreSQL sample](samples/RequestBatcher.Deduplication) uses a named `int` price-query batcher with
@@ -843,8 +843,8 @@ binding and delegate identity, but cannot reliably distinguish static-lambda sou
 lambda. Ordinary typed-handler calls are unaffected, and consumers can disable the analyzers. See the
 [delegate-handler design](docs/delegate-handlers-design.md).
 
-Use the [delegate-handler benchmarks](tests/RequestBatcher.Benchmarks/README.md#batching-and-handler-apis)
-to compare time and allocations in your environment.
+Measured time and allocations are recorded in the
+[delegate-handler performance comparison](docs/evaluations/delegate-handlers/README.md).
 
 The standalone [delegate PostgreSQL sample](samples/RequestBatcher.Delegates) uses delegate handlers for both price updates and
 `POST /prices/query` list lookups. Each static lambda injects a keyed scoped `PriceStore` per handler batch.
@@ -1065,17 +1065,65 @@ An Agent can use these inputs to propose initial `MaxConcurrency`, `BatchSize`, 
 settings, together with assumptions and measurements still needed. The proposal is not an optimum or a performance
 guarantee; adjust it with correctness and load tests in the target environment.
 
-### Comparing Partition Configurations
+### Partition Measurements: Single Submissions
 
-Use [PartitionSubmissionBenchmarks](tests/RequestBatcher.Benchmarks/InMemory/PartitionSubmissionBenchmarks.cs)
-to compare partition counts separately for single and explicit submissions while holding batch size and Handler concurrency fixed.
-Measure actual batch size, downstream work, latency, and allocation together. A caller's explicit group can split
-across Handler batches, and separate calls can share a batch; grouping at the caller does not prevent partial batches
-caused by partition routing. Equal keys can also span multiple batches.
+**These are single-machine tests with simulated downstream latency, for reference only. Repeat the measurements
+with your own deployment, request distribution and real downstream service.**
 
-Start with one partition. Add partitions when measured benefits in your deployment outweigh smaller batches and
-routing costs. Keep local results and hardware details outside the repository; see the
-[benchmark index](tests/RequestBatcher.Benchmarks/README.md) for execution and correctness requirements.
+Test environment: Apple M2 Max, macOS 27.0.1, .NET 10.0.0 (Arm64), and BenchmarkDotNet 0.15.8.
+In-process asynchronous delays simulate downstream latency.
+
+The two submission APIs were measured as **independent experiments**, each comparing one and four partitions at
+`BatchSize = 64`, `MaxConcurrency = 4`, and eight producers. Each chart compares partition counts within a workload;
+workloads differ in request count and downstream cost. The charts show **in-process QPS**, counting Execute calls.
+
+**One request queries one product**; several requests may query the same product. A **wave** is one round in which
+eight producers submit their requests and await every response before the next round. The chart shows **total requests
+per wave** and their product distribution. Each `ExecuteAsync(request)` call submits one request; producers start
+their calls before awaiting the results. Each Handler invocation processes at most 64 requests, with at most four
+Handler batches executing concurrently.
+
+![Single-submission throughput with one and four partitions](docs/assets/partition-submission-single.svg)
+
+**Changing the partition count from one to four** spreads small request sets across queues and creates more partial
+batches. Each batch still makes a downstream call and occupies an execution slot, so the same wave requires more
+calls and waiting. **Prefer one partition for this workload** so queued requests can merge.
+
+With enough unique-product requests, both configurations form nearly full batches and additional partitions show
+no established benefit. Repeated-product requests gain more opportunities for within-batch deduplication when routed
+by product. The simulated downstream latency increases with distinct product count, so less duplicate querying helps.
+**Check that the real downstream benefits from this locality before adding partitions.**
+
+### Partition Measurements: Explicit Batch Submissions
+
+**This is also a single-machine simulation for reference; validate it in your own environment.**
+
+Each `ExecuteAsync(requests)` call submits a list: a 96-request wave makes eight calls of 12 requests; a 4,096-request
+wave makes 128 calls of 32 requests. A call can split across Handler batches, and separate calls can share a Handler
+batch. The Handler limit remains 64 requests per batch.
+Compare one and four partitions within this experiment, not against the single-submission chart.
+
+![Explicit-submission throughput with one and four partitions](docs/assets/partition-submission-explicit.svg)
+
+Explicit submission enqueues a group without fixing the Handler batch boundary. **Changing the partition count from
+one to four still splits small request sets into more Handler calls. Grouping requests at the caller therefore does
+not prevent partial batches caused by partition routing.** Use explicit submission when a list is already available,
+and choose partition count according to the batches actually formed.
+
+For large unique-product workloads, more partitions show no established timing benefit and increase allocation.
+The repeated-product workload benefits from fewer duplicate downstream queries while retaining nearly full Handler
+batches. **Evaluate actual batch size, downstream work and allocation together**, rather than choosing partitions from
+the caller's list size alone.
+
+The distinct-item workloads simulate 12 ms per downstream batch call. The repeated-key workload uses 128 product
+IDs and `8 + ceil(distinct IDs in the Handler batch / 8)` ms, so querying fewer distinct items reduces simulated RT.
+This benefit depends on the workload and downstream behavior; equal keys can still span batches.
+**Start with one partition by default. Add partitions cautiously, only when measured benefits outweigh smaller batches and routing costs.**
+Already having a list is a reason to use explicit submission, not a reason to add partitions. Both APIs still form
+Handler batches from requests available in one partition.
+
+See the [complete evaluation](docs/evaluations/partition-submissions/README.md) for item QPS, Handler batch QPS, allocations, confidence intervals,
+correctness checks and limitations. Each chart shows means; time uncertainty is reported separately.
 
 ### Sizing `MaxConcurrency` with Little's Law
 

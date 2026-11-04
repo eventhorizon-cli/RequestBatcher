@@ -124,11 +124,17 @@ You are an AI coding assistant for this repository.
 
 ## Testing and validation
 
-- For performance work, see the [benchmark index](tests/RequestBatcher.Benchmarks/README.md). Keep generated benchmark
-  reports and machine-specific measurements outside the repository; do not commit or upload machine-specific CSV, JSON, log,
-  trace, package-hash, chart, or evaluation-summary artifacts. Do not copy local results or hardware-specific
-  performance claims into repository documentation. Keep reusable benchmark code, runners, workload definitions,
-  and reproduction guidance in version control.
+- For performance work, see the [benchmark index](tests/RequestBatcher.Benchmarks/README.md) and
+  [evaluation index](docs/evaluations/README.md). Preserve reusable validation scripts, benchmark workloads,
+  concise evaluation conclusions, charts, and the documentation links that support them. Summaries must identify the
+  measured source and runtime, relevant workload, correctness outcome, and limitations; local measurements do not
+  establish universal performance guarantees.
+- Keep bulk raw performance data and disposable outputs outside the repository: per-run CSV/JSON exports, benchmark
+  logs, traces, failed trials, duplicate exports, scratch projects, and one-off investigation outputs. Do not commit
+  or upload these artifacts unless explicitly requested. Keep only concise reviewed conclusions and reproduction
+  guidance for experiments; do not retain obsolete dependency comparisons or one-time optimization and validation
+  reports. Artifact cleanup does not authorize deleting existing README content, linked
+  evaluation summaries, charts, or reusable validation code.
 - Before committing changes to critical paths, run the relevant benchmarks and correctness stress tests listed in the
   benchmark index. Critical paths include single/batch admission, queue adapters, batching and dispatch, capacity and
   concurrency control, response completion, cancellation and draining, tracing/metrics hot paths, and scheduling
@@ -138,8 +144,9 @@ You are an AI coding assistant for this repository.
   order, and exactly-once handling; completion counts alone are insufficient. Include concurrent single, explicit-batch,
   and mixed submissions when changing shared submission, scheduling, or completion logic.
 - For critical-path changes, record the commands, runtime/configuration, workload, correctness outcome, and relevant
-  time/allocation results in a local evaluation report outside the repository. Performance optimizations require a
-  comparable baseline and measured results before committing; a benchmark smoke run alone does not demonstrate a
+  time/allocation conclusions in the appropriate evaluation summary. Keep detailed measurements and raw run output
+  local, and link the reusable workloads and reproduction commands from the summary. Performance optimizations require
+  a comparable baseline and measured results before committing; a benchmark smoke run alone does not demonstrate a
   gain. Keep the benchmark index current when adding or changing stress workloads.
 - Add or update deterministic unit tests for behavior changes, especially batching, concurrency, cancellation,
   backpressure, exception fan-out, and shutdown.

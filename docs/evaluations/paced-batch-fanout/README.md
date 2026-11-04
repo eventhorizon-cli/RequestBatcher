@@ -1,0 +1,7 @@
+# Paced submissions and Handler fan-out
+
+Historical .NET 10.0.0 simulation (2026-10-28/29) comparing direct 20-item bulk queries with explicit submissions batched by RequestBatcher. Each child query waited 20 ms; the workload did not use a database or network service. Runs validated response values, order, and exactly-once handling. The reusable probe is [MeasurePacedBatchFanout.cs](../../../scripts/MeasurePacedBatchFanout.cs), with percentile calculations in [SampleSummary.cs](../../../scripts/Common/SampleSummary.cs).
+
+At 500 submissions/s with batch size 120 and two Handler slots, RequestBatcher reduced downstream calls by about 28.6% and average downstream concurrency by about 27%, while submission P95 rose from roughly 21 ms to 41 ms. Four slots reduced P95 to about 37 ms but raised call count about 7% over the two-slot case. Batch size 30 with 16 slots approached direct-query P95, but did not combine Handler work into child-call fan-out. At 50 submissions/s, batches remained 20 items and call count did not fall. These are tradeoffs in a fixed-delay model: fewer calls do not prove less database work, and allocations include probe bookkeeping.
+
+The producer used paced arrivals, measurements included final drain, and the bounded windows showed no sustained P95 growth. They do not establish production SLOs, query scaling costs, or fault recovery. Reproduce sequentially using the documented probe arguments and fresh output paths; all performance cases reported .NET 10 Release.

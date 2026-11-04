@@ -1,7 +1,7 @@
 # Benchmark index
 
-Use this index to find benchmark source and execution requirements. Keep measurements, charts, environment details,
-and result summaries outside the repository. Commit reusable workloads, runners, and execution guidance only.
+Use this index to find benchmark source and execution requirements. Recorded measurements and conclusions are in the
+[evaluation index](../../docs/evaluations/README.md); reports may cover only part of the current parameter matrix.
 
 ## Run
 
@@ -13,8 +13,7 @@ dotnet run --project tests/RequestBatcher.Benchmarks/RequestBatcher.Benchmarks.c
   --configuration Release -- --list flat
 
 dotnet run --project tests/RequestBatcher.Benchmarks/RequestBatcher.Benchmarks.csproj \
-  --configuration Release -- --filter '*DeduplicationConcurrencyBenchmarks*' \
-  --artifacts /private/tmp/requestbatcher-benchmarks
+  --configuration Release -- --filter '*DeduplicationConcurrencyBenchmarks*'
 ```
 
 Check the selected class's parameters and job settings before running. Use `--artifacts <directory>` to choose an output directory.
@@ -70,8 +69,9 @@ dotnet test tests/it/RequestBatcher.Observability.IntegrationTests/RequestBatche
   --configuration Release --filter 'FullyQualifiedName~TracingStressTests'
 ```
 
-Record the workload, runtime, commands, correctness outcome, and relevant time/allocation measurements in local
-reports outside the repository. For optimization claims, compare the same workload against the
+Keep raw measurements, per-run exports, and logs local. Record concise time/allocation conclusions, workload,
+runtime, commands, and correctness outcome in the [evaluation summaries](../../docs/evaluations/README.md).
+For optimization claims, compare the same workload against the
 baseline with the same environment. Benchmark startup/smoke success alone is insufficient evidence of an improvement.
 
 ## Batching and handler APIs
@@ -83,18 +83,18 @@ These benchmarks run in process without Docker. Some use simulated asynchronous 
 | [DeduplicationConcurrencyBenchmarks](InMemory/DeduplicationConcurrencyBenchmarks.cs) | Batch size, concurrency, duplicates and submission size; bulk reads, chunked WhenAll and per-key fan-out with simulated I/O. |
 | [TaskWhenAllOverheadBenchmarks](InMemory/TaskWhenAllOverheadBenchmarks.cs) | WhenAll versus awaiting already-started tasks, with completed and pending task sets. |
 | [DelayDownstreamOverheadBenchmarks](InMemory/DelayDownstreamOverheadBenchmarks.cs) | Direct and batched calls with simulated 50 ms I/O. Paced arrivals by default; set `REQUEST_BATCHER_TRAFFIC=burst` for bursts. |
-| [QueuePullBenchmarks](InMemory/QueuePullBenchmarks.cs) | One consumer drains 4,096 prefilled BufferQueue records; batch limits 32/128 and 1/16 partitions. |
+| [QueuePullBenchmarks](InMemory/QueuePullBenchmarks.cs) | One consumer drains 4,096 prefilled BufferQueue records; batch limits 32/128 and 1/16 partitions. See the [pull capacity evaluation](../../docs/evaluations/queue-pull-capacity/README.md). |
 | [DispatchCapacityBenchmarks](InMemory/DispatchCapacityBenchmarks.cs) | Direct full batches versus public explicit submission, synchronous/20 ms handlers, concurrency 8/32 and 1/16 partitions. |
 | [DispatchLoopOverheadBenchmarks](InMemory/DispatchLoopOverheadBenchmarks.cs) | Concurrent singles and one explicit submission of 1,024 distinct requests, synchronous handlers, batch limits 1/32 and concurrency eight. Validates every ID exactly once and dispatch bounds; reports time and allocation per request. |
 | [PartitionKeySubmissionBenchmarks](InMemory/PartitionKeySubmissionBenchmarks.cs) | Concurrent single submissions versus one explicit submission under partition-key routing. |
-| [PartitionSubmissionBenchmarks](InMemory/PartitionSubmissionBenchmarks.cs) | Two independent experiments: filter `*SingleSubmissions*` or `*ExplicitSubmissions*`. Each varies Partition 1/4 at BatchSize 64 and MaxConcurrency 4; validates every response, group order, exactly-once handling and concurrency. Records batch formation, query work, time and allocation. |
+| [PartitionSubmissionBenchmarks](InMemory/PartitionSubmissionBenchmarks.cs) | Two independent experiments: filter `*SingleSubmissions*` or `*ExplicitSubmissions*`. Each varies Partition 1/4 at BatchSize 64 and MaxConcurrency 4; validates every response, group order, exactly-once handling and concurrency. Records batch formation, query work, time and allocation. See the [evaluation](../../docs/evaluations/partition-submissions/README.md). |
 | [ExplicitSubmissionBenchmarks](InMemory/ExplicitSubmissionBenchmarks.cs) | Explicit groups versus mixed single/group submissions. |
 | [NamedBatchingBenchmarks](InMemory/NamedBatchingBenchmarks.cs) | Named versus unnamed pipelines, single/list submissions and singleton/scoped handlers. |
 | [DelegateHandlerBenchmarks](InMemory/DelegateHandlerBenchmarks.cs) | Typed versus cached delegate handlers, with and without scoped service injection. |
 | [DelegateRequestOnlyBenchmarks](InMemory/DelegateRequestOnlyBenchmarks.cs) | Typed singleton versus no-service delegate; 256-request single/list waves with Yield or 20 ms work and per-ID validation. |
 | [DelegateForwardingBenchmarks](InMemory/DelegateForwardingBenchmarks.cs) | Isolated typed/delegate forwarding of an incomplete operation, with exactly-once completion validation. |
 | [DelegateServiceInjectionBenchmarks](InMemory/DelegateServiceInjectionBenchmarks.cs) | Typed/delegate service injection across dependency lifetimes and ordinary/keyed services. |
-| [BatchScopeBenchmarks](InMemory/BatchScopeBenchmarks.cs) | Per-batch scope creation/disposal, root versus scoped singleton resolution, and actual delegate invocation with a singleton. Synchronous isolated work with identity, result, exactly-once processing and disposal checks; no Docker. |
+| [BatchScopeBenchmarks](InMemory/BatchScopeBenchmarks.cs) | Per-batch scope creation/disposal, root versus scoped singleton resolution, and actual delegate invocation with a singleton. Synchronous isolated work with identity, result, exactly-once processing and disposal checks; no Docker. See the [scope cost evaluation](../../docs/evaluations/delegate-handlers/batch-scope/README.md). |
 | [DelegateReturnTypeBenchmarks](InMemory/DelegateReturnTypeBenchmarks.cs) | Typed handlers versus delegates returning void, completed Task or completed ValueTask. |
 | [DelegateFirstSubmissionBenchmarks](InMemory/DelegateFirstSubmissionBenchmarks.cs) | First submission through a fresh typed/delegate pipeline; includes initial delegate binding, excludes provider creation. |
 
@@ -132,24 +132,30 @@ Container and data preparation are outside measurement. Their results are separa
 For paced explicit submissions against the current public API, use
 [`MeasurePacedBatchFanout.cs`](../../scripts/MeasurePacedBatchFanout.cs). It is a bounded load probe rather than a
 BenchmarkDotNet throughput loop: arrivals do not wait for earlier responses. See the
-[script index](../../scripts/README.md#scheduling-experiments) for arguments and validation.
+[paced batch fan-out evaluation](../../docs/evaluations/paced-batch-fanout/README.md) for its direct bulk-query baseline,
+correctness checks, runtime, commands, and latency results.
 
 ## Isolated scheduling probe
 
 [SchedulingProbe](SchedulingEvaluation/SchedulingProbe.cs) uses `--scheduling-probe`, separately from BenchmarkDotNet.
 It requires evaluation hooks such as `EvaluationOffload`, which are absent from production source.
 The [arrival scheduling runner](../../scripts/scheduling-evaluation/README.arrival.md) injects these hooks into an
-isolated source copy before invoking the probe.
+isolated source copy before invoking the probe. See the [arrival-scheduling evaluation](../../docs/evaluations/arrival-scheduling/README.md)
+for the recorded experiment.
 
 ## Observability
 
 The optional `RequestBatcher.OpenTelemetry` package exposes `AddRequestBatcherInstrumentation()` for application
-tracing. Each workload specifies its listener/provider configuration. See the [observability design](../../docs/observability-design.md) for span lifetime,
+tracing. Historical benchmark results in this index are not tracing measurements and should not be read as results with
+the new instrumentation enabled. See the [observability design](../../docs/observability-design.md) for span lifetime,
 links, sampling, and performance boundaries.
 
 | Source / filter class | Comparison |
 | --- | --- |
 | [ObservabilityOverheadBenchmarks](InMemory/ObservabilityOverheadBenchmarks.cs) | Disabled, metrics-only, and tracing-plus-metrics OpenTelemetry providers around 256 named async pricing requests with a 20 ms handler delay. |
-| [TracingIoOverheadBenchmarks](InMemory/TracingIoOverheadBenchmarks.cs) | Published versions and source snapshots, with tracing disabled or SDK sampling at 0%, 1%, 10%, and 100%, for single and explicit submissions with 20 ms simulated downstream calls. See the [tracing benchmark guide](../../scripts/TracingBenchmarks.md). |
+| [TracingIoOverheadBenchmarks](InMemory/TracingIoOverheadBenchmarks.cs) | Published versions and source snapshots, with tracing disabled or SDK sampling at 0%, 1%, 10%, and 100%, for single and explicit submissions with 20 ms simulated downstream calls. See the [measurement and reproduction guide](../../docs/evaluations/tracing-io-overhead/README.md). |
 | [NamedTracingHotPathBenchmarks](InMemory/NamedTracingHotPathBenchmarks.cs) | Named synchronous single/explicit dispatch with tracing disabled, propagation-only, or recorded and normal/suppressed submission flow. Validates per-ID processing, completed span names/flags/counts, and suppression ownership; reports per 256-request wave. |
-| [MetricsIoOverheadBenchmarks](InMemory/MetricsIoOverheadBenchmarks.cs) | Metrics disabled, SDK aggregation only, and periodic collection every 1,000 ms or 100 ms, with tracing disabled and 20 ms simulated downstream calls. Validates all four histograms and the backlog gauge, including zero after each completed run. |
+| [MetricsIoOverheadBenchmarks](InMemory/MetricsIoOverheadBenchmarks.cs) | Metrics disabled, SDK aggregation only, and periodic collection every 1,000 ms or 100 ms, with tracing disabled and 20 ms simulated downstream calls. Validates all four histograms and the backlog gauge, including zero after each completed run. See the [metrics evaluation](../../docs/evaluations/metrics-io-overhead/README.md). |
+
+The corresponding [observability overhead evaluation](../../docs/evaluations/observability-overhead/README.md) records the
+measured results and workload limitations.

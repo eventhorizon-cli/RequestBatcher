@@ -1,0 +1,7 @@
+# Named versus unnamed batching
+
+This historical benchmark compared identical `IRequestBatcher<int, int>` pipelines registered with or without a name. It measured single requests and explicit array submissions separately, with singleton and scoped handler lifetimes. Each operation submitted and validated 256 responses. The workload used batch size 32, concurrency 8, capacity 512, one partition, and cheap in-process handlers. Measured 2026-10-16 on Arm64 macOS with SDK 10.0.100, .NET 8.0.25, and BenchmarkDotNet 0.15.8.
+
+Across the four named/unnamed pairs, mean-time changes ranged from -0.78% to +1.69%; reported confidence intervals overlapped in every pair and the direction was inconsistent. Allocations were equal at reported precision for explicit submissions; single-call differences were below 0.4%. This run found no clear steady-state penalty from naming, but does not establish zero overhead for other workloads or repeated service lookup. Benchmark processes ran at normal priority because high priority was unavailable.
+
+The benchmark validates response values and exactly-once handling. Provider creation and initial batcher resolution are outside timing; per-batch scope work remains included. Reproduce with the `NamedBatchingBenchmarks` workload in the [benchmark project](../../../tests/RequestBatcher.Benchmarks/README.md). These results are historical in-process evidence, not application latency guarantees.

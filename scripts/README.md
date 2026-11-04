@@ -1,8 +1,8 @@
 # Repository Scripts
 
 This directory contains file-based C# tools for performance comparisons, allocation diagnostics, and scheduling
-experiments. Benchmark workloads live in the [benchmark project](../tests/RequestBatcher.Benchmarks/README.md).
-Keep measurements, diagnostic traces, host details, and result summaries outside the repository.
+experiments. Benchmark workloads live in the [benchmark project](../tests/RequestBatcher.Benchmarks/README.md);
+recorded results and their limitations live in the [evaluation index](../docs/evaluations/README.md).
 Follow the repository's [contributor instructions](../AGENTS.md) when maintaining these tools.
 
 Keep script entry points, implementations, and shared helpers in this directory, with reusable utilities under
@@ -30,11 +30,11 @@ can reuse an earlier compiled probe. Check the workload's validation output befo
 | Entry point | Purpose and arguments | Detailed guide |
 | --- | --- | --- |
 | [ComparePackagePerformance.cs](ComparePackagePerformance.cs) | Compare two exact stable NuGet versions: `<baseline-version> <candidate-version> [artifact-parent] [--prepare-only]`. Runs identical typed/delegate response workloads for single, explicit, and mixed submissions at 0 ms and 20 ms simulated downstream delay in two rounds with reversed version order; validates every response and records allocation per request. | [Package comparison workload](../tests/RequestBatcher.Benchmarks/InMemory/PackageComparisonBenchmarks.cs) |
-| [CompareTracingIoOverhead.cs](CompareTracingIoOverhead.cs) | Compare published 0.2.4 and 0.3.2 with simulated 20 ms downstream calls across tracing modes. Use `--compare-source` to compare the current source, optionally with `--baseline-source PATH` and `--include-legacy`. Optional positional argument: artifact parent directory. | [Tracing benchmark guide](TracingBenchmarks.md) |
-| [CompareTracingOverhead.cs](CompareTracingOverhead.cs) | Compare 0.2.4 and the current source with a lightweight handler. Optional artifact parent directory and `--prepare-only`; `TRACING_OVERHEAD_FILTER` selects BenchmarkDotNet cases. | [Tracing benchmark guide](TracingBenchmarks.md) |
-| [ProfileTracingAllocations.cs](ProfileTracingAllocations.cs) | Run the 20 ms allocation probe: `<Disabled\|Sample0\|Sample100> [waves=500]`. Emits measurement markers and allocation totals; use `dotnet-trace` to capture a trace. | [Allocation diagnostics](TracingBenchmarks.md#allocation-diagnostics) |
-| [AnalyzeAllocationTrace.cs](AnalyzeAllocationTrace.cs) | Analyze an existing marked EventPipe trace: `<trace.nettrace> <output-prefix>`. Writes `.types.csv`, `.stacks.csv`, and `.summary.txt`; allocation samples are estimates. | [Allocation diagnostics](TracingBenchmarks.md#allocation-diagnostics) |
-| [MeasureMetricsOverhead.cs](MeasureMetricsOverhead.cs) | Run the existing 1,024-item metrics benchmark workload in a bounded probe: `<Disabled\|AggregationOnly> <single\|multi> <output.json> [waves=30]`. Five warmup waves are excluded; use Release and separate processes for baseline/candidate. Reports wave latency and allocation, validates every item's exactly-once handling and exported totals. | [Metrics workload](../tests/RequestBatcher.Benchmarks/InMemory/MetricsIoOverheadBenchmarks.cs) |
+| [CompareTracingIoOverhead.cs](CompareTracingIoOverhead.cs) | Compare published 0.2.4 and 0.3.2 with simulated 20 ms downstream calls across tracing modes. Use `--compare-source` to compare the current source, optionally with `--baseline-source PATH` and `--include-legacy`. Optional positional argument: artifact parent directory. | [Tracing I/O measurement and reproduction guide](../docs/evaluations/tracing-io-overhead/README.md) |
+| [CompareTracingOverhead.cs](CompareTracingOverhead.cs) | Compare 0.2.4 and the current source with a lightweight handler. Optional artifact parent directory and `--prepare-only`; `TRACING_OVERHEAD_FILTER` selects BenchmarkDotNet cases. | [Tracing I/O measurement and reproduction guide](../docs/evaluations/tracing-io-overhead/README.md) |
+| [ProfileTracingAllocations.cs](ProfileTracingAllocations.cs) | Run the 20 ms allocation probe: `<Disabled\|Sample0\|Sample100> [waves=500]`. Emits measurement markers and allocation totals; use `dotnet-trace` to capture a trace. | [Allocation diagnostics](../docs/evaluations/tracing-io-overhead/README.md#allocation-diagnostics) |
+| [AnalyzeAllocationTrace.cs](AnalyzeAllocationTrace.cs) | Analyze an existing marked EventPipe trace: `<trace.nettrace> <output-prefix>`. Writes `.types.csv`, `.stacks.csv`, and `.summary.txt`; allocation samples are estimates. | [Allocation diagnostics](../docs/evaluations/tracing-io-overhead/README.md#allocation-diagnostics) |
+| [MeasureMetricsOverhead.cs](MeasureMetricsOverhead.cs) | Run the existing 1,024-item metrics benchmark workload in a bounded probe: `<Disabled\|AggregationOnly> <single\|multi> <output.json> [waves=30]`. Five warmup waves are excluded; use Release and separate processes for baseline/candidate. Reports wave latency and allocation, validates every item's exactly-once handling and exported totals. | [Metrics I/O conclusions](../docs/evaluations/metrics-io-overhead/README.md) |
 
 The comparison runners retain isolated projects, package evidence, and BenchmarkDotNet reports in a unique `run-*`
 directory under the system temporary directory by default. The package runner uses `requestbatcher-package-performance`;
@@ -49,7 +49,8 @@ explicit submissions. Defaults are 20 items per submission, 30 items per downstr
 Configure `--submission-size`, `--downstream-batch-size`, and `--delay-ms` to change these independently; `--rate`
 is submissions per second, not items per second. `--batch-size`, `--concurrency`, and `--pending-capacity` configure
 RequestBatcher. Run with `--help` for all arguments, defaults, and bounds. It writes a JSON summary and per-submission samples, validates every response and exactly-once
-processing, and reports arrival lateness alongside end-to-end latency.
+processing, and reports arrival lateness alongside end-to-end latency. See the
+[paced batch fan-out evaluation](../docs/evaluations/paced-batch-fanout/README.md) for matched configurations and results.
 
 For example, compare both modes with identical rate, submission size, query size and delay:
 
@@ -78,8 +79,8 @@ timing boundaries in each workload; do not average percentiles from different ru
 partition-count experiment. Run `dotnet run --file scripts/SummarizePartitionSubmissions.cs -- <benchmark-report.csv>
 <benchmark.log> <output-directory>`. It requires six cases for one submission API and two successful process diagnostics
 per case, checks request/batch counts and correctness flags, and writes `summary.csv` plus `diagnostics.jsonl`.
-Run it separately for single and explicit submissions. See [PartitionSubmissionBenchmarks](../tests/RequestBatcher.Benchmarks/InMemory/PartitionSubmissionBenchmarks.cs)
-for workload definitions and throughput units; run it through BenchmarkDotNet as described in the benchmark index.
+Run it separately for single and explicit submissions. See the [partition evaluation](../docs/evaluations/partition-submissions/README.md)
+for commands, workload definitions and throughput units.
 
 These tools build isolated source copies with experimental scheduling instrumentation. Read their guides before
 interpreting the results; the copies are evaluation fixtures rather than supported production configuration.
@@ -101,5 +102,6 @@ runners, not standalone file-based entry points.
 ## Maintenance
 
 Keep this index synchronized when adding, renaming, or changing an entry point. Document its arguments, prerequisites,
-artifact locations, and validation in its linked guide. Keep generated reports and diagnostic traces outside tracked
-source files. Keep local reports and reviewed findings outside the repository, including Markdown result summaries.
+artifact locations, and validation in its linked guide. Keep raw CSV/JSON exports, generated run reports, logs, and
+diagnostic traces local; record only concise reviewed conclusions and reproduction guidance under
+[docs/evaluations](../docs/evaluations/README.md).

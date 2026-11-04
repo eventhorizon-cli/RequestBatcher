@@ -223,7 +223,7 @@ RequestBatcher 不提供全局、Partition 内或 Partition Key 级别的 Handle
 
 **默认使用 1 个 Partition；没有明确的按 Key 路由需求和压测收益，就不要增加 Partition。** 增加 Partition 不会增加 Handler 执行名额。
 每次拉取只读取一个 Partition。**流量不足时，多 Partition 可能把原本可合并的请求拆散；即使调用方已经批量提交，也可能形成更多小批次，增加 Handler 和下游调用次数。**
-可使用[基准测试索引](tests/RequestBatcher.Benchmarks/README.md)中的工作负载，在自己的环境中验证这种取舍。
+[性能调优与压测](#性能调优与压测)中的两个独立实验测量了这种取舍。
 
 **除非已慎重评估排队延迟和下游限制，否则不建议将 `MaxConcurrency` 设为 `1`；通常可以从 `2` 开始。** 执行名额过多时，已到达的请求可能更早被
 取走，形成更多小批次，减少合并和去重的机会；过低则可能增加排队。应选择能满足吞吐和延迟目标的较小值。
@@ -672,7 +672,7 @@ public sealed class PricesController : ControllerBase
 默认服务继续使用原有不带名称的重载。各个 Batcher 的参数通过注册回调配置，注册后固定，不支持运行时调整。
 `UsePartitionKey` 仅负责选定 Batcher 内部的请求路由，不负责选择 Batcher，也不保证 Handler 批次串行执行。
 
-[命名与默认注册的基准测试](tests/RequestBatcher.Benchmarks/InMemory/NamedBatchingBenchmarks.cs)保持请求、响应类型、Handler 和批处理配置一致，
+[命名与默认注册的性能对比](docs/evaluations/named-batching/README.md)保持请求、响应类型、Handler 和批处理配置一致，
 分别测量 Singleton、Scoped Handler 下的逐条提交与显式批量提交。
 
 可运行的 [PostgreSQL 示例](samples/RequestBatcher.Deduplication) 使用名为 `"price"` 的 `int` 请求和 `decimal?`
@@ -774,8 +774,8 @@ DI 生命周期：Singleton 在容器内共享，Scoped 在同一批次内共享
 委托经过参数、属性或工厂传递后，Analyzer 可能无法确定它的目标。这类写法仍然允许使用，
 调用方应保证最终传入的是静态实现。运行时会验证实际签名、服务绑定和委托是否与已绑定的委托一致，
 但无法可靠区分源码中的静态 Lambda 与不捕获变量的普通 Lambda。
-原有 Handler 调用不受影响，使用方也可以禁用 Analyzer。详见[委托 Handler 设计](docs/delegate-handlers-design.md)。
-可使用[委托 Handler 基准测试](tests/RequestBatcher.Benchmarks/README.md#batching-and-handler-apis)，在自己的环境中比较耗时与分配。
+原有 Handler 调用不受影响，使用方也可以禁用 Analyzer。详见[委托 Handler 设计](docs/delegate-handlers-design.md)和
+[性能对比](docs/evaluations/delegate-handlers/README.md)。
 
 [独立的委托版 PostgreSQL 示例](samples/RequestBatcher.Delegates)使用委托 Handler 完成价格写入和
 `POST /prices/query` 列表查询，每个静态 Lambda 都从批次 Scope 注入 Keyed Scoped `PriceStore`。
@@ -977,15 +977,59 @@ Handler 需要 DI 作用域时，应先停止提交并等待未完成的调用�
 同时列出依据、假设和需要压测验证的项目。**这些建议不是最优配置或性能保证**；接入后仍需比较吞吐、端到端 P95/P99、
 实际批大小和下游工作量，再逐项调整参数。
 
-### 比较 Partition 配置
+### Partition 实测：单条提交
 
-可使用 [PartitionSubmissionBenchmarks](tests/RequestBatcher.Benchmarks/InMemory/PartitionSubmissionBenchmarks.cs)，
-在固定批次大小和 Handler 并发的条件下，分别在单条提交和显式批量提交场景中比较不同的 Partition 数量。
-同时观察实际批大小、下游工作量、延迟和分配。调用方的一组显式提交可能拆成多个 Handler 批次，
-不同调用也可能合并到同一批次；调用方分组不能避免分区路由造成的小批次，相同 Key 也可能跨越多个批次。
+**以下是单机、模拟下游耗时的测试，结果仅供参考；请结合自己的部署环境、请求分布和真实下游重新压测。**
 
-默认从一个 Partition 开始，只有部署环境中的实测收益超过小批次和路由开销时才增加分区。
-本地结果和硬件信息保存在仓库外，运行方式及正确性要求见[基准测试索引](tests/RequestBatcher.Benchmarks/README.md)。
+压测环境：Apple M2 Max、macOS 27.0.1、.NET 10.0.0（Arm64），使用 BenchmarkDotNet 0.15.8；
+下游耗时通过进程内异步延迟模拟。
+
+两种提交 API 分成**两个独立实验**，各自在 `BatchSize = 64`、`MaxConcurrency = 4`、8 个生产者下比较
+1 个与 4 个 Partition。图中只比较同一负载下的 Partition 配置；不同负载的请求数和下游耗时模型不同。
+纵轴是**进程内 QPS**，按 Execute 调用次数统计。
+
+这里的**一个请求指查询一个商品**，同一个商品可以对应多个请求。**一轮**指 8 个生产者集中提交各自的请求，
+等全部响应返回后，再开始下一轮。图中的请求数是**每轮提交的总数**，商品分布也标在图中。
+`ExecuteAsync(request)` 每次只提交一个请求，生产者连续发起调用后统一等待结果。
+每次 Handler 最多处理 64 个请求，同时最多执行 4 个 Handler 批次。
+
+![单条提交在一个与四个 Partition 下的吞吐](docs/assets/partition-submission-single.zh-CN.svg)
+
+**Partition 数量从 1 个改为 4 个后**，少量集中提交的请求被分散到不同队列，更容易形成小批次。
+每批仍需一次下游调用，并占用一个执行名额，因此处理同一轮请求需要更多次调用和等待。
+**这类场景应优先保持单 Partition**，让已经排队的请求更容易合并。
+
+请求充足且没有重复商品时，两种配置都能形成接近上限的批次，增加 Partition 没有显示出稳定收益。
+重复商品请求较多时，按商品路由提高了批内去重机会；本次模型的下游耗时随去重后的商品数增加，
+所以减少重复查询带来了收益。**选择多 Partition 前，应确认真实下游也能从这种局部性中获益。**
+
+### Partition 实测：显式批量提交
+
+**本组同样是单机模拟测试，仅供参考，请在自己的环境复测。**
+
+`ExecuteAsync(requests)` 每次提交一个请求列表。每轮 96 个请求分为 8 次调用，每次提交 12 个请求；
+每轮 4,096 个请求分为 128 次调用，每次提交 32 个请求。一次调用可能拆成多个 Handler 批次，
+不同调用也可能合并到同一个 Handler 批次；Handler 每批最多 64 个请求的上限不变。
+本实验只比较 1 个和 4 个 Partition，不与单条提交图横向比较。
+
+![显式批量提交在一个与四个 Partition 下的吞吐](docs/assets/partition-submission-explicit.zh-CN.svg)
+
+显式提交会批量入队，但不会固定 Handler 的批次边界。**Partition 数量从 1 个改为 4 个后，
+少量请求仍会被拆散成更多 Handler 调用，所以“调用方已经分好组”并不能避免队列分区带来的小批次。**
+已有请求列表时可以使用显式批量提交，Partition 数量仍应按实际合并效果选择。
+
+大量无重复请求下，更多 Partition 没有带来稳定的耗时收益，分配反而增加。
+重复商品场景的收益来自下游重复查询减少，同时仍保持了接近上限的 Handler 批次。
+因此应**同时观察实际批大小、下游查询量和分配**，不能只看提交列表大小或分区数量。
+
+无重复负载模拟每次下游批量调用固定 12 ms；重复 Key 负载使用 128 个商品 ID，
+耗时模型为 `8 + ceil(当前 Handler 批次去重后项数 / 8)` ms，因此查询项数减少会缩短模拟 RT。
+这一收益取决于数据分布和下游行为，相同 Key 的请求仍可能分散到不同批次。
+**默认从 1 个 Partition 开始，谨慎增加 Partition；只有实测收益超过小批次和路由开销时再采用。**
+调用方已经持有列表时可以显式批量提交，但不因此需要更多 Partition；两种 API 都只合并同一 Partition 中当前可用的请求。
+
+请求项 QPS、Handler 批次 QPS、分配、置信区间、正确性校验和局限见[完整评估](docs/evaluations/partition-submissions/README.md)。
+图中展示均值，耗时的不确定性在报告中单独列出。
 
 ### 用利特尔法则（Little’s Law）估算 `MaxConcurrency`
 
