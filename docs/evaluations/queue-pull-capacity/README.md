@@ -1,0 +1,7 @@
+# Queue pull and dispatch capacity
+
+Historical evaluation against source `3f939c3`, measured 2026-10-23 on an Apple M2 Max with SDK 10.0.100, .NET 8.0.25, and BenchmarkDotNet 0.15.8. It asked whether pulling one Handler batch per reserved slot limited a full-batch workload. For 4,096 requests in 32-item batches with 20 ms asynchronous handlers, Handler occupancy was 96.2–99.1%; RequestBatcher waves took 0.8–3.0% longer than an ideal direct full-batch control. Raising concurrency from 8 to 32 reduced wave time about 3.9x. The direct control omits admission, queueing, routing, and completion, so the gap is not attributable to pulling alone.
+
+Warm prefilled queue drains measured 15–26 ns per record at batch size 32/128 and used 8–10 B per record; partition count 1 versus 16 was indistinguishable in these runs. Synchronous-handler waves exposed much larger whole-pipeline costs, but the short measurements do not identify a precise throughput ceiling. Thus these results do not justify multi-batch prefetching for this asynchronous workload, nor show that queue pulling is never limiting.
+
+Runs validated every ID exactly once. Sparse/hot-key traffic, concurrent producer contention, empty-queue wakeups, and real downstream services were not measured. Reproduce with [QueuePullBenchmarks.cs](../../../tests/RequestBatcher.Benchmarks/InMemory/QueuePullBenchmarks.cs) and [DispatchCapacityBenchmarks.cs](../../../tests/RequestBatcher.Benchmarks/InMemory/DispatchCapacityBenchmarks.cs).

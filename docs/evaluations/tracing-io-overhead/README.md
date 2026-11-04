@@ -1,11 +1,16 @@
-# Tracing benchmark guide
+# Tracing evaluation guide
 
-The [observability design](../docs/observability-design.md) defines correlation, sampling, and completion contracts.
-Keep measurements, traces, and local findings outside the repository.
+The [observability design](../../observability-design.md) defines correlation, sampling, and completion contracts.
+
+A bounded .NET 10 single-partition probe found that enabling tracing increased allocation even at 0% sampling;
+100% sampling allocated more again. Zero sampled spans does not eliminate context propagation or completion
+bookkeeping. This probe established no latency change or optimization gain. Keep the existing reverse-link
+representation and synchronization: the first batch context already avoids a list allocation, while one partition
+can still produce concurrent Handler batches and split an explicit submission across them.
 
 ## Workloads
 
-[TracingIoOverheadBenchmarks](../tests/RequestBatcher.Benchmarks/InMemory/TracingIoOverheadBenchmarks.cs) submits
+[TracingIoOverheadBenchmarks](../../../tests/RequestBatcher.Benchmarks/InMemory/TracingIoOverheadBenchmarks.cs) submits
 1,024 unique requests per wave, individually or as 32 explicit groups of 32. It uses one unkeyed partition,
 `BatchSize = 32`, `MaxConcurrency = 8`, `MaxPendingRequests = 1,024`, and a singleton handler awaiting a simulated
 20 ms delay per batch. Each wave validates every request ID exactly once. Sampling decisions must match completed
@@ -17,6 +22,7 @@ sampler. Explicit submissions share Execute state across their items, but can st
 
 All current script entry points and generated evaluation projects target .NET 10. Record the actual runtime,
 configuration, source revisions, workload, validation output, and time/allocation results for each comparison.
+Keep detailed run output local; commit only concise conclusions and reproduction guidance.
 Do not infer a runtime from the selected SDK alone. Run measurements sequentially without concurrent local builds,
 tests, or benchmarks. Allocation probes do not establish latency or throughput gains.
 
@@ -43,7 +49,7 @@ dotnet run --file scripts/CompareTracingOverhead.cs -- /private/tmp/requestbatch
 
 This compares published 0.2.4 with current source. `--prepare-only` restores and verifies its baseline without running
 the benchmark; `TRACING_OVERHEAD_FILTER` selects cases. These package comparisons do not isolate one source change.
-See the [script index](README.md) for entry points and arguments.
+See the [script index](../../../scripts/README.md) for entry points and arguments.
 
 ## Allocation diagnostics
 

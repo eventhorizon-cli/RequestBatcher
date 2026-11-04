@@ -16,8 +16,8 @@ The arrival runner also copies the core project's package references into its sc
 isolated runtime dependency manifest uses the same versions. It derives these references from the copied project;
 the checkout's package references are unchanged.
 Case order is deterministic with each runner's fixed seed; the C# random generator need not reproduce Python order.
-Measurements and result summaries remain local artifacts outside the repository. Migration smoke results are
-correctness checks rather than performance evidence.
+Keep raw measurements local and retain only concise experimental conclusions in evaluation documents. Migration
+smoke results validate correctness, not performance.
 
 The tracing package comparison script also uses C# and downloads the published baseline package into an isolated
 NuGet cache. Both builds run with the repository SDK. Each execution creates a fresh artifact directory and retains
@@ -47,7 +47,7 @@ cleanup must not enter the allocation analysis window. Diagnostic timing is not 
 matched marker window and nonempty allocation samples, aggregates GC allocation-tick weights by type and allocation
 stack, and writes CSV evidence. Sample counts are not object counts, and sampled weights are estimates, not exact
 per-type byte totals. TraceEvent is a script-only dependency; production dependencies remain unchanged. Keep raw
-trace files and reports outside the repository. Record tool versions, arguments, and limitations in the local report.
+trace files and generated CSV output local; retain concise conclusions, tool versions, arguments, and limitations.
 
 The observability sample's traffic generator is a file-based C# application. Docker publishes it using the pinned
 SDK and runs the resulting assembly on .NET 8. Cart and Pricing remain the only business project files.

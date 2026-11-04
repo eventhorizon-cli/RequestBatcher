@@ -109,7 +109,7 @@ Typed singleton handlers already bypass batch scope creation because their lifet
 is explicitly supplied at registration. This scope policy changes no public API
 or completion behavior; lifetime tests cover singleton reuse and root-owned disposal,
 per-batch scoped/transient disposal, and scope elision for service-free delegates.
-The [batch scope benchmark](../tests/RequestBatcher.Benchmarks/InMemory/BatchScopeBenchmarks.cs)
+The [batch scope evaluation](evaluations/delegate-handlers/batch-scope/README.md)
 isolates creation and disposal costs from queueing and downstream work.
 
 For request-only delegates without service parameters, the forwarding handler returns

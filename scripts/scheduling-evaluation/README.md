@@ -10,7 +10,7 @@ Run from the repository root with the SDK selected by `global.json`:
 The script and every temporary evaluation project it generates target .NET 10 and C# 12.
 
 ```bash
-dotnet run --file scripts/scheduling-evaluation/EvaluateScheduling.cs -- --output /private/tmp/scheduling-evaluation
+dotnet run --file scripts/scheduling-evaluation/EvaluateScheduling.cs -- --output artifacts/scheduling-evaluation
 ```
 
 The script builds an isolated copy of the current library in a temporary directory.
@@ -26,7 +26,7 @@ A production design needs to resolve that boundary and scheduling-failure cleanu
 Run the deterministic scheduling self-check without the matrix:
 
 ```bash
-dotnet run --file scripts/scheduling-evaluation/EvaluateScheduling.cs -- --self-check --output /private/tmp/scheduling-self-check
+dotnet run --file scripts/scheduling-evaluation/EvaluateScheduling.cs -- --self-check --output artifacts/scheduling-self-check
 ```
 
 The check gates the scheduled delegate until after submission returns and fails if
@@ -44,7 +44,7 @@ compilation is disabled equally for both variants to reduce short-run JIT drift.
 The .NET ThreadPool uses its defaults; the script does not raise minimum threads.
 It writes runtime details, the library diff, per-run measurements, and deterministic
 preloaded-burst results to the local output directory. Keep generated artifacts outside
-version control, including concise result summaries. NuGet cache paths can be supplied
+version control; committed evaluation records contain only concise README summaries. NuGet cache paths can be supplied
 through the usual `NUGET_PACKAGES` and `NUGET_HTTP_CACHE_PATH` environment variables.
 
 The workloads use the real coordinator, dependency injection, and BufferQueue:
@@ -75,7 +75,7 @@ The batch histogram also includes instrumentation cost. No ThreadPool queue-leng
 trace or precise enqueue/dispatch split is collected.
 
 These finite-window diagnostics alone do not justify changing defaults. The
-[arrival-rate probe](README.arrival.md)
+[arrival-rate evaluation](../../docs/evaluations/arrival-scheduling/README.md)
 adds paced and downstream comparisons; neither prototype validates production
 lifecycle semantics. PostgreSQL/Redis workloads require Docker.
 

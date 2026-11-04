@@ -1,0 +1,9 @@
+# Response and tracing hot-path evaluation
+
+Historical comparison of response submission, assignment, and named tracing against source `14310ba11f00eb0cd557a5686e6e483182ad040d`, measured on .NET 10.0.0, Arm64 macOS (2026-10-30). Reusable workloads remain in [response submission](../../../tests/RequestBatcher.Benchmarks/InMemory/ResponseHotPathBenchmarks.cs), [assignment](../../../tests/RequestBatcher.Benchmarks/InMemory/ResponseAssignmentBenchmarks.cs), and [named tracing](../../../tests/RequestBatcher.Benchmarks/InMemory/NamedTracingHotPathBenchmarks.cs).
+
+The final assignment cases used 11.6–15.9% less time; factory assignment also avoided a response-array copy, reducing allocation by about 0.15 KB at 32 entries and 1.02 KB at 256. Explicit response submissions allocated about 9–11% less per 256-request wave; single-call allocation changes were smaller and sensitive to batch formation. Several synchronous timing intervals overlapped, so submission results do not establish a general CPU gain. In waves with simulated 20 ms handler waits, allocation still improved on explicit submissions, while timer scheduling and partial batches limited timing interpretation.
+
+Earlier temporary-array pooling experiments reduced allocation for `int` and `string` responses at sizes 1, 32, and 256, but were slower for one entry and showed no timing gain at the larger tested sizes. Production retained an owned temporary array. This is evidence for the bounded tested cases, not every allocation-pressure profile. Named tracing saved allocation on explicit calls but had mixed timing, including recorded-tracing regressions.
+
+The suite validated values, explicit order, exactly-once handling, and dispatch bounds. Results are finite in-process waves; short synchronous runs and separate-run variation constrain timing conclusions. These historical measurements are not universal performance guarantees.

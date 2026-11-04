@@ -1,0 +1,7 @@
+# Dispatch scheduling with external asynchronous I/O
+
+Historical comparison of direct handler execution with `Task.Run` after acquiring an execution slot. Measured 2026-10-09 with BufferQueue 2.0.3, SDK 10.0.100, .NET 8.0.25 on Arm64, using a separate loopback Kestrel server. It compared individual requests and explicit groups, one partition, batch size 32, capacity 8,192, prewarmed HTTP connections, and finite producer windows. All runs validated request and server counts.
+
+For asynchronous HTTP workloads, offload/direct throughput ratios were about 0.89–0.99 for individual submissions and 0.98–1.01 for explicit groups with full batches. No substantial pure-I/O gain was established. A synchronous HTTP call benefited substantially from offloading (6.23–6.66x), and a large synchronous prefix before an incomplete HTTP await improved 2.18x with 32 slots. Moving that same computation after the await showed no benefit (0.86–0.99x at the tested settings). Batch occupancy differed between individual-submission modes, so these are pipeline comparisons, not isolated scheduling-hop costs.
+
+The test used local simulated HTTP, not remote services, TLS, retries, database locks, or open-ended saturation. The offload prototype did not validate production cancellation or lifecycle behavior. Reproduce with [EvaluateHttpScheduling.cs](../../../scripts/scheduling-evaluation/EvaluateHttpScheduling.cs); see the [probe instructions](../../../scripts/scheduling-evaluation/README.io.md) and [single-call latency follow-up](../external-io-latency/README.md).

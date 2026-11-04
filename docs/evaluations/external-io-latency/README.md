@@ -1,0 +1,7 @@
+# Single-call latency and dispatch scheduling
+
+This historical loopback HTTP evaluation measured actual client-call durations and compared direct dispatch with `Task.Run` after acquiring a handler slot. It used BufferQueue 2.0.3, SDK 10.0.100, .NET 8.0.25 on Arm64, one unkeyed partition, full 32-item batches, and a prewarmed local HTTP/1.1 server. Each scenario used two launches, 1,024 warmup items, and three measured 2,048-item iterations per launch.
+
+For pure asynchronous HTTP calls, offload/direct throughput ratios were 0.97–1.02 across 10–500 ms delays: this workload showed no substantial benefit. At 32 handler slots but only 8 HTTP connections, a 500 ms call averaged 1,258.93 ms at the client while server residence remained about 502 ms, demonstrating that extra handler slots cannot expand the connection pool. With a fixed synchronous 2,000,000-operation prefix, offload ratios fell from 3.93x at 10 ms I/O to 1.12x at 500 ms; the benefit shrank as waiting dominated. These are finite-window loopback results, not production tail or capacity guarantees.
+
+Reproduce with [EvaluateHttpScheduling.cs](../../../scripts/scheduling-evaluation/EvaluateHttpScheduling.cs); timing boundaries and local-server setup are in the [probe instructions](../../../scripts/scheduling-evaluation/README.io.md). The [individual-submission comparison](../external-io-scheduling/README.md) covers broader workload shapes.

@@ -144,8 +144,6 @@ collection. RequestBatcher's public handler signatures remain unchanged, and
 handler-facing request arrays remain independent of pending-request state.
 Tests cover batch lifetime across overlapping executions, cancellation filtering,
 consumer failures, capacity handoff, routing, and shutdown on both target frameworks.
-Dependency comparisons use matched source snapshots with the required API adaptation and the same 20 ms
-workload and sampling matrix, reporting timing and managed allocation separately in local reports.
 
 ## BatchDispatchLoop
 
@@ -394,14 +392,18 @@ existing 4,096-request dispatch-capacity matrix with synchronous and 20 ms
 handlers. Response stress tests cover concurrent single, explicit, and mixed
 submissions, response correlation, collection order, and exactly-once handling.
 
-## Performance Validation
+## Evaluation Evidence
 
-The [benchmark index](../tests/RequestBatcher.Benchmarks/README.md) covers partition routing,
-queue pulling, dispatch bookkeeping, and synchronous/20 ms handler workloads. Compare the same source/runtime
-configuration while holding unrelated settings fixed. The
-[paced-arrival probe](../scripts/scheduling-evaluation/README.arrival.md) adds caller latency,
-occupied-slot wall time, batch formation, and PostgreSQL/Redis checks.
-Keep machine-specific measurements and conclusions in local reports outside the repository.
+The [partition submission evaluation](evaluations/partition-submissions/README.md)
+varies partition count independently for single and explicit submissions while
+holding batch size and handler concurrency fixed. The
+[queue pull evaluation](evaluations/queue-pull-capacity/README.md) checks dispatch
+capacity with asynchronous workloads.
+These measurements are evidence for tradeoffs, not throughput guarantees.
+The [paced-arrival evaluation](evaluations/arrival-scheduling/README.md) adds
+caller latency, occupied-slot wall time, batch formation, and PostgreSQL/Redis
+checks. It supports retaining direct dispatch for asynchronous workloads;
+bounded offloading does not show a consistent benefit in those cases.
 
 ## Acceptance Criteria
 

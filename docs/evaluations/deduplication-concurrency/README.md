@@ -1,0 +1,7 @@
+# Batch-local deduplication and downstream concurrency
+
+This historical benchmark compared bulk reads, chunked parallel reads, and one read per distinct key for in-memory requests. The net8.0 workload ran on Arm64 macOS 27.0.1 with SDK 10.0.100. It varied batch sizes 32/256, handler concurrency 4/32, 32 hot keys or 16,384 unique keys, and single, grouped, or one large explicit submission. A shared downstream semaphore capped calls at 32. Every measured burst validated each response and exactly-once handling.
+
+Larger actual batches improved batch-local deduplication: in the 32-key, one-large-submission case, increasing batch size from 32 to 256 reduced distinct-key reads from 10,408 to 2,047 (deduplication rose from 36.47% to 87.51%). Bulk reads generally avoided the extra task and call costs of fan-out. In the 16,384-unique-key case with batch size 256 and concurrency four, bulk and chunked timings overlapped; chunking increased downstream calls from 64 to 512 without a reliable speedup. These results describe a constant-round-trip simulation, not SQL, network bandwidth, connection acquisition, or real database safety. Caller submission and batch formation also affect end-to-end results.
+
+The source workloads are [DeduplicationConcurrencyBenchmarks](../../../tests/RequestBatcher.Benchmarks/InMemory/DeduplicationConcurrencyBenchmarks.cs) and [TaskWhenAllOverheadBenchmarks](../../../tests/RequestBatcher.Benchmarks/InMemory/TaskWhenAllOverheadBenchmarks.cs).

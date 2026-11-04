@@ -22,8 +22,7 @@ coverage*.info
 *.nupkg
 *.snupkg
 BenchmarkDotNet.Artifacts/
-# Machine-specific performance reports and local evaluation notes
-docs/evaluations/
+# Disposable local performance output
 performance-results/
 
 # Visual Studio and VS Code
