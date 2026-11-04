@@ -41,11 +41,15 @@ public class ResponseFactoryBufferBenchmarks<TResponse>
     private long _publicFactoryValidatedBatches;
     private long _pooledFactoryValidatedBatches;
 
-    /// <summary>Gets or sets the number of request entries assigned in each batch.</summary>
+    /// <summary>
+    /// Gets or sets the number of request entries assigned in each batch.
+    /// </summary>
     [Params(1, 32, 256)]
     public int BatchSize { get; set; }
 
-    /// <summary>Precomputes response values and caches the response factory outside measurement.</summary>
+    /// <summary>
+    /// Precomputes response values and caches the response factory outside measurement.
+    /// </summary>
     [GlobalSetup]
     public void GlobalSetup()
     {
@@ -74,7 +78,9 @@ public class ResponseFactoryBufferBenchmarks<TResponse>
         _pooledFactoryValidatedBatches = 0;
     }
 
-    /// <summary>Measures the public response factory overload for one batch.</summary>
+    /// <summary>
+    /// Measures the public response factory overload for one batch.
+    /// </summary>
     [Benchmark(Baseline = true, Description = "Public factory")]
     public int PublicFactoryAssignment()
     {
@@ -85,7 +91,9 @@ public class ResponseFactoryBufferBenchmarks<TResponse>
         return checksum;
     }
 
-    /// <summary>Measures a benchmark-local response factory that rents its temporary array.</summary>
+    /// <summary>
+    /// Measures a benchmark-local response factory that rents its temporary array.
+    /// </summary>
     [Benchmark(Description = "ArrayPool candidate")]
     public int PooledFactoryAssignment()
     {
@@ -96,7 +104,9 @@ public class ResponseFactoryBufferBenchmarks<TResponse>
         return checksum;
     }
 
-    /// <summary>Prints successful validation counts after each benchmark case.</summary>
+    /// <summary>
+    /// Prints successful validation counts after each benchmark case.
+    /// </summary>
     [GlobalCleanup]
     public void GlobalCleanup()
     {

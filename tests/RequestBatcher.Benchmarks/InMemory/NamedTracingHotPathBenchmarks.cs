@@ -39,11 +39,15 @@ public class NamedTracingHotPathBenchmarks
     private long _stoppedBatches;
     private string _method = string.Empty;
 
-    /// <summary>Gets or sets the ActivityListener configuration.</summary>
+    /// <summary>
+    /// Gets or sets the ActivityListener configuration.
+    /// </summary>
     [Params(ListenerMode.Disabled, ListenerMode.Propagation, ListenerMode.Recorded)]
     public ListenerMode TracingMode { get; set; }
 
-    /// <summary>Gets or sets whether submission calls run while ExecutionContext flow is suppressed.</summary>
+    /// <summary>
+    /// Gets or sets whether submission calls run while ExecutionContext flow is suppressed.
+    /// </summary>
     /// <remarks>
     /// Suppression is applied only around synchronous public submission calls and Task.WhenAll creation, then restored
     /// before awaiting their returned task. Existing caller-owned suppression is preserved.
@@ -51,7 +55,9 @@ public class NamedTracingHotPathBenchmarks
     [Params(false, true)]
     public bool SuppressSubmissionContextFlow { get; set; }
 
-    /// <summary>Creates the named singleton batcher and warms both submission paths.</summary>
+    /// <summary>
+    /// Creates the named singleton batcher and warms both submission paths.
+    /// </summary>
     [GlobalSetup]
     public void GlobalSetup()
     {
@@ -85,15 +91,21 @@ public class NamedTracingHotPathBenchmarks
         RunWaveAsync(explicitSubmission: true).GetAwaiter().GetResult();
     }
 
-    /// <summary>Submits 256 concurrent single calls and validates each handled request.</summary>
+    /// <summary>
+    /// Submits 256 concurrent single calls and validates each handled request.
+    /// </summary>
     [Benchmark]
     public Task ConcurrentSinglesAsync() => RunWaveAsync(explicitSubmission: false);
 
-    /// <summary>Submits one explicit group of 256 requests and validates each handled request.</summary>
+    /// <summary>
+    /// Submits one explicit group of 256 requests and validates each handled request.
+    /// </summary>
     [Benchmark]
     public Task ExplicitSubmissionAsync() => RunWaveAsync(explicitSubmission: true);
 
-    /// <summary>Drains the pipeline, validates stopped spans, and prints successful validation totals.</summary>
+    /// <summary>
+    /// Drains the pipeline, validates stopped spans, and prints successful validation totals.
+    /// </summary>
     [GlobalCleanup]
     public async Task GlobalCleanupAsync()
     {
@@ -210,16 +222,24 @@ public class NamedTracingHotPathBenchmarks
         }
     }
 
-    /// <summary>Specifies whether Activities are disabled, propagation-only, or recorded.</summary>
+    /// <summary>
+    /// Specifies whether Activities are disabled, propagation-only, or recorded.
+    /// </summary>
     public enum ListenerMode
     {
-        /// <summary>No listener is installed.</summary>
+        /// <summary>
+        /// No listener is installed.
+        /// </summary>
         Disabled,
 
-        /// <summary>Activities propagate context without recording.</summary>
+        /// <summary>
+        /// Activities propagate context without recording.
+        /// </summary>
         Propagation,
 
-        /// <summary>Activities record all data and sampled trace flags.</summary>
+        /// <summary>
+        /// Activities record all data and sampled trace flags.
+        /// </summary>
         Recorded,
     }
 

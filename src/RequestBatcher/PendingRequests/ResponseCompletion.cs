@@ -1,5 +1,8 @@
 namespace RequestBatcher.PendingRequests;
 
+/// <summary>
+/// Completes one response-bearing request with a typed task, avoiding a result-projection wrapper on direct admission.
+/// </summary>
 internal class ResponseCompletion<TRequest, TResponse>(RequestBatchEntry<TRequest, TResponse> entry)
     : TaskCompletionSource<TResponse>(TaskCreationOptions.RunContinuationsAsynchronously), IRequestCompletion
 {

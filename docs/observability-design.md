@@ -400,8 +400,12 @@ integration extension changes the SDK's batch decision when it is registered.
 
 ## Internal flow and performance
 
-Diagnostics is organized by responsibility: `Diagnostics/Tracing` owns Activity helpers, links and traced completion
-state; `Diagnostics/Metrics` owns instruments, configuration and metric constants; `Diagnostics/Logging` owns generated
+The [completion design](request-completion-design.md) maps all four public submission paths to their completion
+types and explains shared aggregation, tracing publication, and direct versus wrapper Task boundaries.
+
+Diagnostics is organized by responsibility: `Diagnostics/Tracing` owns Activity helpers, links, traced completion
+state, and `TracedPendingBatchRequest`; ordinary pending-request state stays in `PendingRequests`.
+`Diagnostics/Metrics` owns instruments, configuration and metric constants; `Diagnostics/Logging` owns generated
 logger extensions. Namespaces follow these directories. Shared batcher metadata and the public request-type name resolver
 remain in `Diagnostics`. This internal layout does not change public APIs, instrumentation names or lifecycle behavior.
 

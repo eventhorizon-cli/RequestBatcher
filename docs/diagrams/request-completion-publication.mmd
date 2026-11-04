@@ -1,0 +1,10 @@
+%% Contract: compare the Task returned by the submission delegate, not an optional metrics wrapper.
+%% Both terminal notification and TryAttach must arrive before the observer releases the completion.
+%% Direct: end Execute span before publishing the source Task.
+%% Wrapped: publish the inner Task first; follow the outer Task, including admission waits.
+%% Explicit response submissions also follow the outer Task, without an observer or attachment.
+%% Outer Task already complete: end span and return it unchanged. Otherwise publish a bridge after span end.
+flowchart LR
+    D1[Outcome ready + attached] --> D2[End Execute span] --> D3[Publish completion Task]
+    W1[Outcome ready + attached] --> W2[Publish inner Task] --> W3[Outer Task completes] --> W4[End Execute span] --> W5[Publish bridge or return already-completed Task]
+    %% D nodes: same Task. W nodes: a different returned Task. Separate rows in the SVG.

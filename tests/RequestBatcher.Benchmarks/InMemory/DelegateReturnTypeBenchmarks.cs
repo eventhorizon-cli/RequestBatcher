@@ -19,43 +19,63 @@ public class DelegateReturnTypeBenchmarks
     private IRequestBatcher<int, int> _batcher = null!;
     private Func<Task<IReadOnlyList<int>>> _submit = null!;
 
-    /// <summary>Gets or sets the maximum size of a handler batch.</summary>
+    /// <summary>
+    /// Gets or sets the maximum size of a handler batch.
+    /// </summary>
     [Params(1, 32, 256)]
     public int BatchSize { get; set; }
 
-    /// <summary>Creates and warms the typed singleton control.</summary>
+    /// <summary>
+    /// Creates and warms the typed singleton control.
+    /// </summary>
     [GlobalSetup(Target = nameof(Typed))]
     public void SetupTyped() => Setup(useDelegate: false, SubmitTyped);
 
-    /// <summary>Creates and binds the synchronous void delegate.</summary>
+    /// <summary>
+    /// Creates and binds the synchronous void delegate.
+    /// </summary>
     [GlobalSetup(Target = nameof(DelegateVoid))]
     public void SetupVoid() => Setup(useDelegate: true, SubmitVoid);
 
-    /// <summary>Creates and binds the completed-task delegate.</summary>
+    /// <summary>
+    /// Creates and binds the completed-task delegate.
+    /// </summary>
     [GlobalSetup(Target = nameof(DelegateTask))]
     public void SetupTask() => Setup(useDelegate: true, SubmitTask);
 
-    /// <summary>Creates and binds the completed-value-task delegate.</summary>
+    /// <summary>
+    /// Creates and binds the completed-value-task delegate.
+    /// </summary>
     [GlobalSetup(Target = nameof(DelegateValueTask))]
     public void SetupValueTask() => Setup(useDelegate: true, SubmitValueTask);
 
-    /// <summary>Measures synchronous work in a typed singleton handler.</summary>
+    /// <summary>
+    /// Measures synchronous work in a typed singleton handler.
+    /// </summary>
     [Benchmark(Baseline = true)]
     public Task Typed() => RunAsync();
 
-    /// <summary>Measures synchronous work in a void delegate.</summary>
+    /// <summary>
+    /// Measures synchronous work in a void delegate.
+    /// </summary>
     [Benchmark]
     public Task DelegateVoid() => RunAsync();
 
-    /// <summary>Measures synchronous work in a delegate returning an already completed task.</summary>
+    /// <summary>
+    /// Measures synchronous work in a delegate returning an already completed task.
+    /// </summary>
     [Benchmark]
     public Task DelegateTask() => RunAsync();
 
-    /// <summary>Measures synchronous work in a delegate returning a completed value task.</summary>
+    /// <summary>
+    /// Measures synchronous work in a delegate returning a completed value task.
+    /// </summary>
     [Benchmark]
     public Task DelegateValueTask() => RunAsync();
 
-    /// <summary>Disposes the batcher outside measurement.</summary>
+    /// <summary>
+    /// Disposes the batcher outside measurement.
+    /// </summary>
     [GlobalCleanup]
     public async Task CleanupAsync() => await _provider.DisposeAsync().ConfigureAwait(false);
 

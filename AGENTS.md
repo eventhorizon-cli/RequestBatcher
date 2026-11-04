@@ -70,6 +70,9 @@ You are an AI coding assistant for this repository.
   package metadata.
 - Write code comments and XML documentation in English. Document every public API type and member; do not suppress
   `CS1591` project-wide.
+- Use multiline XML documentation summaries: put `/// <summary>`, the description, and `/// </summary>` on separate
+  lines. Do not collapse a summary onto one line, including for enum members, properties, and benchmark methods.
+  Keep longer explanations in `remarks` and use `param` and `returns` for their corresponding contracts.
 - Prefer concise modern C# when it clarifies the code. Use primary constructors when a type only captures dependencies
   or state and doing so does not broaden constructor accessibility. Retain explicit constructors when validation,
   defensive copies, resource ownership, cleanup, or non-public constructor visibility make the lifecycle clearer.

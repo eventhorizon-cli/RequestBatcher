@@ -1,0 +1,19 @@
+%% 拓扑契约：每个 traced 类型继承对应的基础 completion。
+%% 每个 traced 实例通知各自所属调用的 observer；虚线依赖表示协调，
+%% 不表示继承，也不表示额外包装一个 completion。
+classDiagram
+    direction TB
+    class RequestCompletion
+    class ResponseCompletion~TRequest, TResponse~
+    class BatchSubmissionCompletion
+    class TracedRequestCompletion
+    class TracedResponseCompletion
+    class TracedBatchSubmissionCompletion
+    class CallCompletionObserver
+
+    RequestCompletion <|-- TracedRequestCompletion : 继承
+    ResponseCompletion~TRequest, TResponse~ <|-- TracedResponseCompletion : 继承
+    BatchSubmissionCompletion <|-- TracedBatchSubmissionCompletion : 继承
+    TracedRequestCompletion ..> CallCompletionObserver : 通知 / 协调
+    TracedResponseCompletion ..> CallCompletionObserver : 通知 / 协调
+    TracedBatchSubmissionCompletion ..> CallCompletionObserver : 通知 / 协调

@@ -4,8 +4,13 @@ using RequestBatcher.Scheduling;
 
 namespace RequestBatcher.Diagnostics.Tracing;
 
-// Admission can finish a request before returning its Task. Hold publication until the tracing boundary
-// knows whether that Task is the completion itself or a wrapper covering additional asynchronous work.
+/// <summary>
+/// Coordinates deferred task publication with tracing after the submission returns its task.
+/// </summary>
+/// <remarks>
+/// Completion may precede attachment. A direct task ends the call span before publication; a wrapper task
+/// releases the inner completion and lets the tracing boundary follow the wrapper instead.
+/// </remarks>
 internal sealed class CallCompletionObserver(Activity activity, SubmissionTraceContext? context) : IRequestCompletionObserver
 {
     // Capture while the Execute Activity is current so completion listeners see the submission's ambient values.
@@ -29,6 +34,7 @@ internal sealed class CallCompletionObserver(Activity activity, SubmissionTraceC
                 return _direct;
             }
 
+            // Attachment also handles a completion that reached its terminal outcome before return.
             _direct = _completion is not null && ReferenceEquals(_completion.Task, returnedTask);
             _attached = true;
             publish = _completed;

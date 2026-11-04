@@ -46,15 +46,21 @@ public class ResponseHotPathBenchmarks
     private long _singleWaves;
     private long _explicitWaves;
 
-    /// <summary>Gets or sets whether the wave uses the static delegate handler.</summary>
+    /// <summary>
+    /// Gets or sets whether the wave uses the static delegate handler.
+    /// </summary>
     [Params(false, true)]
     public bool UseDelegate { get; set; }
 
-    /// <summary>Gets or sets the simulated handler delay in milliseconds.</summary>
+    /// <summary>
+    /// Gets or sets the simulated handler delay in milliseconds.
+    /// </summary>
     [Params(0, 20)]
     public int HandlerDelayMilliseconds { get; set; }
 
-    /// <summary>Builds the public batcher and warms both submission paths outside measurement.</summary>
+    /// <summary>
+    /// Builds the public batcher and warms both submission paths outside measurement.
+    /// </summary>
     [GlobalSetup]
     public void GlobalSetup()
     {
@@ -85,15 +91,21 @@ public class ResponseHotPathBenchmarks
         _explicitWaves = 0;
     }
 
-    /// <summary>Measures one wave of 256 concurrent single response submissions.</summary>
+    /// <summary>
+    /// Measures one wave of 256 concurrent single response submissions.
+    /// </summary>
     [Benchmark(Description = "Concurrent single calls")]
     public Task ConcurrentSingleCallsAsync() => RunConcurrentSingleWaveAsync();
 
-    /// <summary>Measures one explicit response submission containing all 256 requests.</summary>
+    /// <summary>
+    /// Measures one explicit response submission containing all 256 requests.
+    /// </summary>
     [Benchmark(Description = "One explicit batch")]
     public Task ExplicitBatchAsync() => RunExplicitBatchWaveAsync();
 
-    /// <summary>Drains and disposes the provider before printing successful wave validation counts.</summary>
+    /// <summary>
+    /// Drains and disposes the provider before printing successful wave validation counts.
+    /// </summary>
     [GlobalCleanup]
     public async Task GlobalCleanupAsync()
     {

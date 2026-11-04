@@ -1,0 +1,61 @@
+<?xml version="1.0" encoding="utf-8"?>
+<svg width="1460" height="790" viewBox="0 0 1460 790" role="img" aria-labelledby="title desc" xmlns="http://www.w3.org/2000/svg">
+  <title id="title">请求完成类型关系</title>
+  <desc id="desc">三个 traced completion 类型分别继承对应的基础 completion 类型。每个 traced 实例通知各自所属调用的 CallCompletionObserver。继承关系不表示包装分配。</desc>
+  <defs>
+    <marker id="inherit" viewBox="0 0 12 12" refX="11" refY="6" markerWidth="10" markerHeight="10" orient="auto">
+      <path d="M 1 1 L 11 6 L 1 11 Z" fill="#ffffff" stroke="#475467" stroke-width="1.4" />
+    </marker>
+    <marker id="notify" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto">
+      <path d="M 0 0 L 10 5 L 0 10 Z" fill="#3567a7" />
+    </marker>
+    <style>text { font-family: Arial, 'PingFang SC', 'Microsoft YaHei', sans-serif; fill: #303b44; } .heading { font-size: 22px; font-weight: 600; } .type { font-size: 19px; font-weight: 600; } .role { font-size: 17px; fill: #596773; } .edge { font-size: 16px; fill: #475467; } .notify-label { font-size: 16px; fill: #3567a7; }</style>
+  </defs>
+  <rect width="1460" height="790" fill="#ffffff" />
+  <text x="40" y="48" class="heading" text-anchor="start">Completion 实现</text>
+  <rect x="55" y="92" width="410" height="128" rx="6" fill="#edf1f5" stroke="#596773" stroke-width="1.5" />
+  <text x="260" y="145" class="type" text-anchor="middle">RequestCompletion</text>
+  <text x="260" y="180" class="role" text-anchor="middle">单个无响应请求</text>
+  <rect x="525" y="92" width="410" height="128" rx="6" fill="#edf1f5" stroke="#596773" stroke-width="1.5" />
+  <text x="730" y="140" class="type" text-anchor="middle">ResponseCompletion&lt;TRequest,</text>
+  <text x="730" y="166" class="type" text-anchor="middle">TResponse&gt;</text>
+  <text x="730" y="194" class="role" text-anchor="middle">带类型化响应的单个请求</text>
+  <rect x="995" y="92" width="410" height="128" rx="6" fill="#edf1f5" stroke="#596773" stroke-width="1.5" />
+  <text x="1200" y="145" class="type" text-anchor="middle">BatchSubmissionCompletion</text>
+  <text x="1200" y="180" class="role" text-anchor="middle">聚合一次显式提交</text>
+
+  <path d="M 260 342 V 220" fill="none" stroke="#475467" stroke-width="2" marker-end="url(#inherit)" />
+  <path d="M 730 342 V 220" fill="none" stroke="#475467" stroke-width="2" marker-end="url(#inherit)" />
+  <path d="M 1200 342 V 220" fill="none" stroke="#475467" stroke-width="2" marker-end="url(#inherit)" />
+  <rect x="300" y="276" width="120" height="30" fill="#ffffff" />
+  <text x="360" y="297" class="edge" text-anchor="middle">继承</text>
+  <rect x="770" y="276" width="120" height="30" fill="#ffffff" />
+  <text x="830" y="297" class="edge" text-anchor="middle">继承</text>
+  <rect x="1240" y="276" width="120" height="30" fill="#ffffff" />
+  <text x="1300" y="297" class="edge" text-anchor="middle">继承</text>
+
+  <rect x="55" y="342" width="410" height="128" rx="6" fill="#eaf2ff" stroke="#3567a7" stroke-width="1.5" />
+  <text x="260" y="394" class="type" text-anchor="middle">TracedRequestCompletion</text>
+  <text x="260" y="429" class="role" text-anchor="middle">发布 Task 前暂存最终结果</text>
+  <rect x="525" y="342" width="410" height="128" rx="6" fill="#eaf2ff" stroke="#3567a7" stroke-width="1.5" />
+  <text x="730" y="394" class="type" text-anchor="middle">TracedResponseCompletion</text>
+  <text x="730" y="429" class="role" text-anchor="middle">发布前暂存类型化结果</text>
+  <rect x="995" y="342" width="410" height="128" rx="6" fill="#eaf2ff" stroke="#3567a7" stroke-width="1.5" />
+  <text x="1200" y="394" class="type" text-anchor="middle">TracedBatchSubmissionCompletion</text>
+  <text x="1200" y="429" class="role" text-anchor="middle">观察最终聚合结果的发布</text>
+
+  <path d="M 260 470 V 550 H 430 V 610" fill="none" stroke="#3567a7" stroke-width="2" stroke-dasharray="7 6" marker-end="url(#notify)" />
+  <path d="M 730 470 V 610" fill="none" stroke="#3567a7" stroke-width="2" stroke-dasharray="7 6" marker-end="url(#notify)" />
+  <path d="M 1200 470 V 550 H 1030 V 610" fill="none" stroke="#3567a7" stroke-width="2" stroke-dasharray="7 6" marker-end="url(#notify)" />
+  <rect x="90" y="500" width="168" height="32" fill="#ffffff" />
+  <text x="174" y="522" class="notify-label" text-anchor="middle">通知 / 协调</text>
+  <rect x="766" y="510" width="168" height="32" fill="#ffffff" />
+  <text x="850" y="532" class="notify-label" text-anchor="middle">通知 / 协调</text>
+  <rect x="1210" y="532" width="168" height="32" fill="#ffffff" />
+  <text x="1294" y="554" class="notify-label" text-anchor="middle">通知 / 协调</text>
+
+  <rect x="300" y="610" width="860" height="118" rx="6" fill="#f4edfb" stroke="#75529b" stroke-width="1.5" />
+  <text x="730" y="662" class="type" text-anchor="middle">CallCompletionObserver</text>
+  <text x="730" y="697" class="role" text-anchor="middle">在调用级协调 tracing 与 Task 发布</text>
+  <text x="40" y="765" class="role" text-anchor="start">每个 traced 实例都是含继承状态的单个 completion 对象，不是由另一个 completion 对象包装基础对象。</text>
+</svg>

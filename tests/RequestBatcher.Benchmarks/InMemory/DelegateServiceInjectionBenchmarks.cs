@@ -30,11 +30,15 @@ public class DelegateServiceInjectionBenchmarks
     private IRequestBatcher<int> _batcher = null!;
     private Func<IEnumerable<int>, Task> _submitBatch = null!;
 
-    /// <summary>Gets or sets the lifetime of the dependency injected into each handler batch.</summary>
+    /// <summary>
+    /// Gets or sets the lifetime of the dependency injected into each handler batch.
+    /// </summary>
     [Params(ServiceLifetime.Singleton, ServiceLifetime.Scoped, ServiceLifetime.Transient)]
     public ServiceLifetime DependencyLifetime { get; set; }
 
-    /// <summary>Gets or sets whether the dependency is selected by the explicit service key.</summary>
+    /// <summary>
+    /// Gets or sets whether the dependency is selected by the explicit service key.
+    /// </summary>
     [Params(false, true)]
     public bool KeyedService { get; set; }
 
@@ -51,15 +55,21 @@ public class DelegateServiceInjectionBenchmarks
     [GlobalSetup(Target = nameof(DelegateBatchSubmission))]
     public void SetupDelegate() => Setup(useDelegate: true);
 
-    /// <summary>Measures explicit request batch submission through a typed scoped handler.</summary>
+    /// <summary>
+    /// Measures explicit request batch submission through a typed scoped handler.
+    /// </summary>
     [Benchmark(Baseline = true)]
     public Task TypedBatchSubmission() => RunSubmissionAsync();
 
-    /// <summary>Measures explicit request batch submission through a bound static delegate.</summary>
+    /// <summary>
+    /// Measures explicit request batch submission through a bound static delegate.
+    /// </summary>
     [Benchmark]
     public Task DelegateBatchSubmission() => RunSubmissionAsync();
 
-    /// <summary>Disposes the application-owned provider after the benchmark completes.</summary>
+    /// <summary>
+    /// Disposes the application-owned provider after the benchmark completes.
+    /// </summary>
     [GlobalCleanup]
     public async Task CleanupAsync() => await _provider.DisposeAsync().ConfigureAwait(false);
 

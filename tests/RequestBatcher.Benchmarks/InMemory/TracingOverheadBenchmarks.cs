@@ -160,13 +160,19 @@ public class TracingOverheadBenchmarks
     /// </summary>
     public enum TracingMode
     {
-        /// <summary>No ActivityListener is installed.</summary>
+        /// <summary>
+        /// No ActivityListener is installed.
+        /// </summary>
         Disabled,
 
-        /// <summary>The source is listened to but spans are sampled out.</summary>
+        /// <summary>
+        /// The source is listened to but spans are sampled out.
+        /// </summary>
         Drop,
 
-        /// <summary>Call and batch Activities are created and recorded in memory; no processor or exporter is installed.</summary>
+        /// <summary>
+        /// Call and batch Activities are created and recorded in memory; no processor or exporter is installed.
+        /// </summary>
         Recorded,
     }
 

@@ -24,11 +24,15 @@ public class DelegateHandlerBenchmarks
     private Func<int, Task<int>> _submitSingle = null!;
     private Func<IEnumerable<int>, Task<IReadOnlyList<int>>> _submitBatch = null!;
 
-    /// <summary>Gets or sets the maximum number of requests in one handler batch.</summary>
+    /// <summary>
+    /// Gets or sets the maximum number of requests in one handler batch.
+    /// </summary>
     [Params(1, 32, 256)]
     public int BatchSize { get; set; }
 
-    /// <summary>Gets or sets the maximum number of concurrently executing handler batches.</summary>
+    /// <summary>
+    /// Gets or sets the maximum number of concurrently executing handler batches.
+    /// </summary>
     [Params(1, 8)]
     public int MaxConcurrency { get; set; }
 
@@ -56,55 +60,81 @@ public class DelegateHandlerBenchmarks
     [GlobalSetup(Target = nameof(DelegateBatchScopedService))]
     public void SetupDelegateScoped() => Setup(useDelegate: true, useServices: true);
 
-    /// <summary>Builds and warms the typed singleton single-submission control.</summary>
+    /// <summary>
+    /// Builds and warms the typed singleton single-submission control.
+    /// </summary>
     [GlobalSetup(Target = nameof(TypedSingleNoServices))]
     public void SetupTypedSingleNoServices() => Setup(useDelegate: false, useServices: false, single: true);
 
-    /// <summary>Builds and binds the delegate single-submission case without services.</summary>
+    /// <summary>
+    /// Builds and binds the delegate single-submission case without services.
+    /// </summary>
     [GlobalSetup(Target = nameof(DelegateSingleNoServices))]
     public void SetupDelegateSingleNoServices() => Setup(useDelegate: true, useServices: false, single: true);
 
-    /// <summary>Builds and warms the typed scoped single-submission control.</summary>
+    /// <summary>
+    /// Builds and warms the typed scoped single-submission control.
+    /// </summary>
     [GlobalSetup(Target = nameof(TypedSingleScopedService))]
     public void SetupTypedSingleScoped() => Setup(useDelegate: false, useServices: true, single: true);
 
-    /// <summary>Builds and binds the delegate single-submission case with a scoped service.</summary>
+    /// <summary>
+    /// Builds and binds the delegate single-submission case with a scoped service.
+    /// </summary>
     [GlobalSetup(Target = nameof(DelegateSingleScopedService))]
     public void SetupDelegateSingleScoped() => Setup(useDelegate: true, useServices: true, single: true);
 
-    /// <summary>Measures single submissions with a typed singleton handler.</summary>
+    /// <summary>
+    /// Measures single submissions with a typed singleton handler.
+    /// </summary>
     [Benchmark(Baseline = true), BenchmarkCategory("SingleNoServices")]
     public Task TypedSingleNoServices() => RunSingleAsync();
 
-    /// <summary>Measures single submissions with a delegate and no services.</summary>
+    /// <summary>
+    /// Measures single submissions with a delegate and no services.
+    /// </summary>
     [Benchmark, BenchmarkCategory("SingleNoServices")]
     public Task DelegateSingleNoServices() => RunSingleAsync();
 
-    /// <summary>Measures explicit submissions with a typed singleton handler.</summary>
+    /// <summary>
+    /// Measures explicit submissions with a typed singleton handler.
+    /// </summary>
     [Benchmark(Baseline = true), BenchmarkCategory("BatchNoServices")]
     public Task TypedBatchNoServices() => RunBatchAsync();
 
-    /// <summary>Measures explicit submissions with a delegate and no services.</summary>
+    /// <summary>
+    /// Measures explicit submissions with a delegate and no services.
+    /// </summary>
     [Benchmark, BenchmarkCategory("BatchNoServices")]
     public Task DelegateBatchNoServices() => RunBatchAsync();
 
-    /// <summary>Measures single submissions with a typed scoped handler.</summary>
+    /// <summary>
+    /// Measures single submissions with a typed scoped handler.
+    /// </summary>
     [Benchmark(Baseline = true), BenchmarkCategory("SingleScopedService")]
     public Task TypedSingleScopedService() => RunSingleAsync();
 
-    /// <summary>Measures single submissions with a delegate and a scoped dependency.</summary>
+    /// <summary>
+    /// Measures single submissions with a delegate and a scoped dependency.
+    /// </summary>
     [Benchmark, BenchmarkCategory("SingleScopedService")]
     public Task DelegateSingleScopedService() => RunSingleAsync();
 
-    /// <summary>Measures explicit submissions with a typed scoped handler.</summary>
+    /// <summary>
+    /// Measures explicit submissions with a typed scoped handler.
+    /// </summary>
     [Benchmark(Baseline = true), BenchmarkCategory("BatchScopedService")]
     public Task TypedBatchScopedService() => RunBatchAsync();
 
-    /// <summary>Measures explicit submissions with a delegate and a scoped dependency.</summary>
+    /// <summary>
+    /// Measures explicit submissions with a delegate and a scoped dependency.
+    /// </summary>
     [Benchmark, BenchmarkCategory("BatchScopedService")]
     public Task DelegateBatchScopedService() => RunBatchAsync();
 
-    /// <summary>Drains and disposes the provider outside measurement.</summary>
+    /// <summary>
+    /// Drains and disposes the provider outside measurement.
+    /// </summary>
     [GlobalCleanup]
     public async Task CleanupAsync() => await _provider.DisposeAsync().ConfigureAwait(false);
 

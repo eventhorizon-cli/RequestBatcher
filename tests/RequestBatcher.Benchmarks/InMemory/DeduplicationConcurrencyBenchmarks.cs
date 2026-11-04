@@ -22,35 +22,51 @@ public class DeduplicationConcurrencyBenchmarks
     private IReadOnlyList<int>[] _results = [];
     private int _querySize;
 
-    /// <summary>Gets or sets the maximum number of original requests in a handler batch.</summary>
+    /// <summary>
+    /// Gets or sets the maximum number of original requests in a handler batch.
+    /// </summary>
     [Params(32, 256)]
     public int BatchSize { get; set; }
 
-    /// <summary>Gets or sets the maximum number of concurrent handler batches.</summary>
+    /// <summary>
+    /// Gets or sets the maximum number of concurrent handler batches.
+    /// </summary>
     [Params(4, 32)]
     public int MaxConcurrency { get; set; }
 
-    /// <summary>Gets or sets the number of distinct keys in the fixed input population.</summary>
+    /// <summary>
+    /// Gets or sets the number of distinct keys in the fixed input population.
+    /// </summary>
     [Params(32, RequestCount)]
     public int UniqueKeyCount { get; set; }
 
-    /// <summary>Gets or sets the caller submission size, independently of handler batch size.</summary>
+    /// <summary>
+    /// Gets or sets the caller submission size, independently of handler batch size.
+    /// </summary>
     [Params(1, 32, RequestCount)]
     public int SubmissionSize { get; set; }
 
-    /// <summary>Creates a batcher that reads all distinct keys with one downstream call per batch.</summary>
+    /// <summary>
+    /// Creates a batcher that reads all distinct keys with one downstream call per batch.
+    /// </summary>
     [GlobalSetup(Target = nameof(BulkRead))]
     public Task SetupBulkAsync() => SetupAsync(querySize: 0);
 
-    /// <summary>Creates a batcher that joins individual distinct-key reads inside each handler.</summary>
+    /// <summary>
+    /// Creates a batcher that joins individual distinct-key reads inside each handler.
+    /// </summary>
     [GlobalSetup(Target = nameof(PerKeyWhenAll))]
     public Task SetupFanOutAsync() => SetupAsync(querySize: 1);
 
-    /// <summary>Creates a batcher that joins reads of up to 32 distinct keys inside each handler.</summary>
+    /// <summary>
+    /// Creates a batcher that joins reads of up to 32 distinct keys inside each handler.
+    /// </summary>
     [GlobalSetup(Target = nameof(ChunkedWhenAll))]
     public Task SetupChunkedAsync() => SetupAsync(querySize: 32);
 
-    /// <summary>Clears validation state outside the measured region.</summary>
+    /// <summary>
+    /// Clears validation state outside the measured region.
+    /// </summary>
     [IterationSetup]
     public void Reset()
     {
@@ -58,19 +74,27 @@ public class DeduplicationConcurrencyBenchmarks
         _workload.Reset();
     }
 
-    /// <summary>Measures caller submission, batch deduplication, and one bulk read per handler.</summary>
+    /// <summary>
+    /// Measures caller submission, batch deduplication, and one bulk read per handler.
+    /// </summary>
     [Benchmark(Baseline = true, OperationsPerInvoke = RequestCount)]
     public Task BulkRead() => SubmitAsync();
 
-    /// <summary>Measures caller submission and Task.WhenAll fan-out after batch-local deduplication.</summary>
+    /// <summary>
+    /// Measures caller submission and Task.WhenAll fan-out after batch-local deduplication.
+    /// </summary>
     [Benchmark(OperationsPerInvoke = RequestCount)]
     public Task PerKeyWhenAll() => SubmitAsync();
 
-    /// <summary>Measures deduplication before splitting distinct keys into concurrent chunks of 32.</summary>
+    /// <summary>
+    /// Measures deduplication before splitting distinct keys into concurrent chunks of 32.
+    /// </summary>
     [Benchmark(OperationsPerInvoke = RequestCount)]
     public Task ChunkedWhenAll() => SubmitAsync();
 
-    /// <summary>Checks every result and reports actual work outside the timed region.</summary>
+    /// <summary>
+    /// Checks every result and reports actual work outside the timed region.
+    /// </summary>
     [IterationCleanup]
     public void Validate()
     {
@@ -118,7 +142,9 @@ public class DeduplicationConcurrencyBenchmarks
             $"PeakDownstream={_workload.PeakCalls}");
     }
 
-    /// <summary>Drains and disposes the batcher outside measurement.</summary>
+    /// <summary>
+    /// Drains and disposes the batcher outside measurement.
+    /// </summary>
     [GlobalCleanup]
     public async Task CleanupAsync() => await _provider.DisposeAsync().ConfigureAwait(false);
 

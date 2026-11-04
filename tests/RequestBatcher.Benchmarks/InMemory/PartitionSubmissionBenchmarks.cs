@@ -41,19 +41,27 @@ public class PartitionSubmissionBenchmarks
     private ProductRequest[][][] _producerGroups = null!;
     private string _diagnosticMethod = "unknown";
 
-    /// <summary>Gets or sets the number of BufferQueue partitions.</summary>
+    /// <summary>
+    /// Gets or sets the number of BufferQueue partitions.
+    /// </summary>
     [Params(1, 4)]
     public int Partitions { get; set; }
 
-    /// <summary>Gets or sets the request distribution used by the wave.</summary>
+    /// <summary>
+    /// Gets or sets the request distribution used by the wave.
+    /// </summary>
     [Params("SmallBurst", "Backlog", "RepeatedKeys")]
     public string Workload { get; set; } = "SmallBurst";
 
-    /// <summary>Builds and warms the provider and single-submission path outside measurement.</summary>
+    /// <summary>
+    /// Builds and warms the provider and single-submission path outside measurement.
+    /// </summary>
     [GlobalSetup(Target = nameof(SingleSubmissions))]
     public void SetupSingles() => Setup(explicitSubmission: false);
 
-    /// <summary>Builds and warms the provider and explicit-submission path outside measurement.</summary>
+    /// <summary>
+    /// Builds and warms the provider and explicit-submission path outside measurement.
+    /// </summary>
     [GlobalSetup(Target = nameof(ExplicitSubmissions))]
     public void SetupExplicit() => Setup(explicitSubmission: true);
 
@@ -90,15 +98,21 @@ public class PartitionSubmissionBenchmarks
         RunWaveAsync("Warmup", explicitSubmission).GetAwaiter().GetResult();
     }
 
-    /// <summary>Measures eight producers submitting every request independently before awaiting their results.</summary>
+    /// <summary>
+    /// Measures eight producers submitting every request independently before awaiting their results.
+    /// </summary>
     [Benchmark]
     public Task SingleSubmissions() => RunWaveAsync(nameof(SingleSubmissions), explicitSubmission: false);
 
-    /// <summary>Measures eight producers submitting groups of at most 32 requests before awaiting their results.</summary>
+    /// <summary>
+    /// Measures eight producers submitting groups of at most 32 requests before awaiting their results.
+    /// </summary>
     [Benchmark]
     public Task ExplicitSubmissions() => RunWaveAsync(nameof(ExplicitSubmissions), explicitSubmission: true);
 
-    /// <summary>Drains and disposes the provider, then emits aggregate batch diagnostics.</summary>
+    /// <summary>
+    /// Drains and disposes the provider, then emits aggregate batch diagnostics.
+    /// </summary>
     [GlobalCleanup]
     public async Task CleanupAsync()
     {

@@ -1,0 +1,19 @@
+%% Topology contract: each traced class inherits the corresponding core completion.
+%% Each traced instance notifies its own call-level observer; dashed dependencies
+%% describe coordination, not inheritance or an additional completion wrapper.
+classDiagram
+    direction TB
+    class RequestCompletion
+    class ResponseCompletion~TRequest, TResponse~
+    class BatchSubmissionCompletion
+    class TracedRequestCompletion
+    class TracedResponseCompletion
+    class TracedBatchSubmissionCompletion
+    class CallCompletionObserver
+
+    RequestCompletion <|-- TracedRequestCompletion : inherits
+    ResponseCompletion~TRequest, TResponse~ <|-- TracedResponseCompletion : inherits
+    BatchSubmissionCompletion <|-- TracedBatchSubmissionCompletion : inherits
+    TracedRequestCompletion ..> CallCompletionObserver : notify / coordinate
+    TracedResponseCompletion ..> CallCompletionObserver : notify / coordinate
+    TracedBatchSubmissionCompletion ..> CallCompletionObserver : notify / coordinate

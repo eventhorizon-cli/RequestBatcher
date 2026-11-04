@@ -30,19 +30,27 @@ public class DispatchCapacityBenchmarks
     private int _minCalls = int.MaxValue;
     private int _maxCalls;
 
-    /// <summary>Maximum concurrent handler invocations.</summary>
+    /// <summary>
+    /// Maximum concurrent handler invocations.
+    /// </summary>
     [Params(8, 32)]
     public int Concurrency { get; set; }
 
-    /// <summary>One unkeyed partition or sixteen partitions with integer keys.</summary>
+    /// <summary>
+    /// One unkeyed partition or sixteen partitions with integer keys.
+    /// </summary>
     [Params(1, 16)]
     public int Partitions { get; set; }
 
-    /// <summary>Synchronous completion or simulated asynchronous downstream I/O.</summary>
+    /// <summary>
+    /// Synchronous completion or simulated asynchronous downstream I/O.
+    /// </summary>
     [Params(0, 20)]
     public int DelayMilliseconds { get; set; }
 
-    /// <summary>Creates the batcher outside measurement without telemetry listeners.</summary>
+    /// <summary>
+    /// Creates the batcher outside measurement without telemetry listeners.
+    /// </summary>
     [GlobalSetup]
     public void Setup()
     {
@@ -67,7 +75,9 @@ public class DispatchCapacityBenchmarks
         _batcher = _provider.GetRequiredService<IRequestBatcher<int>>();
     }
 
-    /// <summary>Runs full handler batches through a fixed number of async workers without a queue.</summary>
+    /// <summary>
+    /// Runs full handler batches through a fixed number of async workers without a queue.
+    /// </summary>
     [Benchmark(Baseline = true)]
     public async Task DirectFullBatchesAsync()
     {
@@ -84,7 +94,9 @@ public class DispatchCapacityBenchmarks
         ValidateAndRecord(started, direct: true);
     }
 
-    /// <summary>Submits the same request set through the public explicit-submission API.</summary>
+    /// <summary>
+    /// Submits the same request set through the public explicit-submission API.
+    /// </summary>
     [Benchmark]
     public async Task RequestBatcherAsync()
     {
@@ -94,7 +106,9 @@ public class DispatchCapacityBenchmarks
         ValidateAndRecord(started, direct: false);
     }
 
-    /// <summary>Disposes the batcher and reports observed batch formation and handler occupancy.</summary>
+    /// <summary>
+    /// Disposes the batcher and reports observed batch formation and handler occupancy.
+    /// </summary>
     [GlobalCleanup]
     public async Task CleanupAsync()
     {
