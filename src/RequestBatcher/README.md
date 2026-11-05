@@ -351,6 +351,9 @@ package, or a `MeterListener` that calls `EnableMeasurementEvents` for the desir
 application logging pipeline with category prefix `RequestBatcher.RequestBatchCoordinator`; set the `RequestBatcher`
 log-level prefix to configure the whole library.
 
+The `Execute` span's `requestbatcher.submission.size` attribute matches the count and admission boundary of the metric
+of the same name: `1` for a single request, the collection count, or `0` for an empty collection. Pre-admission rejection omits it.
+
 The Meter exposes four histograms: `requestbatcher.submission.size` and `requestbatcher.batch.size` are `Histogram<long>`
 in `{request}`; `requestbatcher.handle.duration` and `requestbatcher.execute.duration` are `Histogram<double>` in `ms`.
 `requestbatcher.backlog` is an `ObservableGauge<long>` in `{request}` for approximate enqueued items not yet pulled,

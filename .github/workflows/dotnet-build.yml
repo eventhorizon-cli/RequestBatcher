@@ -94,8 +94,6 @@ jobs:
           global-json-file: global.json
 
       - name: Verify exported traces and metrics
-        env:
-          REQUESTBATCHER_RUN_INTEGRATION_TESTS: "1"
         run: >-
           dotnet test tests/it/RequestBatcher.Observability.IntegrationTests/RequestBatcher.Observability.IntegrationTests.csproj
           --configuration Release

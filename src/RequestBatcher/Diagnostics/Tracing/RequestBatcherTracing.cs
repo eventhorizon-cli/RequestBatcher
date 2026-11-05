@@ -239,6 +239,15 @@ internal static class RequestBatcherTracing
         return 1 + (additional?.Count ?? 0);
     }
 
+    public static void RecordSubmissionSize(RequestBatcherMetadata metadata, int count)
+    {
+        if (Activity.Current is { IsAllDataRequested: true } activity &&
+            activity.Source == Source && activity.OperationName == metadata.TraceCallName)
+        {
+            activity.SetTag(RequestBatcherTraceTags.SubmissionSize, count);
+        }
+    }
+
     public static void RecordFailure(Activity? activity, Exception exception)
     {
         activity?.SetStatus(ActivityStatusCode.Error);

@@ -96,6 +96,7 @@ public sealed class RequestBatcherTracingTests
         await batcher.ExecuteAsync(new[] { 1, 2, 3 }).WaitAsync(TimeSpan.FromSeconds(5));
 
         var call = Assert.Single(capture.Calls);
+        Assert.Equal(3, call.GetTagItem("requestbatcher.submission.size"));
         Assert.Equal(3, capture.Batches.Count());
         Assert.All(capture.Batches, batch => Assert.Equal(1, batch.GetTagItem("requestbatcher.batch.submission.count")));
         Assert.All(capture.Batches, batch => Assert.Equal(call.Context, Assert.Single(batch.Links).Context));
@@ -188,13 +189,27 @@ public sealed class RequestBatcherTracingTests
         await using var provider = CreateProvider((_, _) => ValueTask.CompletedTask);
         var batcher = provider.GetRequiredService<RequestBatchCoordinator<int>>();
         await batcher.ExecuteAsync(Array.Empty<int>());
+        Assert.Equal(0, Assert.Single(capture.Calls).GetTagItem("requestbatcher.submission.size"));
         using var cancellation = new CancellationTokenSource();
         cancellation.Cancel();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => batcher.ExecuteAsync(1, cancellation.Token));
         await batcher.DisposeAsync();
         await Assert.ThrowsAsync<ObjectDisposedException>(() => batcher.ExecuteAsync(2));
         Assert.Equal(3, capture.Calls.Count());
+        Assert.Equal(2, capture.Calls.Count(call => call.GetTagItem("requestbatcher.submission.size") is null));
         Assert.Empty(capture.Batches);
+    }
+
+    [Fact]
+    public void RecordSubmissionSize_WrongOperation_DoesNotSetTag()
+    {
+        using var capture = new TraceCapture();
+        using var activity = RequestBatcherTracing.Source.StartActivity("Other");
+        Assert.NotNull(activity);
+
+        RequestBatcherTracing.RecordSubmissionSize(new RequestBatcherMetadata("test"), 4);
+
+        Assert.Null(activity.GetTagItem("requestbatcher.submission.size"));
     }
 
     [Fact]
@@ -223,6 +238,7 @@ public sealed class RequestBatcherTracingTests
         Assert.Empty(capture.Calls);
         Assert.Empty(Assert.Single(capture.Batches).Links);
         Assert.Empty(parent.Links);
+        Assert.Null(parent.GetTagItem("requestbatcher.submission.size"));
     }
 
     [Fact]

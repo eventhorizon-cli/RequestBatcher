@@ -1242,6 +1242,8 @@ Named RequestBatcher 会在操作名后追加注册名称，例如 `RequestBatch
 
 - `requestbatcher.name`：配置的 Batcher 名称，未配置时省略。
 - `requestbatcher.request.type`：公开请求类型的短名，例如 `Int32`，不含命名空间。
+- `requestbatcher.submission.size`：本次 `Execute` 调用提交的请求数，单条为 `1`，集合为实际条数，空集合为 `0`。
+  数值和记录时机与同名 Metric 一致。调用因提前取消、Batcher 已停止或集合枚举失败而在提交前结束时，不记录该属性。
 - `requestbatcher.batch.size`：一个 Handler 批次中的请求数。
 - `requestbatcher.batch.submission.count`：该 Handler 批次合并了多少次不同的 `ExecuteAsync` 提交。
   同一次提交的多项请求，在每个批次中只计一次。
