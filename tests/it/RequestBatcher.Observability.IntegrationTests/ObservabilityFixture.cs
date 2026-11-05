@@ -18,6 +18,7 @@ public sealed class ObservabilityFixture : IAsyncLifetime
     private const int ServicePort = 8080;
 
     private readonly string _repositoryRoot = FindRepositoryRoot();
+    private readonly string _projectName = $"requestbatcher-it-{Guid.NewGuid():N}";
     private INetwork? _network;
     private IFutureDockerImage? _cartImage;
     private IFutureDockerImage? _pricingImage;
@@ -38,20 +39,19 @@ public sealed class ObservabilityFixture : IAsyncLifetime
     public Uri GrafanaUrl { get; private set; } = null!;
 
     /// <summary>
-    /// Starts the environment when live integration tests are explicitly enabled.
+    /// Starts the disposable environment for the live integration test.
     /// </summary>
     public async Task InitializeAsync()
     {
-        if (!IsEnabled())
-        {
-            return;
-        }
-
         try
         {
             using var startupTimeout = new CancellationTokenSource(TimeSpan.FromMinutes(10));
             var cancellationToken = startupTimeout.Token;
-            _network = new NetworkBuilder().Build();
+            _network = new NetworkBuilder()
+                .WithName($"{_projectName}-default")
+                .WithLabel("com.docker.compose.project", _projectName)
+                .WithLabel("com.docker.compose.network", "default")
+                .Build();
             await _network.CreateAsync(cancellationToken).ConfigureAwait(false);
 
             _cartImage = BuildSampleImage("cart");
@@ -132,10 +132,6 @@ public sealed class ObservabilityFixture : IAsyncLifetime
         }
     }
 
-    private static bool IsEnabled() =>
-        string.Equals(Environment.GetEnvironmentVariable("REQUESTBATCHER_RUN_INTEGRATION_TESTS"), "1",
-            StringComparison.Ordinal);
-
     private IFutureDockerImage BuildSampleImage(string target) =>
         new ImageFromDockerfileBuilder()
             .WithName($"requestbatcher-it-{target}:{Guid.NewGuid():N}")
@@ -148,7 +144,7 @@ public sealed class ObservabilityFixture : IAsyncLifetime
     private IContainer CreatePostgres()
     {
         var initSql = Path.Combine(_repositoryRoot, "samples", "RequestBatcher.Observability", "init.sql");
-        return new ContainerBuilder(PostgresImage)
+        return GroupContainer(new ContainerBuilder(PostgresImage), "postgres")
             .WithNetwork(_network!)
             .WithNetworkAliases("postgres")
             .WithEnvironment("POSTGRES_DB", "requestbatcher_observability")
@@ -168,7 +164,7 @@ public sealed class ObservabilityFixture : IAsyncLifetime
     private IContainer CreateLgtm()
     {
         var sampleRoot = Path.Combine(_repositoryRoot, "samples", "RequestBatcher.Observability");
-        return new ContainerBuilder(LgtmImage)
+        return GroupContainer(new ContainerBuilder(LgtmImage), "lgtm")
             .WithNetwork(_network!)
             .WithNetworkAliases("lgtm")
             .WithPortBinding(LgtmGrafanaPort, true)
@@ -193,7 +189,7 @@ public sealed class ObservabilityFixture : IAsyncLifetime
         IImage image,
         string alias,
         IReadOnlyDictionary<string, string> environment) =>
-        new ContainerBuilder(image)
+        GroupContainer(new ContainerBuilder(image), alias)
             .WithNetwork(_network!)
             .WithNetworkAliases(alias)
             .WithEnvironment(environment)
@@ -204,6 +200,11 @@ public sealed class ObservabilityFixture : IAsyncLifetime
                     .ForPath("/health"),
                     wait => wait.WithTimeout(TimeSpan.FromMinutes(2))))
             .Build();
+
+    private ContainerBuilder GroupContainer(ContainerBuilder builder, string service) => builder
+        .WithName($"{_projectName}-{service}")
+        .WithLabel("com.docker.compose.project", _projectName)
+        .WithLabel("com.docker.compose.service", service);
 
     private static Uri CreateMappedUrl(IContainer container, int port) =>
         new UriBuilder(Uri.UriSchemeHttp, container.Hostname, container.GetMappedPublicPort(port)).Uri;

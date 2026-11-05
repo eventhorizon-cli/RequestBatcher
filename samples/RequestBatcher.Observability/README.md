@@ -138,9 +138,10 @@ The [sample design](../../docs/observability-sample-design.md) documents the cur
 The [sample source](https://github.com/eventhorizon-cli/RequestBatcher/tree/main/samples/RequestBatcher.Observability)
 shows the two Web APIs, the traffic generator, and their telemetry setup.
 
-For optional end-to-end validation, see the [integration test guide](../../tests/it/README.md)
-([中文](../../tests/it/README.zh-CN.md)). Set `REQUESTBATCHER_RUN_INTEGRATION_TESTS=1` to let the integration-test
-fixture create an isolated environment through Testcontainers and clean it up after validation. It checks one Cart
-`Execute` per HTTP request, cross-trace batch links, Pricing/database parent-child spans, and metrics.
+For end-to-end validation, see the [integration test guide](../../tests/it/README.md)
+([中文](../../tests/it/README.zh-CN.md)). Running the full integration-test project requires Docker; its Testcontainers
+fixture creates an isolated environment and cleans it up after validation. The live test checks one Cart `Execute` per
+HTTP request, cross-trace batch links, Pricing/database parent-child spans, and metrics. To run the in-process tests
+without Docker, use the `TracingStressTests` and `MetricsAdviceTests` filter shown in the guide.
 
 RequestBatcher is in-process and does not recover pending requests after a process failure.

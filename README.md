@@ -1354,6 +1354,9 @@ Named instances append the registered name, for example `RequestBatcher.Execute 
 
 - `requestbatcher.name`: the configured batcher name, when present.
 - `requestbatcher.request.type`: the public request type's short name, such as `Int32`, without its namespace.
+- `requestbatcher.submission.size`: on `Execute`, the number of submitted requests reaching admission: `1` for a single
+  request, the collection count for a list, or `0` for an empty list. It matches the metric of the same name; calls
+  rejected before admission omit it.
 - `requestbatcher.batch.size`: the number of requests in a Handler batch.
 - `requestbatcher.batch.submission.count`: how many distinct `ExecuteAsync` submissions contributed to that batch.
   Several items from one submission count once within each batch.

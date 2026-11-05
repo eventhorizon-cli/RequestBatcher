@@ -5,15 +5,16 @@
 这些 .NET 10 xUnit 测试通过真实 HTTP、PostgreSQL、OTLP 导出、Tempo 和 Prometheus 验证运行中的
 [可观测性示例](../../samples/RequestBatcher.Observability/README.zh-CN.md)。参考
 [EventHorizon.RocketMQ.EventBus 集成测试](https://github.com/eventhorizon-cli/EventHorizon.RocketMQ.EventBus/tree/main/tests/it)
-的组织方式，集成测试与单元测试分开，并显式声明环境要求。启用容器测试后，Testcontainers 测试夹具会创建
+的组织方式，集成测试与单元测试分开，并显式声明环境要求。运行完整测试项目时，Testcontainers 测试夹具会创建
 隔离网络，构建 Cart 和 Pricing 示例镜像，启动 PostgreSQL 17.6 与 OTEL-LGTM 0.29.0，并随机分配宿主机端口。
+同一次运行的四个服务容器使用相同的 Compose 项目标签，方便在容器管理界面中按 `requestbatcher-it-<run-id>` 分组查看。
 测试结束后会清理容器、镜像和网络，包括启动失败时的部分资源；Testcontainers 的 Resource Reaper 也会作为额外
 清理保障。普通单元测试不依赖外部服务。
 
-显式启用并运行集成测试：
+运行完整集成测试（需要 Docker）：
 
 ```bash
-REQUESTBATCHER_RUN_INTEGRATION_TESTS=1 dotnet test \
+dotnet test \
   tests/it/RequestBatcher.Observability.IntegrationTests/RequestBatcher.Observability.IntegrationTests.csproj \
   --configuration Release \
   --collect:"XPlat Code Coverage" \
@@ -26,7 +27,7 @@ REQUESTBATCHER_RUN_INTEGRATION_TESTS=1 dotnet test \
 覆盖数据来自进程内压力测试；测试宿主的 Collector 不会对示例容器内的代码执行 Instrument，容器测试单独验证实际导出的行为。
 CI 将该报告标记为 `integration` 上传，单元测试报告标记为 `unit`。
 
-同一个项目还包含不依赖 Docker 和环境开关的进程内测试，它们使用公共 API 和真实 OpenTelemetry SDK：
+同一个项目还包含不依赖 Docker 的进程内测试，它们使用公共 API 和真实 OpenTelemetry SDK：
 `MetricsAdviceTests` 通过原生 MeterListener 和 SDK 的直接 `AddMeter` 注册，验证 core 的大小 Histogram Advice，
 同时校验普通和委托 Handler 的响应、桶边界、count、sum 和标签。
 `ExecuteAsync_ConcurrentWavesAtEachSamplingRate_ProcessesExactlyOnceAndLinksActualBatches` 在 0% 和 100% 采样下分别运行
@@ -38,9 +39,16 @@ Execute 上下文，包括未采样的上下文；Handle 是否导出则根据�
 `AddRequestBatcherInstrumentation()` 扩展，验证即使根采样率为 0%，已采样 Execute 对应的 Handler 批次仍被采样。
 确定性单元测试覆盖扩展在所有 Execute 都未采样时不导出批次，以及直接注册 Source 时保留应用采样规则。
 `DisposeAsync_QueuedCancellationAndHandlerFailure_DrainsAcceptedWorkAndRejectsLateSubmissions` 覆盖取消、
-排空、失败和停止接收新提交。不设置 `REQUESTBATCHER_RUN_INTEGRATION_TESTS` 运行项目即可执行这些测试，且不会启动容器测试夹具。
+排空、失败和停止接收新提交。如需仅运行进程内测试，可显式筛选测试类：
 
-未设置 `REQUESTBATCHER_RUN_INTEGRATION_TESTS=1` 时，容器测试报告为跳过，进程内测试仍会运行。项目已加入 `RequestBatcher.slnx`，
+```bash
+dotnet test \
+  tests/it/RequestBatcher.Observability.IntegrationTests/RequestBatcher.Observability.IntegrationTests.csproj \
+  --configuration Release \
+  --filter 'FullyQualifiedName~TracingStressTests|FullyQualifiedName~MetricsAdviceTests'
+```
+
+项目已加入 `RequestBatcher.slnx`，
 也可以在 Rider 中构建、运行。测试夹具会向测试提供本次运行生成的 Cart 和 Grafana 地址，不需要固定端口环境变量。
 如果需要手动查看示例，请使用示例 README 中独立的 Compose 步骤，并在结束后停止 Compose 环境。
 
@@ -70,9 +78,6 @@ OTLP 导出、Tempo 索引和 Prometheus 抓取是异步的，所以每个验证
 测试期间只发送测试用例中的请求，避免其他流量影响计数。
 测试使用示例中 ID 为 1–100、价格为 `id × 1.25` 的种子数据，不修改数据库内容。
 
-| 环境变量 | 默认值 | 用途 |
-| --- | --- | --- |
-| `REQUESTBATCHER_RUN_INTEGRATION_TESTS` | 未设置 | 设为 `1` 启用真实环境测试。 |
 测试夹具使用示例默认的 Grafana 凭据（`admin` / `admin`），并为每次运行生成 Cart 和 Grafana 的宿主机地址。
 
 测试通过 Grafana 的认证代理访问预置的 `requestbatcher-tempo` 和 `requestbatcher-prometheus` 数据源，

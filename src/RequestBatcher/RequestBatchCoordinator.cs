@@ -194,7 +194,7 @@ internal sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TReque
 
         if (requests.Length == 0)
         {
-            _metrics.RecordSubmissionSize(_metadata.RequestTypeName, _metadata.BatcherName, RequestBatcherMetricTags.MultiSubmission, 0);
+            RecordSubmissionSize(RequestBatcherMetricTags.MultiSubmission, 0);
             return Task.CompletedTask;
         }
 
@@ -250,7 +250,7 @@ internal sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TReque
             _pendingRequests.TryAdd(pendingRequest, 0);
         }
 
-        _metrics.RecordSubmissionSize(_metadata.RequestTypeName, _metadata.BatcherName, RequestBatcherMetricTags.SingleSubmission, 1);
+        RecordSubmissionSize(RequestBatcherMetricTags.SingleSubmission, 1);
         return _producer.ProduceAsync(pendingRequest, cancellationToken);
     }
 
@@ -281,8 +281,14 @@ internal sealed class RequestBatchCoordinator<TRequest> : IRequestBatcher<TReque
             }
         }
 
-        _metrics.RecordSubmissionSize(_metadata.RequestTypeName, _metadata.BatcherName, RequestBatcherMetricTags.MultiSubmission, requests.Length);
+        RecordSubmissionSize(RequestBatcherMetricTags.MultiSubmission, requests.Length);
         return _producer.ProduceAsync(pendingRequests, cancellationToken);
+    }
+
+    private void RecordSubmissionSize(string kind, int count)
+    {
+        RequestBatcherTracing.RecordSubmissionSize(_metadata, count);
+        _metrics.RecordSubmissionSize(_metadata.RequestTypeName, _metadata.BatcherName, kind, count);
     }
 
     private PendingBatchRequest<TRequest> CreatePendingRequest(

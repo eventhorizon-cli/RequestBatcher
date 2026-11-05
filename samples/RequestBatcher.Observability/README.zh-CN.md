@@ -109,7 +109,7 @@ Handler Link 则指向独立的 `Handle` Trace。这里的父节点条目并不�
 业务流程图和示例设计分别见 [business-flow.zh-CN.svg](business-flow.zh-CN.svg) 与 [示例设计](../../docs/observability-sample-design.md)。
 RequestBatcher 在进程内运行，进程故障后不会恢复待处理请求。
 
-如需执行可选的端到端验证，请查看[集成测试说明](../../tests/it/README.zh-CN.md)（[English](../../tests/it/README.md)）。显式设置
-`REQUESTBATCHER_RUN_INTEGRATION_TESTS=1` 后，集成测试夹具会通过 Testcontainers 创建隔离环境，并在验证完成后自动清理；
+端到端验证的运行方法见[集成测试说明](../../tests/it/README.zh-CN.md)（[English](../../tests/it/README.md)）。运行测试项目时，
+集成测试夹具会通过 Testcontainers 创建隔离环境，并在验证完成后自动清理；
 测试分别验证普通入口和委托入口：每个 Cart HTTP 请求只有一个 `Execute`，跨 Trace 的批次 Link 和 Pricing/数据库父子 Span 正确，
 并按 Batcher 名称核对 Histogram 的调用次数和请求项数。

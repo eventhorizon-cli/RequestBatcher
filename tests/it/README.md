@@ -8,12 +8,13 @@ through real HTTP, PostgreSQL, OTLP export, Tempo, and Prometheus. Like the
 they live separately from unit tests and have explicit environment requirements. The live fixture creates an isolated
 Testcontainers network, builds the Cart and Pricing sample images, starts PostgreSQL 17.6 and OTEL-LGTM 0.29.0, and
 assigns random host ports. It tears down containers, images, and the network after the test, including partial startup.
+The four service containers share a unique `requestbatcher-it-<run-id>` Compose project label for grouping in container UIs.
 Testcontainers' resource reaper is an additional cleanup guard. Ordinary unit tests require no external services.
 
-Enable and run the integration test:
+Run the full integration-test project (Docker is required):
 
 ```bash
-REQUESTBATCHER_RUN_INTEGRATION_TESTS=1 dotnet test \
+dotnet test \
   tests/it/RequestBatcher.Observability.IntegrationTests/RequestBatcher.Observability.IntegrationTests.csproj \
   --configuration Release \
   --collect:"XPlat Code Coverage" \
@@ -27,8 +28,17 @@ This collects coverage from the in-process stress tests. Code executing inside t
 by the test host's collector; the live test verifies exported behavior separately. CI uploads this report with the
 `integration` flag and unit-test reports with the `unit` flag.
 
-The same project also contains in-process tests that use the public API and the real OpenTelemetry SDK without Docker or
-the environment switch. `MetricsAdviceTests` verifies core size-histogram advice through a native MeterListener and
+The same project also contains in-process tests that use the public API and the real OpenTelemetry SDK without Docker.
+Run only those tests with an explicit filter:
+
+```bash
+dotnet test \
+  tests/it/RequestBatcher.Observability.IntegrationTests/RequestBatcher.Observability.IntegrationTests.csproj \
+  --configuration Release \
+  --filter 'FullyQualifiedName~TracingStressTests|FullyQualifiedName~MetricsAdviceTests'
+```
+
+`MetricsAdviceTests` verifies core size-histogram advice through a native MeterListener and
 direct SDK `AddMeter`, including ordinary/delegate response correctness, bucket boundaries, counts, sums, and tags.
 `ExecuteAsync_ConcurrentWavesAtEachSamplingRate_ProcessesExactlyOnceAndLinksActualBatches`
 checks 32 waves of 512 requests (16,384 requests per sampling mode) at 0% and 100% sampling, with mixed single and
@@ -43,11 +53,8 @@ is asserted from whether the actual batch contains a sampled Execute context.
 even with a 0% root ratio. Deterministic unit tests cover dropping a batch when all Execute spans are unsampled through
 the extension and preserving application sampling with direct source registration.
 `DisposeAsync_QueuedCancellationAndHandlerFailure_DrainsAcceptedWorkAndRejectsLateSubmissions` checks cancellation,
-draining, failures, and late admission. Run the project without `REQUESTBATCHER_RUN_INTEGRATION_TESTS` to execute these
-tests without starting the live fixture.
-
-Without `REQUESTBATCHER_RUN_INTEGRATION_TESTS=1`, the live test is reported as skipped. The project is included in
-`RequestBatcher.slnx`, so it can also be built and run from Rider. The fixture owns the test environment and supplies
+draining, failures, and late admission. The project is included in `RequestBatcher.slnx`, so it can also be built and run
+from Rider. The live fixture owns the test environment and supplies
 the generated Cart and Grafana URLs; no fixed-port environment variables are required. For a manually inspected
 sample, use the separate Compose instructions in the sample README and stop that stack when finished.
 
@@ -79,10 +86,6 @@ batch trace IDs for inspection in Grafana. Only this run's trace IDs are searche
 Histograms are cumulative for each named sample batcher; the backlog gauge reports the approximate value at collection
 time. Only requests from the test cases are sent, so additional traffic does not affect the counts.
 The test uses the sample's seeded product IDs 1–100 and prices (`id × 1.25`); it does not modify database contents.
-
-| Environment variable | Default | Purpose |
-| --- | --- | --- |
-| `REQUESTBATCHER_RUN_INTEGRATION_TESTS` | unset | Set to `1` to enable live tests. |
 
 The fixture uses the sample's default Grafana credentials (`admin` / `admin`) and generates the Cart and Grafana host
 addresses for each run.

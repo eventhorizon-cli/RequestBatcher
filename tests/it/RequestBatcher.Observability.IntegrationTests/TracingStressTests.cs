@@ -282,6 +282,11 @@ public sealed class TracingStressTests(ITestOutputHelper output)
             .Where(span => span.OperationName == ExecuteOperation && expectedByParent.ContainsKey(span.ParentSpanId))
             .ToArray();
         Assert.Equal(submissions.Count, executeSpans.Length);
+        foreach (var span in executeSpans)
+        {
+            var submission = expectedByParent[span.ParentSpanId];
+            Assert.Equal(submission.Requests.Length, span.SubmissionSize);
+        }
 
         var executeBySubmission = executeSpans.ToDictionary(
             span => expectedByParent[span.ParentSpanId],
@@ -546,7 +551,8 @@ public sealed class TracingStressTests(ITestOutputHelper output)
                     data.Links.ToArray(),
                     data.Status,
                     data.GetTagItem("requestbatcher.canceled") is true,
-                    data.GetTagItem("requestbatcher.batch.submission.count") is int count ? count : null));
+                    data.GetTagItem("requestbatcher.batch.submission.count") is int count ? count : null,
+                    data.GetTagItem("requestbatcher.submission.size") is int size ? size : null));
             }
         }
 
@@ -560,7 +566,8 @@ public sealed class TracingStressTests(ITestOutputHelper output)
         ActivityLink[] Links,
         ActivityStatusCode Status,
         bool Canceled,
-        int? SubmissionCount);
+        int? SubmissionCount,
+        int? SubmissionSize);
 
     private static TaskCompletionSource NewSource() =>
         new(TaskCreationOptions.RunContinuationsAsynchronously);

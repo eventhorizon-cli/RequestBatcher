@@ -16,7 +16,7 @@ public sealed class ObservabilityTests(ITestOutputHelper output, ObservabilityFi
     private const string OrdinaryBatcherName = "pricing-queries-ordinary";
     private static readonly TimeSpan _telemetryTimeout = TimeSpan.FromSeconds(120);
 
-    [LiveFact]
+    [Fact]
     public async Task Quote_ConcurrentOrdinaryAndDelegateSubmissions_ExportsLinkedTracesAndMetrics()
     {
         using var cart = new HttpClient
@@ -219,6 +219,8 @@ public sealed class ObservabilityTests(ITestOutputHelper output, ObservabilityFi
         Assert.Equal("cart", execute.ServiceName);
         Assert.Equal(batcherName, execute.Attributes["requestbatcher.name"]);
         Assert.Equal(nameof(Int32), execute.Attributes["requestbatcher.request.type"]);
+        Assert.Equal(probe.Items.Length.ToString(CultureInfo.InvariantCulture),
+            execute.Attributes["requestbatcher.submission.size"]);
         Assert.Equal("200", http.Attributes["http.response.status_code"]);
         Assert.InRange(execute.StartTimeUnixNano, http.StartTimeUnixNano, http.EndTimeUnixNano);
         Assert.InRange(execute.EndTimeUnixNano, execute.StartTimeUnixNano + 1, http.EndTimeUnixNano);

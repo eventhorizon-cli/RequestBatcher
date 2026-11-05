@@ -43,6 +43,11 @@ outcome is available. Delegate binding is inside that boundary. Empty,
 pre-canceled, rejected, and failed submissions terminate their call span too.
 Argument-null validation that throws before a submission begins remains synchronous.
 An explicit submission has one call span even when it becomes multiple batches.
+The `requestbatcher.submission.size` Execute attribute uses the same count and admission boundary as the metric:
+one for a single request, the materialized collection length, or zero for an empty collection. Alongside the metric,
+the coordinator calls a tracing helper that checks the current Activity and sets the Execute tag without extra enumeration.
+Pre-admission rejection omits it. This adds no public API changes. Tests cover single/collection submissions,
+response and delegate forwarding, empty inputs, split batches, and dropped spans.
 
 With a listener registered, each dispatched nonempty batch attempts to create one `RequestBatcher.Handle`
 Consumer span in the isolated background context, with its own root trace.

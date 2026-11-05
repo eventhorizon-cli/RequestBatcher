@@ -80,6 +80,7 @@ public sealed class ExecuteMetricsTests
         {
             Assert.Equal("Int32", callSpans[0].GetTagItem("requestbatcher.request.type"));
             Assert.Equal("prices", callSpans[0].GetTagItem("requestbatcher.name"));
+            Assert.Equal(batch ? 2 : 1, callSpans[0].GetTagItem("requestbatcher.submission.size"));
             Assert.Equal(ActivityStatusCode.Unset, callSpans[0].Status);
         }
     }
