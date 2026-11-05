@@ -201,6 +201,18 @@ public sealed class RequestBatcherTracingTests
     }
 
     [Fact]
+    public void RecordSubmissionSize_WrongOperation_DoesNotSetTag()
+    {
+        using var capture = new TraceCapture();
+        using var activity = RequestBatcherTracing.Source.StartActivity("Other");
+        Assert.NotNull(activity);
+
+        RequestBatcherTracing.RecordSubmissionSize(new RequestBatcherMetadata("test"), 4);
+
+        Assert.Null(activity.GetTagItem("requestbatcher.submission.size"));
+    }
+
+    [Fact]
     public async Task TraceCall_MultipleFaults_PreservesAllOriginalExceptions()
     {
         using var capture = new TraceCapture();
