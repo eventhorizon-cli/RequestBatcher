@@ -40,11 +40,26 @@ not guaranteed to arrive in one batch.
 
 ## How Requests Are Batched: Opportunistic Merging
 
-![Opportunistic batching animation](docs/assets/request-batcher-conveyor.gif)
+![Opportunistic batching animation](docs/assets/request-batcher-conveyor.svg)
 
-Illustration: one partition, `MaxConcurrency=2`, and `BatchSize=4`. When an execution slot is available, the dispatch
-loop pulls queued requests without waiting to fill a batch. [Open the animation source](docs/animations/opportunistic-merging/); after
-downloading it, open `index.html` to pause and drag the animation.
+The animation shows one partition with `MaxConcurrency=2` and `BatchSize=4`. Follow what happens as requests arrive:
+
+1. **Request 01 arrives.** It is the only queued request, and an execution slot is available. The loop takes it
+   immediately and passes it to the Handler, without waiting for more requests.
+2. **Request 02 arrives.** Request 01 is still running, but the second slot is free. Request 02 is also taken
+   immediately, as a separate batch. Both slots are now occupied.
+3. **Requests 03–05 arrive, followed by 06–08.** Both slots are busy, so these six requests stay in the queue.
+   They wait for execution capacity, not for a batch to fill.
+4. **Request 01 completes.** A slot becomes available. The loop takes the first four queued requests, 03–06,
+   and passes them to the Handler together. Requests 07–08 remain queued.
+5. **Request 02 completes.** The other slot becomes available. Only 07–08 remain queued, so the loop takes both
+   immediately, without waiting for another two requests.
+
+The later 07–08 batch finishes before 03–06; batches need not finish in dispatch order. Eight requests receive their
+own results through four Handler calls, with batch sizes of 1, 1, 4, and 2. `BatchSize` is an upper limit, not a target
+to wait for. The 15-second loop uses illustrative timing.
+[Open the animation source](docs/animations/opportunistic-merging/); after downloading it, open `index.html` to pause
+and drag the animation.
 
 RequestBatcher uses [BufferQueue](https://github.com/eventhorizon-cli/BufferQueue) to combine queued requests within a
 .NET process and pass them to an application handler. The current dependency is

@@ -36,9 +36,18 @@ RequestBatcher 会合并已经排队的请求，限制 Handler 批次并发数�
 
 ## 请求如何合并：机会式合并
 
-![机会式合并动画](docs/assets/request-batcher-conveyor.zh-CN.gif)
+![机会式合并动画](docs/assets/request-batcher-conveyor.zh-CN.svg)
 
-示例展示单个 Partition、`MaxConcurrency=2` 和 `BatchSize=4`。有可用执行名额时，会立即分发已排队的请求，不会等待凑满一批。
+图中展示单个 Partition、`MaxConcurrency=2` 和 `BatchSize=4`。跟着请求到达的顺序看：
+
+1. **第一个请求 01 到达。** 队列里只有这一个请求，但有空闲的执行名额，所以调度循环立即取走它，交给 Handler，不等后面的请求。
+2. **第二个请求 02 到达。** 01 还在执行，但另一个名额空着，所以 02 也立即被取走，单独组成一批。此时两个执行名额都被占用。
+3. **03–05 到达，随后 06–08 到达。** 两个名额都还没释放，这 6 个请求只能留在队列里。这里是在等执行名额，不是在等凑满一批。
+4. **01 完成，释放一个名额。** 调度循环从队列头取走最多 4 个请求，也就是 03–06，一起交给 Handler。07–08 继续排队。
+5. **02 完成，另一个名额释放。** 队列里只剩 07–08，调度循环立即取走这 2 个，不会再等另外 2 个来凑满。
+
+后开始的 07–08 比 03–06 更早完成，批次不保证按分派顺序完成。8 个请求通过 4 次 Handler 调用各自得到结果，批次大小依次为 1、1、4、2。
+`BatchSize` 是单批上限，不是需要等待凑满的目标。动画每轮 15 秒，时间仅作示意。
 [打开动画源码](docs/animations/opportunistic-merging/)；下载后打开 `index.html`，可以暂停并拖动动画。
 
 RequestBatcher 基于 [BufferQueue](https://github.com/eventhorizon-cli/BufferQueue)，将 .NET 进程内已经排队的并发请求
