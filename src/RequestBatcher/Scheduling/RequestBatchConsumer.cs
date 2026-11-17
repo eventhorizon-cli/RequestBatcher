@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using Microsoft.Extensions.Logging;
 using RequestBatcher.Diagnostics;
 using RequestBatcher.Diagnostics.Logging;
@@ -40,10 +41,20 @@ internal sealed class RequestBatchConsumer<TRequest>(
         {
             RequestBatcherTracing.RecordFailure(activity, exception);
             failure = exception;
-            logger.BatchFailed(
-                exception,
-                metadata.RequestTypeName,
-                requests.Length);
+            if (logger.IsEnabled(LogLevel.Error))
+            {
+                var traceIds = CollectTraceIds(activeRequests);
+                if (traceIds.Length == 0)
+                {
+                    logger.BatchFailedWithoutTraceIds(
+                        exception, metadata.RequestTypeName, requests.Length, metadata.BatcherName ?? "(unnamed)");
+                }
+                else
+                {
+                    logger.BatchFailed(
+                        exception, metadata.RequestTypeName, requests.Length, metadata.BatcherName ?? "(unnamed)", traceIds);
+                }
+            }
         }
         finally
         {
@@ -62,6 +73,30 @@ internal sealed class RequestBatchConsumer<TRequest>(
         {
             activeRequests[i].CompleteSuccessfully();
         }
+    }
+
+    private static string CollectTraceIds(IReadOnlyList<PendingBatchRequest<TRequest>> requests)
+    {
+        HashSet<ActivityTraceId>? seen = null;
+        List<string>? ids = null;
+        var count = requests.Count;
+        for (var index = 0; index < count; index++)
+        {
+            if (requests[index] is not TracedPendingBatchRequest<TRequest> traced)
+            {
+                continue;
+            }
+
+            var id = traced.TraceContext.Context.TraceId;
+            if (id == default || !(seen ??= []).Add(id))
+            {
+                continue;
+            }
+
+            (ids ??= []).Add(id.ToString());
+        }
+
+        return ids is null ? string.Empty : string.Join(", ", ids);
     }
 
     private static IReadOnlyList<PendingBatchRequest<TRequest>> StartQueuedRequests(

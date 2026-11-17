@@ -977,7 +977,7 @@ instance or state initialized there.
 Read values the Handler needs before submission, such as currency, language, or a business correlation ID, and carry
 them as immutable request data. Do not pass an `HttpContext`, request service provider, or request-scoped service
 instance to preserve caller context. RequestBatcher tracing connects `Execute` and `Handle` spans with links; those
-links do not restore caller ambient context. Activities created inside a Handler still use the Handler batch span as
+links do not restore caller ambient context. Spans created inside a Handler still use the Handler batch span as
 their parent.
 
 ### Completion and Failure
@@ -1378,7 +1378,7 @@ Named instances append the registered name, for example `RequestBatcher.Execute 
 
 Handlers run in the independent batch execution context described in [Handler Execution Context](#handler-execution-context).
 Pass required business data explicitly in requests. Execute/Handle span links connect the traces without restoring
-caller ambient context; Activities created inside a Handler follow its batch span normally.
+caller ambient context; spans created inside a Handler follow its batch span normally.
 
 ![RequestBatcher observability model](docs/diagrams/observability.svg)
 
@@ -1449,6 +1449,20 @@ required. The category prefix is `RequestBatcher.RequestBatchCoordinator`. Confi
 
 `Warning` retains Warning and more severe logs. Use `Debug` for startup and shutdown diagnostics, or `Trace` to also
 see each batch start and completion. Handler failures include the original exception; request payloads are not logged.
+
+Handler failure logs include the structured field `BatcherName` and, when available,
+`RelatedTraceIds`. `BatcherName` is the registered batcher name; an unnamed batcher is
+shown as `(unnamed)`. A named batcher literally named `(unnamed)` therefore has the same displayed value and can be
+confused with the unnamed batcher in logs.
+
+`RelatedTraceIds` contains the trace IDs associated with `ExecuteAsync`
+submissions contributing requests to the failed batch. They come from the `Execute` span, or from the caller's current
+span when no `Execute` span was created. Use them to find caller logs that record the same trace IDs; they are not
+the independent `Handle` trace ID.
+
+IDs are deduplicated and separated by commas. The field is omitted when no submission
+trace contexts are available; its contents are independent of `Handle` span links and sampling. Large batches can
+produce long log entries.
 
 ## Sample Application
 

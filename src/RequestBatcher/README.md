@@ -294,7 +294,7 @@ instance or state initialized there.
 Read values the Handler needs before submission, such as currency, language, or a business correlation ID, and carry
 them as immutable request data. Do not pass an `HttpContext`, request service provider, or request-scoped service
 instance to preserve caller context. RequestBatcher tracing connects `Execute` and `Handle` spans with links; those
-links do not restore caller ambient context. Activities created inside a Handler still use the Handler batch span as
+links do not restore caller ambient context. Spans created inside a Handler still use the Handler batch span as
 their parent.
 
 ### Completion, Cancellation, and Draining
@@ -365,6 +365,19 @@ and does not sample it if none are. Metrics-only consumers can use `AddMeter("Re
 package, or a `MeterListener` that calls `EnableMeasurementEvents` for the desired instruments. Built-in logs use the
 application logging pipeline with category prefix `RequestBatcher.RequestBatchCoordinator`; set the `RequestBatcher`
 log-level prefix to configure the whole library.
+
+Handler failure logs include the structured field `BatcherName` and, when available,
+`RelatedTraceIds`. `BatcherName` is the registered name, or `(unnamed)` for an unnamed batcher; a batcher
+literally named `(unnamed)` can therefore collide with that display value.
+
+`RelatedTraceIds` contains trace IDs associated
+with `ExecuteAsync` submissions contributing requests to the failed batch. They come from the `Execute` span, or the
+caller's current span when no `Execute` span was created. Use them to find caller logs that record the same trace
+IDs; they are not the independent `Handle` trace ID.
+
+IDs are deduplicated and separated by commas. The field is omitted
+when no submission trace contexts are available, independently of `Handle` span links or sampling. Large batches can
+produce long log entries.
 
 The `Execute` span's `requestbatcher.submission.size` attribute matches the count and admission boundary of the metric
 of the same name: `1` for a single request, the collection count, or `0` for an empty collection. Pre-admission rejection omits it.

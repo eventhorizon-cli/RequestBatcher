@@ -59,12 +59,27 @@ internal static partial class RequestBatcherLoggerExtensions
     [LoggerMessage(
         EventId = 1005,
         Level = LogLevel.Error,
-        Message = "Failed to process a {RequestType} batch containing {BatchSize} requests.")]
+        Message = "Failed to process a {RequestType} batch containing {BatchSize} requests. " +
+                  "BatcherName={BatcherName}, RelatedTraceIds=[{RelatedTraceIds}].")]
     public static partial void BatchFailed(
         this ILogger logger,
         Exception exception,
         string requestType,
-        int batchSize);
+        int batchSize,
+        string batcherName,
+        string relatedTraceIds);
+
+    [LoggerMessage(
+        EventId = 1005,
+        Level = LogLevel.Error,
+        Message = "Failed to process a {RequestType} batch containing {BatchSize} requests. " +
+                  "BatcherName={BatcherName}.")]
+    public static partial void BatchFailedWithoutTraceIds(
+        this ILogger logger,
+        Exception exception,
+        string requestType,
+        int batchSize,
+        string batcherName);
 
     [LoggerMessage(
         EventId = 1006,

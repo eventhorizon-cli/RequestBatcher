@@ -1,5 +1,13 @@
 # Observability
 
+Handler batch failures retain event 1005 and the original exception. The error log includes structured
+`BatcherName`, using `(unnamed)` for an unnamed instance, and `RelatedTraceIds`, a comma-separated list of distinct
+trace IDs from available submission contexts; omit `RelatedTraceIds` entirely when no IDs are available. The placeholder can coincide with an explicitly configured name. Context availability
+depends on tracing and caller context; this list is independent of the Handle span's sampling and links, and can be
+empty, in which case the field is absent. Collection occurs only on failure with error logging enabled. This changes the event's message and structured
+fields, without changing public APIs, execution, or tracing. Tests cover named and unnamed instances, absent and
+duplicate contexts while retaining exception propagation.
+
 ## Documentation scope
 
 The root READMEs and both package READMEs describe the application-facing setup and behavior: installing and registering

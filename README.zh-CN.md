@@ -893,7 +893,7 @@ Handler 使用的批次 DI Scope 与 HTTP 请求的 DI Scope 相互独立。即�
 读取，并作为不可变值放进请求对象。不要通过传递整个 `HttpContext`、请求的 Service Provider 或请求作用域中的服务实例来
 保留上下文，这些对象的生命周期仍属于原请求。
 
-链路追踪通过 Span Link 关联提交与处理批次，不会恢复调用方的 `ExecutionContext`。Handler 内创建的 Activity 会关联到当前批次
+链路追踪通过 Span Link 关联提交与处理批次，不会恢复调用方的 `ExecutionContext`。Handler 内创建的 Span 会关联到当前批次
 Span，详见[链路追踪](#链路追踪)。
 
 ### 完成与失败
@@ -1258,7 +1258,7 @@ Named RequestBatcher 会在操作名后追加注册名称，例如 `RequestBatch
   同一次提交的多项请求，在每个批次中只计一次。
 
 Handler 不会继承调用方的 HTTP Span、日志 Scope、Baggage 或其他 `AsyncLocal` 值。
-处理所需的业务数据应通过请求显式传递，详见 [Handler 的 ExecutionContext](#handler-的-executioncontext)。Handler 内创建的 Activity
+处理所需的业务数据应通过请求显式传递，详见 [Handler 的 ExecutionContext](#handler-的-executioncontext)。Handler 内创建的 Span
 会正常关联到当前批次 Span。
 
 ![RequestBatcher 可观测性模型](docs/diagrams/observability.zh-CN.svg)
@@ -1330,6 +1330,16 @@ builder.Services.AddOpenTelemetry()
 
 该配置保留 Warning 及以上级别；Debug 可查看启动和停止日志，Trace 还会记录每批处理的开始与完成。
 Handler 失败日志包含原始异常，库本身不会记录请求内容。
+
+Handler 处理失败时，结构化日志包含 `BatcherName`；未命名的 Batcher 显示为 `(unnamed)`，
+这与显式命名为 `(unnamed)` 的 Batcher 无法从该字段区分。
+
+`RelatedTraceIds` 记录参与该失败批次的
+`ExecuteAsync` 提交所关联的 Trace ID，来自 `Execute` Span，或未创建该 Span 时来自提交时调用方的当前
+Span。如果调用方日志也记录了相同的 Trace ID，可以用它查找相关日志；它不是独立的 `Handle` Trace ID。
+
+多个提交可能属于同一条 Trace，因此日志会去重并以逗号分隔。没有可用的提交追踪上下文时不输出该字段；
+列表不依赖 `Handle` Span 的链接或采样结果，大批次可能产生较长的日志。
 
 ## 示例应用
 

@@ -1,11 +1,18 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
+using RequestBatcher.Diagnostics;
+using RequestBatcher.Diagnostics.Metrics;
+using RequestBatcher.Diagnostics.Tracing;
+using RequestBatcher.PendingRequests;
+using RequestBatcher.Scheduling;
 
 namespace RequestBatcher.Tests;
 
+[Collection("Tracing")]
 public sealed class RequestBatchCoordinatorTests
 {
     [Fact]
@@ -828,6 +835,8 @@ public sealed class RequestBatchCoordinatorTests
     [Fact]
     public async Task ExecuteAsync_HandlerFails_LogsOnceAndPropagatesOriginalException()
     {
+        Assert.False(RequestBatcherTracing.Source.HasListeners());
+        using var activity = new Activity("caller").SetIdFormat(ActivityIdFormat.W3C).Start();
         var expected = new TestBatchException();
         var logger = new RecordingLogger<RequestBatchCoordinator<int>>(LogLevel.Error);
 
@@ -850,9 +859,64 @@ public sealed class RequestBatchCoordinatorTests
         Assert.Equal(1005, logEntry.EventId.Id);
         Assert.Contains("Failed to process", logEntry.Message, StringComparison.Ordinal);
         Assert.Contains("Int32", logEntry.Message, StringComparison.Ordinal);
+        Assert.Contains("BatcherName=(unnamed)", logEntry.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("RelatedTraceIds", logEntry.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain(logEntry.Properties, item => item.Key == "RelatedTraceIds");
         Assert.DoesNotContain("System.Int32", logEntry.Message, StringComparison.Ordinal);
         Assert.Same(expected, logEntry.Exception);
     }
+
+    [Fact]
+    public async Task ExecuteAsync_NamedBatcherWithTrace_LogsNameAndTraceId()
+    {
+        using var listener = new ActivityListener
+        {
+            ShouldListenTo = source => source.Name == "RequestBatcher",
+            Sample = (ref ActivityCreationOptions<ActivityContext> _) => ActivitySamplingResult.PropagationData,
+        };
+        ActivitySource.AddActivityListener(listener);
+        var logger = new RecordingLogger<RequestBatchCoordinator<int>>(LogLevel.Error);
+        var services = new ServiceCollection();
+        services.AddSingleton<ILogger<RequestBatchCoordinator<int>>>(logger);
+        services.AddSingleton<Func<IReadOnlyList<int>, CancellationToken, ValueTask>>(
+            (_, _) => ValueTask.FromException(new TestBatchException()));
+        services.AddRequestBatcher<int, TestBatchHandler<int>>("orders", ServiceLifetime.Singleton);
+        await using var provider = services.BuildServiceProvider();
+        using var activity = new Activity("caller").SetIdFormat(ActivityIdFormat.W3C).Start();
+
+        await Assert.ThrowsAsync<TestBatchException>(() =>
+            provider.GetRequiredKeyedService<IRequestBatcher<int>>("orders").ExecuteAsync(42));
+
+        var entry = Assert.Single(logger.Entries);
+        Assert.Contains("BatcherName=orders", entry.Message, StringComparison.Ordinal);
+        Assert.Contains("RelatedTraceIds=", entry.Message, StringComparison.Ordinal);
+        Assert.Contains(entry.Properties, item => item.Key == "RelatedTraceIds");
+        Assert.Contains(activity.TraceId.ToHexString(), entry.Message, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_FailedBatchWithDuplicateTraceIds_LogsEachIdOnce()
+    {
+        var ids = Enumerable.Range(0, 40).Select(_ => ActivityTraceId.CreateRandom()).ToArray();
+        var requests = ids.Select(CreateTracedRequest).ToList<PendingBatchRequest<int>>();
+        requests.Add(CreateTracedRequest(ids[0]));
+        requests.Add(new PendingBatchRequest<int>(0, default, _ => { }));
+        var logger = new RecordingLogger<RequestBatchCoordinator<int>>(LogLevel.Error);
+        await using var metrics = new RequestBatcherMetrics([new(42)]);
+        var consumer = new RequestBatchConsumer<int>(
+            (_, _) => ValueTask.FromException(new TestBatchException()),
+            logger, new RequestBatcherMetadata("Int32"), metrics);
+
+        await consumer.ExecuteAsync(requests, default);
+
+        var entry = Assert.Single(logger.Entries);
+        var traceIds = Assert.Single(entry.Properties, item => item.Key == "RelatedTraceIds");
+        Assert.Equal(string.Join(", ", ids.Select(id => id.ToString())), traceIds.Value);
+    }
+
+    private static TracedPendingBatchRequest<int> CreateTracedRequest(ActivityTraceId id) =>
+        new(0, default, _ => { }, null,
+            SubmissionTraceContext.Create(new ActivityContext(id, ActivitySpanId.CreateRandom(), ActivityTraceFlags.None), false));
 
     private static ServiceProvider CreateProvider<TRequest>(
         Func<IReadOnlyList<TRequest>, CancellationToken, ValueTask> handler,
@@ -953,7 +1017,8 @@ public sealed class RequestBatchCoordinatorTests
             Exception? exception,
             Func<TState, Exception?, string> formatter)
         {
-            Entries.Enqueue(new LogEntry(logLevel, eventId, formatter(state, exception), exception));
+            var properties = state is IEnumerable<KeyValuePair<string, object?>> values ? values.ToArray() : [];
+            Entries.Enqueue(new LogEntry(logLevel, eventId, formatter(state, exception), exception, properties));
             _logged.TrySetResult();
         }
     }
@@ -962,5 +1027,6 @@ public sealed class RequestBatchCoordinatorTests
         LogLevel Level,
         EventId EventId,
         string Message,
-        Exception? Exception);
+        Exception? Exception,
+        KeyValuePair<string, object?>[] Properties);
 }
